@@ -6,15 +6,10 @@ The toolchain changed the most in this release.
 
 - `vey run` serves the built site the way a host would serve it. `vey dev` is
   the same server for the work: it watches the files and reloads the page.
-- `vey web` is gone.
-- The build folder is `.dist` and it is hidden.
-- The entry of a project is always `main.vey`, in `src/` or in the project
-  itself.
 - `vey check` checks the whole project when it is given a folder, and only the
   file it is given when it is given a file.
 - `vey new` writes a clean project: `src/main.vey`, `src/styles/site.css`,
-  `public/`, `package.json`, `README.md` and `.gitignore`. There is no
-  `settings.yaml` any more.
+  `public/`, `package.json`, `README.md` and `.gitignore`.
 - Every page of a project becomes a page of the site. A page that cannot be
   built is reported and the other pages are still written.
 - A page may not take the place of the home of the site.

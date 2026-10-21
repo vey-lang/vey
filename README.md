@@ -647,7 +647,7 @@ component App() {
 
 Rules:
 
-- A tag is a name with optional `.class` and `#id` selectors: `div.card`, `main#root`, `img.avatar`, `div.nav-row`.
+- A tag is the name of a tag of HTML, with optional `.class` and `#id` selectors: `div.card`, `main#root`, `img.avatar`, `div.nav-row`. A name that is not a tag of HTML is reported.
 - Attributes use `name=value`: `class="row"`, `href="/home"`, `click=fn() { ... }`, `disabled=true`.
 - Children go inside braces. Use a string or an expression directly for text.
 - `if` and `for` work inside markup.
@@ -782,11 +782,15 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `print(...)` | write to the console |
 | `input(prompt)` | read a line from stdin |
 | `len(value)` | string, list or object length |
+| `str(value)` / `num(value)` / `int(value)` / `bool(value)` | the value as text, number or yes or no |
+| `type(value)` | runtime type name |
 | `append(list, ...items)` | new list with items added |
 | `slice(value, start, end)` | slice a string or list |
 | `join(list, sep)` / `split(text, sep)` | list and text conversion |
 | `map`, `filter`, `reduce`, `find`, `sort` | list helpers |
-| `keys`, `values`, `entries`, `omit` | the parts of an object |
+| `flatMap(list, fn)` | map a list and flatten the result |
+| `upper(text)`, `lower(text)`, `trim(text)` | the text in another shape |
+| `replace(text, search, next)`, `includes(text, part)` | the parts of a text |
 | `startsWith(text, prefix)`, `endsWith(text, suffix)` | the ends of a text |
 | `json.parse`, `json.stringify` | JSON |
 | `math.round`, `math.floor`, `math.random`, `math.pi` | math |
@@ -796,13 +800,17 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `html(node)` | render a component tree to HTML |
 | `raw(html)` | mark trusted HTML so `html()` does not escape it |
 | `bind(selector, node)` | mount into the DOM |
-| `type(value)` | runtime type name |
+| `cls(...names)` | the class names of an element |
+| `server(port)` | a server of the program |
 | `assert(condition, message)` | throw when a condition is false |
 | `test(name, fn)` | run a test block |
+| `error(message)` | throw an error |
 | `all(list)` / `race(list)` | promise combinators |
 | `env(name, fallback)` | environment variable, Node only |
 | `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
 | `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
+| `keys(object)`, `values(object)`, `entries(object)` | the parts of an object |
+| `omit(object, keys)` | the object without the keys |
 | `base64.encode(value)` / `base64.decode(value)` | base64 |
 | `url.encode(value)` / `url.decode(value)` / `url.parse(value)` | URL helpers |
 | `fs.read`, `fs.write`, `fs.append`, `fs.exists`, `fs.list`, `fs.remove`, `fs.mkdir` | file system, Node only |

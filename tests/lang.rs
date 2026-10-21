@@ -1510,3 +1510,12 @@ fn a_name_cannot_stand_next_to_another_pattern() {
         "a name cannot be used with other patterns",
     );
 }
+
+#[test]
+fn a_tag_that_is_not_a_tag_of_html_is_reported() {
+    check_error(
+        "component C() {\n  main {\n    mywidget { \"x\" }\n  }\n}\n",
+        "unknown-tag",
+        "unknown tag 'mywidget'",
+    );
+}

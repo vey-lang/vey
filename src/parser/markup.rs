@@ -22,9 +22,37 @@ impl Parser {
                 nodes.push(MarkupNode::Element(self.parse_element()?));
                 continue;
             }
+            // A name with a block behind it is meant to be a tag, so the tag
+            // is named when it is not one.
+            if let Some(name) = self.unknown_tag()? {
+                return Err(self.error_at(self.tok.pos, format!("unknown tag '{}'", name)));
+            }
             nodes.push(MarkupNode::Expr(self.parse_expression()?));
         }
         Ok(nodes)
+    }
+
+    /// The name of a tag that is not a tag of HTML and not a component.
+    fn unknown_tag(&mut self) -> Result<Option<String>, VeyError> {
+        if self.tok.kind != TokKind::Ident {
+            return Ok(None);
+        }
+        let name = self.tok.value.clone();
+        if name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_uppercase())
+        {
+            return Ok(None);
+        }
+        if is_html_tag(&name) {
+            return Ok(None);
+        }
+        let next = self.peek()?;
+        if next.kind == TokKind::Punct && next.value == "{" {
+            return Ok(Some(name));
+        }
+        Ok(None)
     }
 
     pub(crate) fn is_element_start(&mut self) -> Result<bool, VeyError> {
