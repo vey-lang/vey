@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::lexer::Pos;
+use crate::suggest::did_you_mean;
 use crate::types::builtins::is_builtin_type;
 use crate::types::core::{
     assignable, element_type, has_type_var, remove_type, rest_element_type, string_literal,
@@ -516,6 +517,16 @@ impl TypeChecker<'_> {
         }
     }
 
+    /// The names of the known types, used to suggest a similar one.
+    pub(crate) fn known_types(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.aliases.keys().map(|name| name.as_str()).collect();
+        names.extend(self.enums.keys().map(|name| name.as_str()));
+        for scope in &self.type_param_scopes {
+            names.extend(scope.keys().map(|name| name.as_str()));
+        }
+        names
+    }
+
     /// Update the type of a binding in the current scope.
     ///
     /// Only the innermost scope is looked at, so that a name that shadows an
@@ -630,7 +641,11 @@ impl TypeChecker<'_> {
                         if self.enums.contains_key(name) {
                             return Ok(Type::EnumUnion(name.clone()));
                         }
-                        Err(self.error(*pos, format!("unknown type '{}'", name)))
+                        let mut error = self.error(*pos, format!("unknown type '{}'", name));
+                        if let Some(hint) = did_you_mean(name, self.known_types()) {
+                            error = error.with_hint(hint);
+                        }
+                        Err(error)
                     }
                 }
             }

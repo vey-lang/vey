@@ -6,6 +6,7 @@ pub mod compiler;
 pub mod lexer;
 pub mod parser;
 pub mod sourcemap;
+pub mod suggest;
 pub mod types;
 
 use std::fmt;

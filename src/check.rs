@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::builtins::is_builtin;
 use crate::lexer::Pos;
+use crate::suggest::did_you_mean;
 use crate::VeyError;
 
 pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
@@ -133,6 +134,17 @@ impl Checker<'_> {
             .iter()
             .rev()
             .find_map(|scope| scope.get(name).copied())
+    }
+
+    /// The names that are in scope, used to suggest a similar one.
+    fn known_names(&self) -> Vec<&str> {
+        let mut names = Vec::new();
+        for scope in &self.scopes {
+            for name in scope.keys() {
+                names.push(name.as_str());
+            }
+        }
+        names
     }
 
     fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
@@ -370,7 +382,11 @@ impl Checker<'_> {
             Expr::Number(_, _) | Expr::Bool(_, _) | Expr::Null(_) => {}
             Expr::Ident(name, pos) => {
                 if self.resolve(name).is_none() && !is_builtin(name) {
-                    return Err(self.error(*pos, format!("unknown variable '{}'", name)));
+                    let mut error = self.error(*pos, format!("unknown variable '{}'", name));
+                    if let Some(hint) = did_you_mean(name, self.known_names()) {
+                        error = error.with_hint(hint);
+                    }
+                    return Err(error);
                 }
             }
             Expr::String(parts, _) => {

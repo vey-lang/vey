@@ -6,6 +6,7 @@ use crate::ast::{Program, Stmt};
 use crate::check;
 use crate::codegen::{generate, Options};
 use crate::parser::Parser;
+use crate::suggest::edit_distance;
 use crate::types;
 use crate::VeyError;
 
@@ -348,24 +349,6 @@ fn sibling_hint(parent: &Path, request: &str) -> Option<String> {
 
     let (_, name) = best?;
     Some(format!("did you mean `use \"./{}\"`?", name))
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-    for (i, left) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, right) in b.iter().enumerate() {
-            let cost = usize::from(left != right);
-            current[j + 1] = (previous[j + 1] + 1)
-                .min(current[j] + 1)
-                .min(previous[j] + cost);
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    previous[b.len()]
 }
 
 fn relative_path(from: &Path, to: &Path) -> Option<PathBuf> {

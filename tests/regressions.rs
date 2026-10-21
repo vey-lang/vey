@@ -282,3 +282,27 @@ fn a_name_that_is_known_later_is_accepted() {
     );
     assert!(text.contains("1"), "{text}");
 }
+
+#[test]
+fn an_unknown_variable_suggests_a_similar_name() {
+    let error = run_err("suggest-variable", "let name = 1\nprint(nam)\n");
+    assert!(error.contains("unknown variable 'nam'"), "{error}");
+    assert!(error.contains("did you mean 'name'?"), "{error}");
+}
+
+#[test]
+fn an_unknown_type_suggests_a_similar_name() {
+    let error = run_err(
+        "suggest-type",
+        "type User = { name: string }\nlet user: Users = { name: \"x\" }\n",
+    );
+    assert!(error.contains("unknown type 'Users'"), "{error}");
+    assert!(error.contains("did you mean 'User'?"), "{error}");
+}
+
+#[test]
+fn an_unknown_name_without_a_similar_one_has_no_hint() {
+    let error = run_err("no-suggestion", "print(zzzzzzzzzzzz)\n");
+    assert!(error.contains("unknown variable"), "{error}");
+    assert!(!error.contains("did you mean"), "{error}");
+}
