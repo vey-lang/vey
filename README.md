@@ -67,7 +67,8 @@ multiple matches must be passed explicitly.
 Every other page of the project becomes a page of the site. The name of a
 page follows the file it comes from, so `src/about.vey` becomes `about.html`
 and `src/docs/index.vey` becomes `docs/index.html`. A file that is imported
-by another page is a module and does not become a page.
+by another page is a module and does not become a page, and a page may not
+take the place of the home of the site.
 
 The build folder is emptied before it is written. Vey refuses to write into
 the project itself or into a folder that holds it, so that a wrong `-o` cannot
