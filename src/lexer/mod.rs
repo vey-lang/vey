@@ -158,7 +158,9 @@ impl Lexer {
     fn skip_space(&mut self) {
         loop {
             match self.at(0) {
-                Some(c) if c.is_whitespace() => {
+                // A file that starts with a byte order mark is read as if it
+                // was not there.
+                Some(c) if c.is_whitespace() || c == '\u{feff}' => {
                     self.bump();
                 }
                 Some('/') if self.at(1) == Some('/') => {

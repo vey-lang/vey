@@ -53,6 +53,19 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         )
     })?;
 
+    // A file that is not a Vey file is a mistake worth naming.
+    if entry
+        .extension()
+        .is_some_and(|extension| extension != "vey")
+    {
+        return Err(VeyError::new(
+            format!("{} is not a Vey file", entry.display()),
+            entry.display().to_string(),
+            1,
+            1,
+        ));
+    }
+
     let mut modules: Vec<Module> = Vec::new();
     let mut ids: HashMap<PathBuf, usize> = HashMap::new();
     let mut stack: Vec<PathBuf> = Vec::new();

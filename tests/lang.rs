@@ -1236,3 +1236,26 @@ fn an_unknown_component_is_reported() {
         "unknown component 'Missng'",
     );
 }
+
+#[test]
+fn a_file_with_a_byte_order_mark_is_read() {
+    let dir = temp_dir("bom");
+    let file = dir.join("main.vey");
+    fs::write(&file, b"\xef\xbb\xbfprint(\"bom\")\n").unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output).trim(), "bom");
+}
+
+#[test]
+fn a_file_that_is_not_vey_is_named() {
+    let dir = temp_dir("not-vey");
+    let file = dir.join("notes.txt");
+    fs::write(&file, "hello\n").unwrap();
+
+    let output = run_file(&file);
+    assert!(!output.status.success());
+    let error = stderr(&output);
+    assert!(error.contains("is not a Vey file"), "{error}");
+}
