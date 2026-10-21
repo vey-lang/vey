@@ -29,6 +29,9 @@ pub struct ModuleTypeEnv {
     /// The types of the exported values, so that a call to a function of
     /// another module is checked as well.
     pub values: HashMap<String, Type>,
+    /// The parameters of the exported components, so that a component of
+    /// another module is checked as well.
+    pub components: HashMap<String, Vec<ComponentParam>>,
 }
 
 pub fn check(
@@ -99,6 +102,11 @@ pub fn check(
             Stmt::Fn(decl) if decl.exported => {
                 if let Some(ty) = checker.lookup(&decl.name) {
                     env.values.insert(decl.name.clone(), ty);
+                }
+            }
+            Stmt::Component(decl) if decl.exported => {
+                if let Some(params) = checker.components.get(&decl.name) {
+                    env.components.insert(decl.name.clone(), params.clone());
                 }
             }
             Stmt::Var(decl) if decl.exported => {

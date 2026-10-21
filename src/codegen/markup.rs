@@ -42,7 +42,12 @@ impl Codegen {
 
     pub(crate) fn gen_element(&mut self, element: &Element) -> Result<String, VeyError> {
         let tag = if element.component {
-            self.resolve(&element.tag)
+            // A component of another module, such as `ui.Card`, is a member
+            // of the module.
+            match element.tag.rsplit_once('.') {
+                Some((module, name)) => format!("{}.{}", self.resolve(module), name),
+                None => self.resolve(&element.tag),
+            }
         } else {
             js_string(&element.tag)
         };

@@ -1193,3 +1193,46 @@ print(items)
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output).trim(), "2\n[ 1, 2 ]");
 }
+
+#[test]
+fn a_component_of_another_module_may_be_used() {
+    let dir = temp_dir("module-component");
+    fs::write(
+        dir.join("ui.vey"),
+        "export component Card(title: string) {\n  section { h2 { title } }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("app.vey"),
+        r#"
+use "./ui.vey" as ui
+
+component App() {
+  main {
+    ui.Card title="x"
+  }
+}
+
+print(html(App()))
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&dir.join("app.vey"));
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("<section><h2>x</h2></section>"));
+}
+
+#[test]
+fn an_unknown_component_is_reported() {
+    check_error(
+        "component Card(title: string) { h2 { title } }\ncomponent App() {\n  Missng title=\"y\"\n}\n",
+        "unknown-component",
+        "unknown component 'Missng'",
+    );
+    check_error(
+        "component App() {\n  Missng\n}\n",
+        "unknown-component-alone",
+        "unknown component 'Missng'",
+    );
+}

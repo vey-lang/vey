@@ -35,6 +35,10 @@ impl Parser {
         if first.is_uppercase() {
             return Ok(true);
         }
+        // A component of another module, such as `ui.Card`.
+        if self.qualified_name_ahead()? {
+            return Ok(true);
+        }
         let next = self.peek()?;
         if next.kind == TokKind::Punct
             && (next.value == "{" || next.value == "." || next.value == "#")
@@ -48,6 +52,38 @@ impl Parser {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Whether the tag is the name of a component of another module.
+    ///
+    /// The name of a module starts with a small letter and the name of the
+    /// component with a big one, so that `div.card` stays a tag with a class.
+    pub(crate) fn qualified_name_ahead(&mut self) -> Result<bool, VeyError> {
+        let dot = self.peek()?;
+        if dot.kind != TokKind::Punct || dot.value != "." {
+            return Ok(false);
+        }
+        let name = self.peek_n(2)?;
+        Ok(name.kind == TokKind::Ident
+            && name
+                .value
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_uppercase()))
+    }
+
+    /// Whether the current token is the dot of a name of a component.
+    pub(crate) fn qualified_name_here(&mut self) -> Result<bool, VeyError> {
+        if !self.is_punct(".") {
+            return Ok(false);
+        }
+        let name = self.peek()?;
+        Ok(name.kind == TokKind::Ident
+            && name
+                .value
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_uppercase()))
     }
 
     pub(crate) fn attr_ahead(&mut self) -> Result<bool, VeyError> {
@@ -105,6 +141,14 @@ impl Parser {
             children: Vec::new(),
             pos: tag_token.pos,
         };
+
+        // A component of another module, such as `ui.Card`.
+        if self.qualified_name_here()? {
+            self.advance()?;
+            let name = self.expect_ident("component name")?;
+            element.tag = format!("{}.{}", element.tag, name);
+            element.component = true;
+        }
 
         loop {
             if self.is_punct(".") || self.is_punct("#") {

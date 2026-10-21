@@ -426,10 +426,35 @@ impl TypeChecker<'_> {
         for node in nodes {
             match node {
                 MarkupNode::Element(element) => {
-                    let signature = if element.component {
-                        self.components.get(&element.tag).cloned()
-                    } else {
+                    // A tag that starts with a capital is a component, and it
+                    // has to be one of the components of the program. A
+                    // component of another module is written `module.Name`.
+                    let signature = if !element.component {
                         None
+                    } else {
+                        match element.tag.rsplit_once('.') {
+                            Some((module, name)) => {
+                                let env = self.imports.get(module).ok_or_else(|| {
+                                    self.error(element.pos, format!("unknown module '{}'", module))
+                                })?;
+                                let params = env.components.get(name).ok_or_else(|| {
+                                    self.error(
+                                        element.pos,
+                                        format!("unknown component '{}.{}'", module, name),
+                                    )
+                                })?;
+                                Some(params.clone())
+                            }
+                            None => {
+                                if !self.components.contains_key(&element.tag) {
+                                    return Err(self.error(
+                                        element.pos,
+                                        format!("unknown component '{}'", element.tag),
+                                    ));
+                                }
+                                self.components.get(&element.tag).cloned()
+                            }
+                        }
                     };
                     for (name, value) in &element.attrs {
                         let actual = self.infer_expr(value)?;
