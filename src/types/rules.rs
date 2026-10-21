@@ -43,6 +43,18 @@ fn holds_null(ty: &Type) -> bool {
     }
 }
 
+/// Whether the values of a type have an order.
+///
+/// Only numbers have one. A value that may be nothing is fine, because it is
+/// never greater than another value.
+pub(crate) fn orderable(ty: &Type) -> bool {
+    match ty {
+        Type::Any | Type::Var(_) | Type::Never | Type::Number | Type::Null => true,
+        Type::Union(items) => items.iter().all(orderable),
+        _ => false,
+    }
+}
+
 pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
     // The open part of a recursive alias is checked loosely, because it
     // cannot be written out.

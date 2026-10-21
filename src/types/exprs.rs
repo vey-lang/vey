@@ -7,8 +7,8 @@ use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
 use crate::types::core::{union, FunctionType, ObjectField, Type};
 use crate::types::rules::{
-    assignable, collect_type_vars, comparable, erase_type_vars, substitute, substitute_bound,
-    unify_types,
+    assignable, collect_type_vars, comparable, erase_type_vars, orderable, substitute,
+    substitute_bound, unify_types,
 };
 use crate::VeyError;
 
@@ -626,10 +626,9 @@ impl TypeChecker<'_> {
                 Ok(Type::Bool)
             }
             "<" | "<=" | ">" | ">=" => {
-                if !matches!(left, Type::Any | Type::Var(_))
-                    && !matches!(right, Type::Any | Type::Var(_))
-                    && !(assignable(left, &Type::Number) && assignable(right, &Type::Number))
-                {
+                // Only numbers have an order. A value that may be nothing is
+                // fine, because it is never greater than another value.
+                if !orderable(left) || !orderable(right) {
                     return Err(self.error(
                         pos,
                         format!(

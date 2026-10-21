@@ -522,3 +522,17 @@ fn a_helper_of_the_runtime_is_not_a_field() {
     );
     assert!(error.contains("use upper(...) instead"), "{error}");
 }
+
+#[test]
+fn a_value_that_may_be_nothing_can_be_compared() {
+    check_ok(
+        "compare-maybe-nothing",
+        "let x: number | null = 5\nif x > 10 { print(\"big\") }\nif x == null { print(\"none\") }\n",
+    );
+
+    let error = check_err(
+        "compare-text",
+        "let x: number | string = 5\nif x > 10 { print(\"big\") }\n",
+    );
+    assert!(error.contains("requires numbers"), "{error}");
+}
