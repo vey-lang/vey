@@ -534,8 +534,23 @@ function createVeyRuntime(scope, req) {
 
   function failTest(name, err) {
     log.error("fail " + name);
-    log.error(err && err.stack ? err.stack : String(err));
+    log.error(testFailure(err));
     if (isNode && typeof process !== "undefined") process.exitCode = 1;
+  }
+
+  /// The message of a failed test, with the place it happened.
+  ///
+  /// The whole stack of Node is not shown, because most of it belongs to the
+  /// runtime and not to the program.
+  function testFailure(err) {
+    if (!err) return "unknown error";
+    var message = err && err.message !== undefined ? String(err.message) : String(err);
+    var stack = err && err.stack ? String(err.stack) : "";
+    var place = /\(([^()]*\.vey:\d+:\d+)\)/.exec(stack);
+    if (place) {
+      return message + "\n  " + place[1];
+    }
+    return message;
   }
 
   function all(list) {
