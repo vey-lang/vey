@@ -1519,3 +1519,29 @@ fn a_tag_that_is_not_a_tag_of_html_is_reported() {
         "unknown tag 'mywidget'",
     );
 }
+
+#[test]
+fn the_value_of_an_attribute_may_be_written_in_braces() {
+    let dir = temp_dir("attr-value");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+let name = "row"
+let count = 3
+
+component App() {
+  div class={name} data-count={count} { "x" }
+}
+
+print(html(App()))
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("class=\"row\""), "{text}");
+    assert!(text.contains("data-count=\"3\""), "{text}");
+}

@@ -650,7 +650,7 @@ component App() {
 Rules:
 
 - A tag is the name of a tag of HTML, with optional `.class` and `#id` selectors: `div.card`, `main#root`, `img.avatar`, `div.nav-row`. A name that is not a tag of HTML is reported.
-- Attributes use `name=value`: `class="row"`, `href="/home"`, `click=fn() { ... }`, `disabled=true`.
+- Attributes use `name=value`: `class="row"`, `href="/home"`, `click=fn() { ... }`, `disabled=true`. A value may also be written in braces: `class={name}`.
 - Children go inside braces. Use a string or an expression directly for text.
 - `if` and `for` work inside markup.
 - Components start with an uppercase letter and receive attributes as parameters. `Card { ... }` and `Card() { ... }` are equivalent.

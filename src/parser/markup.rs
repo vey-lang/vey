@@ -192,7 +192,7 @@ impl Parser {
             if self.attr_here()? {
                 let name = self.parse_attr_name()?;
                 self.expect_op("=")?;
-                let value = self.parse_expression()?;
+                let value = self.parse_attr_value()?;
                 element.attrs.push((name, value));
                 continue;
             }
@@ -221,6 +221,34 @@ impl Parser {
         }
 
         Ok(element)
+    }
+
+    /// The value of an attribute.
+    ///
+    /// The value may be written in braces, like `{name}`, so that it reads
+    /// the way it does in other languages of the web. A brace that holds the
+    /// fields of an object is still an object.
+    fn parse_attr_value(&mut self) -> Result<Expr, VeyError> {
+        if !self.is_punct("{") || self.object_ahead()? {
+            return self.parse_expression();
+        }
+        self.advance()?;
+        let value = self.parse_expression()?;
+        self.expect_punct("}")?;
+        Ok(value)
+    }
+
+    /// Whether the brace at the cursor holds an object.
+    fn object_ahead(&mut self) -> Result<bool, VeyError> {
+        let next = self.peek()?;
+        if next.kind == TokKind::Punct && next.value == "}" {
+            return Ok(true);
+        }
+        if next.kind != TokKind::Ident && next.kind != TokKind::Str {
+            return Ok(false);
+        }
+        let after = self.peek_n(2)?;
+        Ok(after.kind == TokKind::Punct && after.value == ":")
     }
 
     pub(crate) fn parse_attr_name(&mut self) -> Result<String, VeyError> {
