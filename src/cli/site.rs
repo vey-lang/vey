@@ -81,7 +81,8 @@ pub(crate) fn write_site(
     }
 
     let mut watch = Vec::new();
-    let (files, failed) = site_files(entry, title, &mut watch)?;
+    let site = site_files(entry, title, &mut watch)?;
+    let (files, failed) = (site.files, site.failed);
     if output.exists() {
         fs::remove_dir_all(&output).map_err(|err| {
             BuildError::from(format!("cannot clean {}: {}", output.display(), err))
@@ -116,12 +117,19 @@ pub(crate) fn write_site(
     })
 }
 
-/// The files of the site and the pages that could not be built.
+/// The files of a site.
+pub(crate) struct SiteOutput {
+    /// The files that are written, by their name in the site.
+    pub files: HashMap<String, Vec<u8>>,
+    /// The pages that could not be built, by their name in the site.
+    pub failed: Vec<(String, BuildError)>,
+}
+
 pub(crate) fn site_files(
     entry: &Path,
     title: Option<&str>,
     watch: &mut Vec<PathBuf>,
-) -> Result<(HashMap<String, Vec<u8>>, Vec<(String, BuildError)>), BuildError> {
+) -> Result<SiteOutput, BuildError> {
     let root = project_root(entry);
     let page_title = title
         .map(str::to_string)
@@ -158,7 +166,7 @@ pub(crate) fn site_files(
         files.insert(name, page.into_bytes());
     }
 
-    Ok((files, failed))
+    Ok(SiteOutput { files, failed })
 }
 
 /// The pages of a project, besides the entry and the page of an unknown
