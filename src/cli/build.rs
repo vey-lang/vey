@@ -1,6 +1,6 @@
-//! The `vey build` and `vey web` commands.
+//! The `vey build` command.
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use vey::compiler::compile_project;
 
@@ -73,12 +73,21 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
 }
 
 pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
-    let Some(file) = parsed.files.first() else {
-        eprintln!("usage: vey build <file.vey> --node [-o out.cjs]");
-        return 1;
+    // A file that is named is the program, otherwise the entry of the project
+    // is used.
+    let file = match parsed.files.first() {
+        Some(file) => PathBuf::from(file),
+        None => match entry_from(&[]) {
+            Ok(entry) => entry,
+            Err(err) => {
+                eprintln!("{}", err);
+                eprintln!("usage: vey build <file.vey> --node [-o out.cjs]");
+                return 1;
+            }
+        },
     };
 
-    let bundle = match compile_project(Path::new(file)) {
+    let bundle = match compile_project(&file) {
         Ok(bundle) => bundle,
         Err(err) => {
             report(&err);
@@ -89,7 +98,7 @@ pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
     let output = parsed
         .output
         .clone()
-        .unwrap_or_else(|| replace_extension(file, "cjs"));
+        .unwrap_or_else(|| replace_extension(&file.to_string_lossy(), "cjs"));
     if let Err(err) = fs::write(&output, node_script(&bundle)) {
         eprintln!("cannot write {}: {}", output, err);
         return 1;
