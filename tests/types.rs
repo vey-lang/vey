@@ -399,3 +399,50 @@ fn a_call_to_another_module_with_too_few_arguments_is_checked() {
     let error = common::stderr(&output);
     assert!(error.contains("expected at least 2 arguments"), "{error}");
 }
+
+#[test]
+fn a_value_of_the_language_has_no_fields() {
+    let error = check_err("field-of-a-number", "let n: number = 5\nprint(n.field)\n");
+    assert!(
+        error.contains("type number has no field 'field'"),
+        "{error}"
+    );
+
+    let error = check_err("field-of-a-list", "let l: [number] = [1]\nprint(l.field)\n");
+    assert!(error.contains("has no field 'field'"), "{error}");
+}
+
+#[test]
+fn a_value_of_the_language_cannot_be_called() {
+    let error = check_err("call-a-number", "let n: number = 5\nprint(n())\n");
+    assert!(
+        error.contains("value of type number is not callable"),
+        "{error}"
+    );
+}
+
+#[test]
+fn only_a_list_can_be_walked_through() {
+    let error = check_err(
+        "walk-a-number",
+        "fn f(x: number) {\n  for i in x { print(i) }\n}\n",
+    );
+    assert!(error.contains("cannot walk through a number"), "{error}");
+}
+
+#[test]
+fn a_rest_parameter_is_a_list_inside_the_function() {
+    check_ok(
+        "rest-inside",
+        r#"
+fn sum(...values: number) -> number {
+  let total: number = 0
+  for value in values {
+    total += value
+  }
+  return total
+}
+print(sum(1, 2, 3))
+"#,
+    );
+}

@@ -225,6 +225,16 @@ impl TypeChecker<'_> {
             }
             Stmt::For(decl) => {
                 let iter_ty = self.infer_expr(&decl.iter)?;
+                // Only a list can be walked through.
+                if !matches!(
+                    iter_ty,
+                    Type::Array(_) | Type::String | Type::Any | Type::Var(_)
+                ) {
+                    return Err(self.error(
+                        decl.pos,
+                        format!("cannot walk through a {}", iter_ty.display()),
+                    ));
+                }
                 let item_ty = match &decl.ty {
                     Some(annotation) => {
                         let expected = self.resolve_type(annotation)?;

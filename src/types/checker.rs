@@ -364,10 +364,16 @@ impl TypeChecker<'_> {
             .find_map(|scope| scope.get(name).cloned())
     }
     pub(crate) fn param_type(&self, param: &Param) -> Result<Type, VeyError> {
-        match &param.ty {
-            Some(ty) => self.resolve_type(ty),
-            None => Ok(Type::Any),
+        let ty = match &param.ty {
+            Some(ty) => self.resolve_type(ty)?,
+            None => Type::Any,
+        };
+        if param.rest {
+            // Inside the function the rest parameter is a list of the values,
+            // while a call gives every one of them on its own.
+            return Ok(Type::Array(Box::new(rest_element_type(&ty))));
         }
+        Ok(ty)
     }
 
     pub(crate) fn function_type_from_parts(

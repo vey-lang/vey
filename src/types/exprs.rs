@@ -644,6 +644,9 @@ impl TypeChecker<'_> {
                 match &object_ty {
                     Type::Array(inner) if assignable(&index_ty, &Type::Number) => (**inner).clone(),
                     Type::String if assignable(&index_ty, &Type::Number) => Type::String,
+                    Type::Array(_) | Type::String => {
+                        return Err(self.type_error(pos, &index_ty, &Type::Number));
+                    }
                     _ => Type::Any,
                 }
             }
@@ -747,6 +750,17 @@ impl TypeChecker<'_> {
                     Ok(union(out))
                 }
             }
+            // The values of the language have no fields of their own.
+            Type::Number
+            | Type::Bool
+            | Type::Null
+            | Type::Void
+            | Type::Never
+            | Type::Array(_)
+            | Type::String => Err(self.error(
+                pos,
+                format!("type {} has no field '{}'", ty.display(), name),
+            )),
             _ => Ok(Type::Any),
         }
     }
