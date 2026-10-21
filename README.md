@@ -116,7 +116,18 @@ test("adds numbers", fn() {
 
 ## Checks
 
-`vey check` rejects duplicate declarations, reassignment of constants and imports, `break` or `continue` outside a loop, `return` outside a function, assignment to an unknown variable, the use of an unknown variable and type mismatches in annotated code. The same checks run before every build.
+`vey check` rejects duplicate declarations, reassignment of constants and imports, `break` or `continue` outside a loop, `return` outside a function, assignment to an unknown variable, the use of an unknown variable, the use of a value before it is declared and type mismatches in annotated code. The same checks run before every build.
+
+When a name is not known, the error names the one that is closest to it:
+
+```
+main.vey:2:7: unknown variable 'nam'
+
+  print(nam)
+        ^
+
+  hint: did you mean 'name'?
+```
 
 ## Language
 
@@ -620,13 +631,28 @@ A few details worth knowing:
 ```
 src/lexer.rs         tokens
 src/parser.rs        AST
+  mod.rs             the parser and the statements
+  exprs.rs           the expressions
+  patterns.rs        the binding patterns and the match patterns
+  types.rs           the type expressions
+  strings.rs         the string literals
+  markup.rs          the tag syntax
+  html.rs            the HTML tags
 src/check.rs         semantic checks
 src/builtins.rs      the names the runtime provides
+src/suggest.rs       suggestions for names that are close to a known one
 src/types/           gradual type checker
   core.rs            the type representation and the rules between types
   builtins.rs        the signatures of the runtime helpers
   checker.rs         the checker that walks a program
+  exprs.rs           the expressions
+  patterns.rs        the patterns
 src/codegen.rs       JavaScript output
+  mod.rs             the statements
+  exprs.rs           the expressions
+  markup.rs          the markup
+  js.rs              the JavaScript helpers
+  awaits.rs          finding out whether code uses `await`
 src/compiler.rs      module graph and bundling
 src/sourcemap.rs     inline source map encoding
 src/main.rs          CLI entry point
