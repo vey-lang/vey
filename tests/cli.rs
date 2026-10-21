@@ -259,3 +259,43 @@ fn a_page_that_cannot_be_built_does_not_stop_the_others() {
     assert!(error.contains("cannot build bad.html"), "{error}");
     assert!(error.contains("unknown variable 'missing'"), "{error}");
 }
+
+#[test]
+fn a_check_of_a_file_looks_at_that_file_only() {
+    let dir = temp_dir("check-one");
+    let project = dir.join("project");
+    write(&project.join("good.vey"), PAGE);
+    // A broken file next to it does not matter when the file is named.
+    write(
+        &project.join("broken.vey"),
+        "component Broken() {\n  main { h1 { missing } }\n}\n",
+    );
+
+    let output = vey()
+        .arg("check")
+        .arg(project.join("good.vey"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 page"));
+}
+
+#[test]
+fn a_check_of_a_project_looks_at_every_page() {
+    let dir = temp_dir("check-all");
+    let project = dir.join("project");
+    write(&project.join("src/main.vey"), PAGE);
+    write(
+        &project.join("src/broken.vey"),
+        "component Broken() {\n  main { h1 { missing } }\n}\n",
+    );
+
+    let output = vey().arg("check").arg(&project).output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("unknown variable 'missing'"), "{error}");
+}

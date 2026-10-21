@@ -129,11 +129,23 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
         }
     };
 
-    // The entry is checked first, and then every other page of the project.
+    // A file that is named is checked on its own, a project is checked as a
+    // whole.
+    let whole_project = parsed
+        .files
+        .first()
+        .map(|file| Path::new(file).is_dir())
+        .unwrap_or(true);
+
     let mut watch = Vec::new();
     let mut failed = Vec::new();
     let mut pages = 0;
-    for file in project_pages(&entry, &mut watch) {
+    let files = if whole_project {
+        project_pages(&entry, &mut watch)
+    } else {
+        vec![entry.clone()]
+    };
+    for file in files {
         pages += 1;
         if let Err(err) = compile_project(&file) {
             report(&err);

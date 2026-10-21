@@ -236,7 +236,8 @@ pub(crate) fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<DevState
         respond(&mut guard, path)
     };
 
-    write_response(&mut stream, status, content_type, &body, head);
+    let live = state.lock().map(|guard| guard.live).unwrap_or(false);
+    write_response(&mut stream, status, content_type, &body, head, live);
 }
 
 pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, Vec<u8>) {
@@ -409,6 +410,7 @@ pub(crate) fn write_response(
     content_type: &str,
     body: &[u8],
     head: bool,
+    live: bool,
 ) {
     let reason = match status {
         200 => "OK",
@@ -416,12 +418,20 @@ pub(crate) fn write_response(
         500 => "Internal Server Error",
         _ => "OK",
     };
+    // The development server never lets the browser keep a page, because it
+    // changes while it is worked on.
+    let cache = if live {
+        "Cache-Control: no-store\r\n"
+    } else {
+        ""
+    };
     let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
         status,
         reason,
         content_type,
-        body.len()
+        body.len(),
+        cache
     );
     let _ = stream.write_all(header.as_bytes());
     if !head {

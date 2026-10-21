@@ -125,7 +125,7 @@ print(b.value)
 "#,
     )
     .unwrap();
-    let output = common::check_file(&dir.join("app.vey"));
+    let output = common::run_file(&dir.join("app.vey"));
     assert!(output.status.success(), "{}", common::stderr(&output));
     assert!(common::stdout(&output).contains('2'));
 }
