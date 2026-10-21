@@ -104,7 +104,9 @@ pub(crate) fn write_site(
             .map_err(|err| BuildError::from(format!("cannot write {}: {}", path.display(), err)))?;
         if name.ends_with(".html") {
             pages.push(name.clone());
-        } else {
+        } else if !name.ends_with(".vey") {
+            // A page that is also written under the name of its source is
+            // not an asset.
             assets += 1;
         }
     }
@@ -250,7 +252,13 @@ pub(crate) fn other_pages(
             continue;
         }
         let page_title = format!("{} · {}", title, page_title_of(&file));
-        pages.push((name, html_document(&page, &page_title, false)));
+        let body = html_document(&page, &page_title, false);
+        pages.push((name.clone(), body.clone()));
+        // The page is also written under the name of its source, so that a
+        // link may point at the file the page was written in.
+        if let Some(source_name) = name.strip_suffix(".html") {
+            pages.push((format!("{}.vey", source_name), body));
+        }
     }
     pages
 }

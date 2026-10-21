@@ -2,25 +2,27 @@ use "./styles/site.css"
 use "./site.vey" as site
 use "./samples.vey" as samples
 
-export component App() {
+component App() {
   main {
     site.Header("")
 
     section.hero {
       div.shell {
-        h1 { "A small web language." }
-        p {
-          "Vey has its own syntax, its own compiler and its own runtime. The compiler is written in Rust and ships as a single binary. It emits JavaScript, so the same source runs on Node and in the browser."
+        div.inner {
+          div {
+            h1 { "A small web language." }
+            p {
+              "Vey has its own syntax, its own compiler and its own runtime. The compiler is written in Rust and ships as a single binary. It emits JavaScript, so the same source runs on Node and in the browser."
+            }
+            site.Command("curl -fsSL https://veylang.tech/install.sh | sh")
+          }
+          img.mark src="/logo.svg" alt=""
         }
-        site.Command("curl -fsSL https://veylang.tech/install.sh | sh")
       }
     }
 
     section.prose {
       div.shell {
-        h2 { "What it looks like" }
-        site.Sample(samples.HELLO)
-
         h2 { "What it has" }
         ul.points {
           li {
@@ -29,7 +31,7 @@ export component App() {
           }
           li {
             h3 { "Types when you want them" }
-            p { "A type is checked while the program is compiled and erased from the output. A program without types stays as it is." }
+            p { "A type is checked while the program is compiled and erased from the output." }
           }
           li {
             h3 { "One binary" }
@@ -39,11 +41,51 @@ export component App() {
             h3 { "Modules and packages" }
             p { "A module of your own, or a package of npm that is installed with npm." }
           }
+          li {
+            h3 { "A server of your own" }
+            p { "A program may serve a site, with routes, a body and the cookies of a request." }
+          }
+          li {
+            h3 { "Errors that are readable" }
+            p { "The page of an error shows the file, the line and a caret under the wrong part." }
+          }
+        }
+
+        h2 { "What it looks like" }
+        site.Sample(samples.HELLO)
+        site.Sample(samples.COMPONENTS)
+
+        h2 { "The tools" }
+        ul.commands {
+          li {
+            code { "vey new myapp" }
+            span { "a project with a page, the styles and the files of the site" }
+          }
+          li {
+            code { "vey dev" }
+            span { "the site in the browser, rebuilt and reloaded while you work" }
+          }
+          li {
+            code { "vey run" }
+            span { "the site the way a host serves it" }
+          }
+          li {
+            code { "vey build" }
+            span { "the site in .dist, ready to be uploaded" }
+          }
+          li {
+            code { "vey check" }
+            span { "the whole project, with the types" }
+          }
+          li {
+            code { "vey test" }
+            span { "the tests under tests/" }
+          }
         }
 
         div.links {
-          a.button href="/language.html" { "Read the language" }
-          a.button href="/install.html" { "Install Vey" }
+          a.button href="/language.vey" { "Read the language" }
+          a.button href="/install.vey" { "Install Vey" }
         }
       }
     }

@@ -52,6 +52,7 @@ pub const BUILTINS: &[&str] = &[
     "env",
     "require",
     "hash",
+    "highlight",
     "process",
     "text",
     "date",

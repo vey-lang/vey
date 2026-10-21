@@ -181,6 +181,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "server" => Some(builtin_optional(vec![number()], 0, any())),
         "require" => Some(builtin_function(vec![string()], any())),
         "hash" => Some(builtin_function(vec![any()], string())),
+        "highlight" => Some(builtin_function(vec![string()], string())),
         "process" => Some(builtin_object(vec![
             ("cwd", builtin_function(vec![], string())),
             ("argv", builtin_function(vec![], list(string()))),

@@ -20,6 +20,7 @@ const PARTS: &[&str] = &[
     include_str!("./runtime/web.js"),
     include_str!("./runtime/dom.js"),
     include_str!("./runtime/http.js"),
+    include_str!("./runtime/highlight.js"),
     include_str!("./runtime/server.js"),
 ];
 
@@ -49,6 +50,7 @@ pub fn parts() -> Vec<&'static str> {
         "web.js",
         "dom.js",
         "http.js",
+        "highlight.js",
         "server.js",
     ]
 }

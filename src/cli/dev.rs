@@ -485,6 +485,8 @@ pub(crate) fn content_type_for(path: &str) -> &'static str {
         .to_ascii_lowercase();
     match extension.as_str() {
         "html" | "htm" => "text/html; charset=utf-8",
+        // A page may also be written under the name of its source.
+        "vey" => "text/html; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "json" => "application/json; charset=utf-8",

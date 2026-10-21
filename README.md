@@ -864,6 +864,7 @@ The body of a request is read as JSON or as the fields of a form, so
 | `env(name, fallback)` | environment variable, Node only |
 | `require(name)` | a package of npm, Node only |
 | `hash(value)` | the fingerprint of a value, Node only |
+| `highlight(code)` | the code as HTML, with the parts of the language coloured |
 | `process.cwd()`, `process.argv()`, `process.platform()`, `process.exit(code)` | the process, Node only |
 | `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
 | `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
