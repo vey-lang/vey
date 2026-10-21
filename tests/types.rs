@@ -509,3 +509,16 @@ fn a_comparison_of_numbers_needs_numbers() {
     let error = check_err("order-different", "let n: number = 1\nprint(n < \"a\")\n");
     assert!(error.contains("requires numbers"), "{error}");
 }
+
+#[test]
+fn a_helper_of_the_runtime_is_not_a_field() {
+    let error = check_err(
+        "string-field",
+        "let s: string = \"text\"\nprint(s.upper())\n",
+    );
+    assert!(
+        error.contains("type string has no field 'upper'"),
+        "{error}"
+    );
+    assert!(error.contains("use upper(...) instead"), "{error}");
+}

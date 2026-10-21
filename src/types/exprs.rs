@@ -752,12 +752,7 @@ impl TypeChecker<'_> {
                 .iter()
                 .find(|field| field.name == name)
                 .map(|field| field.ty.clone())
-                .ok_or_else(|| {
-                    self.error(
-                        pos,
-                        format!("type {} has no field '{}'", ty.display(), name),
-                    )
-                }),
+                .ok_or_else(|| self.no_field_error(ty, name, pos)),
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
             Type::Union(items) => {
@@ -784,11 +779,23 @@ impl TypeChecker<'_> {
             | Type::Void
             | Type::Never
             | Type::Array(_)
-            | Type::String => Err(self.error(
-                pos,
-                format!("type {} has no field '{}'", ty.display(), name),
-            )),
+            | Type::String => Err(self.no_field_error(ty, name, pos)),
             _ => Ok(Type::Any),
         }
+    }
+
+    /// The error for a field that a type does not have.
+    ///
+    /// The helpers of the runtime are free functions, so `upper(text)` is
+    /// written and not `text.upper()`.
+    fn no_field_error(&self, ty: &Type, name: &str, pos: Pos) -> VeyError {
+        let error = self.error(
+            pos,
+            format!("type {} has no field '{}'", ty.display(), name),
+        );
+        if builtin_type(name).is_some() {
+            return error.with_hint(format!("use {}(...) instead", name));
+        }
+        error
     }
 }
