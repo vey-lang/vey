@@ -655,10 +655,8 @@ fn new_project_builds_and_curate_is_gone() {
     assert!(output.status.success(), "{}", stderr(&output));
 
     for file in [
-        "main.vey",
-        "404.vey",
-        "style.css",
-        "tests/main.vey",
+        "src/main.vey",
+        "src/styles/site.css",
         "public/robots.txt",
         "public/logo.svg",
         "public/favicon.svg",
@@ -668,6 +666,10 @@ fn new_project_builds_and_curate_is_gone() {
     ] {
         assert!(project.join(file).is_file(), "missing {}", file);
     }
+    // The page of an unknown address and the tests are built in, so a new
+    // project does not need them.
+    assert!(!project.join("src/404.vey").exists());
+    assert!(!project.join("tests").exists());
 
     let build = Command::new(env!("CARGO_BIN_EXE_vey"))
         .arg("build")
@@ -677,15 +679,9 @@ fn new_project_builds_and_curate_is_gone() {
     assert!(build.status.success(), "{}", stderr(&build));
     assert!(!project.join("index.vey").exists());
     let index = fs::read_to_string(project.join("dist/index.html")).unwrap();
-    assert!(index.contains("A small language for the web."), "{}", index);
+    assert!(index.contains("Welcome to Vey"), "{}", index);
     assert!(index.contains("favicon.svg"), "{}", index);
-    for removed in [
-        "Welcome to",
-        "Clicked",
-        "See features",
-        "What you get",
-        "Built from",
-    ] {
+    for removed in ["Clicked", "See features", "What you get", "Built from"] {
         assert!(
             !index.contains(removed),
             "unexpected '{}' in landing page",
@@ -694,7 +690,7 @@ fn new_project_builds_and_curate_is_gone() {
     }
 
     // The palette is black and white, so no colour may be in the styles.
-    let css = fs::read_to_string(project.join("style.css")).unwrap();
+    let css = fs::read_to_string(project.join("src/styles/site.css")).unwrap();
     for colour in [
         "#0f172a", "#1e293b", "#334155", "#e2e8f0", "#94a3b8", "#818cf8", "#35d6c6", "#f87171",
     ] {
@@ -708,12 +704,9 @@ fn new_project_builds_and_curate_is_gone() {
         assert!(!css.contains(pattern), "unexpected {} in style", pattern);
     }
 
-    let landing = fs::read_to_string(project.join("main.vey")).unwrap();
-    assert!(
-        !landing.contains("img."),
-        "the page should not need an image"
-    );
-    assert!(landing.contains("kicker"), "{}", landing);
+    let landing = fs::read_to_string(project.join("src/main.vey")).unwrap();
+    assert!(landing.contains("logo.svg"), "{}", landing);
+    assert!(landing.contains("Welcome to Vey"), "{}", landing);
 
     let logo = fs::read_to_string(project.join("public/logo.svg")).unwrap();
     assert_eq!(logo.matches("<path").count(), 1, "{}", logo);
@@ -722,6 +715,8 @@ fn new_project_builds_and_curate_is_gone() {
         "logo must not have a box: {}",
         logo
     );
+    let favicon = fs::read_to_string(project.join("public/favicon.svg")).unwrap();
+    assert_eq!(favicon.matches("<path").count(), 1, "{}", favicon);
     assert!(project.join("dist/logo.svg").is_file());
     assert!(project.join("dist/404.html").is_file());
 

@@ -45,18 +45,15 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| name.clone());
 
-    let files: [(&str, String); 11] = [
-        ("main.vey", PROJECT_MAIN.to_string()),
-        ("404.vey", PROJECT_404.to_string()),
-        ("style.css", PROJECT_STYLE.to_string()),
-        ("tests/main.vey", PROJECT_TEST.to_string()),
+    let files: [(&str, String); 8] = [
+        ("src/main.vey", PROJECT_MAIN.to_string()),
+        ("src/styles/site.css", PROJECT_STYLE.to_string()),
         ("public/logo.svg", PROJECT_LOGO.to_string()),
         ("public/favicon.svg", PROJECT_FAVICON.to_string()),
         ("public/robots.txt", ROBOTS.to_string()),
         ("package.json", PROJECT_PACKAGE.replace("{name}", &project)),
         ("README.md", PROJECT_README.replace("{name}", &project)),
         (".gitignore", GITIGNORE.to_string()),
-        ("vey.toml", PROJECT_CONFIG.replace("{name}", &project)),
     ];
 
     for (file, content) in &files {
@@ -86,46 +83,16 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     0
 }
 
-pub(crate) const PROJECT_MAIN: &str = r##"use "./style.css"
+pub(crate) const PROJECT_MAIN: &str = r##"use "./styles/site.css"
 
 component App() {
-  main.page {
-    p.kicker { "Vey" }
-    h1 { "A small language for the web." }
-    p.lede {
-      "Vey compiles to JavaScript, so the same file runs in the browser and on \
-       the server. Types are optional, and checked when you write them."
-    }
-    hr
-    dl.list {
-      dt { "vey dev" }
-      dd { "Starts the development server." }
-      dt { "vey build" }
-      dd { "Writes the site to dist/." }
-      dt { "vey test" }
-      dd { "Runs the tests of the project." }
-    }
-    hr
-    footer { "Built with Vey." }
+  main.start {
+    img.mark src="/logo.svg" alt="" width="52" height="52"
+    h1 { "Welcome to Vey" }
   }
 }
 
 bind("#app", App())
-"##;
-
-pub(crate) const PROJECT_404: &str = r##"use "./style.css"
-
-component NotFound() {
-  main.page {
-    p.kicker { "404" }
-    h1 { "Nothing here." }
-    p.lede { "The address may be wrong, or the page may have moved." }
-    hr
-    p { a href="/" { "Go back home" } }
-  }
-}
-
-bind("#app", NotFound())
 "##;
 
 pub(crate) const PROJECT_STYLE: &str = r##"/* The styles of the site.
@@ -163,68 +130,53 @@ body {
   color: var(--fg);
   font-family: var(--sans);
   font-size: 16px;
-  line-height: 1.65;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
 
-.page {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 6rem 1.5rem 5rem;
+.start {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 1.5rem;
+  min-height: 100svh;
+  padding: 3rem 1.5rem;
+  text-align: center;
 }
 
-.kicker {
-  margin: 0;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+.mark {
+  width: 52px;
+  height: 52px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mark {
+    filter: invert(1);
+  }
 }
 
 h1 {
-  margin: 1.25rem 0 0;
+  margin: 0;
   font-family: var(--serif);
-  font-size: clamp(2.25rem, 8vw, 3.25rem);
+  font-size: clamp(1.875rem, 7vw, 2.75rem);
   font-weight: 400;
   line-height: 1.1;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
-.lede {
-  margin: 1.5rem 0 0;
-  max-width: 32rem;
-  font-size: 1.0625rem;
-  color: var(--muted);
-}
-
-hr {
-  margin: 3.5rem 0;
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-
-.list {
+.code {
   margin: 0;
-}
-
-.list dt {
-  font-family: var(--mono);
-  font-size: 0.8125rem;
   color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
 }
 
-.list dd {
-  margin: 0 0 1.1rem;
-  padding-left: 10.5rem;
-}
-
-@media (max-width: 34rem) {
-  .list dd {
-    padding-left: 0;
-    margin-bottom: 1.5rem;
-  }
+.lede {
+  margin: 0;
+  max-width: 26rem;
+  color: var(--muted);
 }
 
 a {
@@ -237,26 +189,6 @@ a {
 a:hover {
   border-bottom-color: var(--fg);
 }
-
-code {
-  font-family: var(--mono);
-  font-size: 0.875em;
-}
-
-footer {
-  margin-top: 0;
-  color: var(--muted);
-  font-size: 0.8125rem;
-}
-"##;
-
-pub(crate) const PROJECT_TEST: &str = r##"fn add(a: number, b: number) -> number {
-  return a + b
-}
-
-test("adds numbers", fn() {
-  assert(add(2, 3) == 5, "the sum should be 5")
-})
 "##;
 
 const ROBOTS: &str = "User-agent: *\nAllow: /\n";
@@ -272,18 +204,9 @@ const PROJECT_PACKAGE: &str = r##"{
     "dev": "vey dev",
     "build": "vey build",
     "test": "vey test",
-    "check": "vey check main.vey"
+    "check": "vey check src/main.vey"
   }
 }
-"##;
-
-const PROJECT_CONFIG: &str = r##"# The settings of the project.
-
-[project]
-name = "{name}"
-
-[site]
-title = "{name}"
 "##;
 
 const PROJECT_README: &str = r##"# {name}
@@ -308,19 +231,29 @@ npm run build   # or: vey build
 The site is written to `dist/`. That folder holds everything the server
 needs, so it can be uploaded as it is.
 
-## Tests
-
-```sh
-npm test        # or: vey test
-```
-
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `main.vey` | the page |
-| `404.vey` | the page of an unknown address |
-| `style.css` | the styles of the site |
+| `src/main.vey` | the page |
+| `src/styles/site.css` | the styles of the site |
 | `public/` | the files that are copied as they are |
-| `tests/` | the tests of the project |
+
+## Styles
+
+The styles of a page may be written in a `style { }` block, next to the
+markup they belong to:
+
+```vey
+style {
+  h1 { font-size: 2rem; }
+}
+```
+
+A stylesheet that is shared by several pages belongs in `src/styles/`.
+
+## Pages
+
+`src/404.vey` is the page of an unknown address. Without it, Vey writes a
+plain page of its own.
 "##;

@@ -117,12 +117,12 @@ pub(crate) fn site_files(
 
     let bundle = compile_for_site(entry, watch)?;
     let favicon = root.join("public/favicon.svg").is_file();
-    let not_found = root.join("404.vey");
-    let not_found_body = if not_found.is_file() {
-        let bundle = compile_for_site(&not_found, watch)?;
-        html_document(&bundle, &format!("{} · 404", page_title), favicon)
-    } else {
-        default_404_page(&page_title)
+    let not_found_body = match not_found_page(entry, &root) {
+        Some(not_found) => {
+            let bundle = compile_for_site(&not_found, watch)?;
+            html_document(&bundle, &format!("{} · 404", page_title), favicon)
+        }
+        None => default_404_page(&page_title),
     };
 
     // Static files are copied first so generated pages always win over a
@@ -140,6 +140,25 @@ pub(crate) fn site_files(
     files.insert("404.html".to_string(), not_found_body.into_bytes());
 
     Ok(files)
+}
+
+/// The page of an unknown address.
+///
+/// It is looked for next to the entry file first, so that a project that
+/// keeps its pages in `src` finds it there.
+pub(crate) fn not_found_page(entry: &Path, root: &Path) -> Option<PathBuf> {
+    let beside = entry
+        .parent()
+        .map(|directory| directory.join("404.vey"))
+        .unwrap_or_default();
+    if beside.is_file() {
+        return Some(beside);
+    }
+    let at_root = root.join("404.vey");
+    if at_root.is_file() {
+        return Some(at_root);
+    }
+    None
 }
 
 pub(crate) fn copy_public(
