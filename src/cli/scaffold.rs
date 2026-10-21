@@ -51,7 +51,10 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         ("public/logo.svg", PROJECT_LOGO.to_string()),
         ("public/favicon.svg", PROJECT_FAVICON.to_string()),
         ("public/robots.txt", ROBOTS.to_string()),
-        ("package.json", PROJECT_PACKAGE.replace("{name}", &project)),
+        (
+            "package.json",
+            PROJECT_PACKAGE.replace("{name}", &package_name(&project)),
+        ),
         ("README.md", PROJECT_README.replace("{name}", &project)),
         (".gitignore", GITIGNORE.to_string()),
     ];
@@ -81,6 +84,29 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     println!("  cd {}", name);
     println!("  vey dev");
     0
+}
+
+/// The name of the package of a project.
+///
+/// npm wants a name that is small, without spaces and not starting with a
+/// dot.
+fn package_name(project: &str) -> String {
+    let name: String = project
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let name = name.trim_matches('-').to_string();
+    if name.is_empty() {
+        "vey-app".to_string()
+    } else {
+        name
+    }
 }
 
 pub(crate) const PROJECT_MAIN: &str = r##"use "./styles/site.css"

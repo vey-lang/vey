@@ -140,6 +140,45 @@ impl Type {
     }
 }
 
+/// Whether two values of these types may be the same.
+pub(crate) fn comparable(left: &Type, right: &Type) -> bool {
+    if matches!(left, Type::Any | Type::Var(_) | Type::Never)
+        || matches!(right, Type::Any | Type::Var(_) | Type::Never)
+    {
+        return true;
+    }
+    if left == right {
+        return true;
+    }
+    if let Type::Union(items) = left {
+        if items.iter().any(|item| comparable(item, right)) {
+            return true;
+        }
+    }
+    if let Type::Union(items) = right {
+        if items.iter().any(|item| comparable(left, item)) {
+            return true;
+        }
+    }
+    // Null is the same as the absence of a value.
+    if matches!(left, Type::Null) {
+        return holds_null(right);
+    }
+    if matches!(right, Type::Null) {
+        return holds_null(left);
+    }
+    false
+}
+
+/// Whether the type may hold null.
+fn holds_null(ty: &Type) -> bool {
+    match ty {
+        Type::Null => true,
+        Type::Union(items) => items.iter().any(holds_null),
+        _ => false,
+    }
+}
+
 pub(crate) fn union(types: Vec<Type>) -> Type {
     let mut out = Vec::new();
     for ty in types {

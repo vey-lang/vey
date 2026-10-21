@@ -486,3 +486,26 @@ fn a_condition_has_to_be_a_bool() {
         "let b: bool = true\nif b { print(1) }\nlet n = 0\nwhile n < 1 { n += 1 }\n",
     );
 }
+
+#[test]
+fn two_values_of_different_types_are_never_the_same() {
+    let error = check_err(
+        "compare-different",
+        "let n: number = 1\nif n == \"a\" { print(1) }\n",
+    );
+    assert!(
+        error.contains("number and string are never the same"),
+        "{error}"
+    );
+
+    check_ok(
+        "compare-same",
+        "let n: number = 1\nlet s: string = \"a\"\nprint(n == 1)\nprint(s == \"a\")\n",
+    );
+}
+
+#[test]
+fn a_comparison_of_numbers_needs_numbers() {
+    let error = check_err("order-different", "let n: number = 1\nprint(n < \"a\")\n");
+    assert!(error.contains("requires numbers"), "{error}");
+}

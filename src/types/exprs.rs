@@ -6,8 +6,8 @@ use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
 use crate::types::core::{
-    assignable, collect_type_vars, erase_type_vars, substitute, substitute_bound, unify_types,
-    union, FunctionType, ObjectField, Type,
+    assignable, collect_type_vars, comparable, erase_type_vars, substitute, substitute_bound,
+    unify_types, union, FunctionType, ObjectField, Type,
 };
 use crate::VeyError;
 
@@ -592,7 +592,38 @@ impl TypeChecker<'_> {
                     ))
                 }
             }
-            "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=" => Ok(Type::Bool),
+            "==" | "!=" | "===" | "!==" => {
+                // Two values of different types are never the same, so the
+                // comparison is most likely a mistake.
+                if !comparable(left, right) {
+                    return Err(self.error(
+                        pos,
+                        format!(
+                            "{} and {} are never the same",
+                            left.display(),
+                            right.display()
+                        ),
+                    ));
+                }
+                Ok(Type::Bool)
+            }
+            "<" | "<=" | ">" | ">=" => {
+                if !matches!(left, Type::Any | Type::Var(_))
+                    && !matches!(right, Type::Any | Type::Var(_))
+                    && !(assignable(left, &Type::Number) && assignable(right, &Type::Number))
+                {
+                    return Err(self.error(
+                        pos,
+                        format!(
+                            "operator '{}' requires numbers, found {} and {}",
+                            op,
+                            left.display(),
+                            right.display()
+                        ),
+                    ));
+                }
+                Ok(Type::Bool)
+            }
             "&" | "|" | "^" | "<<" | ">>" => {
                 if matches!(left, Type::Any) || matches!(right, Type::Any) {
                     Ok(Type::Any)
