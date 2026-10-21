@@ -19,6 +19,14 @@ use crate::cli::site::{default_404_page, site_files};
 /// The port the development server listens on.
 pub(crate) const DEFAULT_PORT: u16 = 4000;
 
+/// Take the lock of the state.
+///
+/// A panic while the lock was held would otherwise make every later request
+/// fail, so the state is used even then.
+fn lock(state: &Arc<Mutex<DevState>>) -> std::sync::MutexGuard<'_, DevState> {
+    state.lock().unwrap_or_else(|err| err.into_inner())
+}
+
 #[derive(Default)]
 pub(crate) struct DevState {
     pub(crate) files: HashMap<String, Vec<u8>>,
@@ -56,7 +64,7 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
 
     let state = Arc::new(Mutex::new(DevState::default()));
     {
-        let mut guard = state.lock().unwrap();
+        let mut guard = lock(&state);
         guard.root = root.canonicalize().unwrap_or_else(|_| root.clone());
         guard.title = title.clone();
     }
@@ -130,7 +138,7 @@ pub(crate) fn refresh_dev(
 ) -> Result<usize, BuildError> {
     let mut watch = Vec::new();
     let result = site_files(entry, Some(title), &mut watch);
-    let mut guard = state.lock().unwrap();
+    let mut guard = lock(state);
     guard.version += 1;
     match result {
         Ok(files) => {
@@ -182,7 +190,7 @@ pub(crate) fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<DevState
     let head = method.eq_ignore_ascii_case("HEAD");
 
     let (status, content_type, body) = {
-        let mut guard = state.lock().unwrap();
+        let mut guard = lock(&state);
         respond(&mut guard, path)
     };
 
@@ -429,7 +437,7 @@ pub(crate) fn dev_snapshot(
     entry: &Path,
     state: &Arc<Mutex<DevState>>,
 ) -> Vec<FileState> {
-    let watch = state.lock().unwrap().watch.clone();
+    let watch = lock(state).watch.clone();
 
     let mut paths: Vec<PathBuf> = vec![entry.to_path_buf()];
     // The files of the project that the build reads.
