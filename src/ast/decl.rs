@@ -128,7 +128,9 @@ pub struct ReturnStmt {
 pub struct TryStmt {
     pub body: Block,
     pub name: Option<String>,
-    pub catch: Block,
+    pub catch: Option<Block>,
+    /// The block that always runs, with or without an error.
+    pub finally: Option<Block>,
     pub pos: Pos,
 }
 

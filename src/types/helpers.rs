@@ -103,7 +103,15 @@ pub(crate) fn stmt_assigns_name(stmt: &Stmt, name: &str) -> bool {
             .as_ref()
             .is_some_and(|value| expr_assigns_name(value, name)),
         Stmt::Try(decl) => {
-            block_assigns_name(&decl.body, name) || block_assigns_name(&decl.catch, name)
+            block_assigns_name(&decl.body, name)
+                || decl
+                    .catch
+                    .as_ref()
+                    .is_some_and(|catch| block_assigns_name(catch, name))
+                || decl
+                    .finally
+                    .as_ref()
+                    .is_some_and(|finally| block_assigns_name(finally, name))
         }
         Stmt::Expr(decl) => expr_assigns_name(&decl.expr, name),
         Stmt::Assign(decl) => {

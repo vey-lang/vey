@@ -234,12 +234,17 @@ pub(crate) fn other_pages(
         // The home of the site and the page of an unknown address have their
         // own names.
         if name == "index.html" || name == "404.html" {
+            let place = if name == "index.html" {
+                "the home of the site"
+            } else {
+                "the page of an unknown address"
+            };
             failed.push((
                 name.clone(),
                 BuildError::from(format!(
-                    "'{}' would take the place of the {} of the site",
+                    "'{}' would take the place of {}",
                     file.display(),
-                    name
+                    place
                 )),
             ));
             continue;

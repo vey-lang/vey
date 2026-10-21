@@ -94,6 +94,7 @@ fn is_keyword(word: &str) -> bool {
             | "continue"
             | "try"
             | "catch"
+            | "finally"
             | "use"
             | "as"
             | "export"

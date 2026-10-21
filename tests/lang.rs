@@ -1278,3 +1278,54 @@ fn a_file_that_is_not_vey_is_named() {
     let error = stderr(&output);
     assert!(error.contains("is not a Vey file"), "{error}");
 }
+
+#[test]
+fn a_block_that_always_runs_may_be_added_to_an_error() {
+    let dir = temp_dir("finally");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+try {
+  error("boom")
+} catch err {
+  print("caught")
+} finally {
+  print("always")
+}
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("caught"), "{text}");
+    assert!(text.contains("always"), "{text}");
+}
+
+#[test]
+fn a_block_that_always_runs_may_stand_alone() {
+    let dir = temp_dir("finally-only");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        "try {\n  print(\"fine\")\n} finally {\n  print(\"always\")\n}\n",
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("fine"), "{text}");
+    assert!(text.contains("always"), "{text}");
+}
+
+#[test]
+fn an_error_needs_a_catch_or_a_block_that_always_runs() {
+    check_error(
+        "try {\n  print(\"x\")\n}\n",
+        "try-without-catch",
+        "expected a catch or a finally block",
+    );
+}

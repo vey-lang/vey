@@ -271,14 +271,19 @@ impl TypeChecker<'_> {
             Stmt::Break(_) | Stmt::Continue(_) => Ok(()),
             Stmt::Try(decl) => {
                 self.check_block(&decl.body)?;
-                self.push_scope();
-                if let Some(name) = &decl.name {
-                    self.declare(name, Type::Any);
+                if let Some(catch) = &decl.catch {
+                    self.push_scope();
+                    if let Some(name) = &decl.name {
+                        self.declare(name, Type::Any);
+                    }
+                    for inner in &catch.body {
+                        self.check_stmt(inner)?;
+                    }
+                    self.pop_scope();
                 }
-                for inner in &decl.catch.body {
-                    self.check_stmt(inner)?;
+                if let Some(finally) = &decl.finally {
+                    self.check_block(finally)?;
                 }
-                self.pop_scope();
                 Ok(())
             }
             Stmt::Use(decl) => {

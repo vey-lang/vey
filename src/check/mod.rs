@@ -189,14 +189,19 @@ impl Checker<'_> {
             }
             Stmt::Try(decl) => {
                 self.check_block(&decl.body)?;
-                self.scopes.push();
-                if let Some(name) = &decl.name {
-                    self.declare(name, BindingKind::Let, decl.pos)?;
+                if let Some(catch) = &decl.catch {
+                    self.scopes.push();
+                    if let Some(name) = &decl.name {
+                        self.declare(name, BindingKind::Let, decl.pos)?;
+                    }
+                    for inner in &catch.body {
+                        self.check_stmt(inner)?;
+                    }
+                    self.scopes.pop();
                 }
-                for inner in &decl.catch.body {
-                    self.check_stmt(inner)?;
+                if let Some(finally) = &decl.finally {
+                    self.check_block(finally)?;
                 }
-                self.scopes.pop();
             }
             Stmt::Use(decl) => {
                 if !decl.path.ends_with(".css") {

@@ -574,17 +574,31 @@ impl Parser {
     fn parse_try(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("try")?;
         let body = self.parse_block()?;
-        self.expect_kw("catch")?;
-        let name = if self.tok.kind == TokKind::Ident {
-            Some(self.advance()?.value)
+
+        // The catch and the finally blocks are both optional, but at least one
+        // of them has to be there.
+        let mut name = None;
+        let mut catch = None;
+        if self.eat_kw("catch")? {
+            if self.tok.kind == TokKind::Ident {
+                name = Some(self.advance()?.value);
+            }
+            catch = Some(self.parse_block()?);
+        }
+        let finally = if self.eat_kw("finally")? {
+            Some(self.parse_block()?)
         } else {
             None
         };
-        let catch = self.parse_block()?;
+        if catch.is_none() && finally.is_none() {
+            return Err(self.error_at(start.pos, "expected a catch or a finally block"));
+        }
+
         Ok(Stmt::Try(TryStmt {
             body,
             name,
             catch,
+            finally,
             pos: start.pos,
         }))
     }

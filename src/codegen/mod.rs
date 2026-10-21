@@ -362,23 +362,41 @@ impl Codegen {
                 self.indent += 1;
                 self.gen_block(&decl.body)?;
                 self.indent -= 1;
-                let name = decl
-                    .name
-                    .as_ref()
-                    .map(|n| format!("_{}", n))
-                    .unwrap_or_else(|| "__err".to_string());
-                self.emit(&format!("}} catch ({}) {{", name));
-                self.indent += 1;
-                self.push_scope();
-                if let Some(n) = &decl.name {
-                    self.declare(n);
+                if let Some(catch) = &decl.catch {
+                    let name = decl
+                        .name
+                        .as_ref()
+                        .map(|n| format!("_{}", n))
+                        .unwrap_or_else(|| "__err".to_string());
+                    self.emit(&format!("}} catch ({}) {{", name));
+                    self.indent += 1;
+                    self.push_scope();
+                    if let Some(n) = &decl.name {
+                        self.declare(n);
+                    }
+                    for inner in &catch.body {
+                        self.gen_stmt(inner)?;
+                    }
+                    self.pop_scope();
+                    self.indent -= 1;
+                    self.emit("}");
                 }
-                for inner in &decl.catch.body {
-                    self.gen_stmt(inner)?;
+                if let Some(finally) = &decl.finally {
+                    // The catch block has already closed the try.
+                    if decl.catch.is_some() {
+                        self.emit(" finally {");
+                    } else {
+                        self.emit("} finally {");
+                    }
+                    self.indent += 1;
+                    self.gen_block(finally)?;
+                    self.indent -= 1;
+                    self.emit("}");
+                } else if decl.catch.is_none() {
+                    // Without a catch and without a finally the block of the
+                    // try still has to be closed.
+                    self.emit("}");
                 }
-                self.pop_scope();
-                self.indent -= 1;
-                self.emit("}");
             }
             Stmt::Type(_) => {}
             Stmt::Style(_) => {}

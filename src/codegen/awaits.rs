@@ -29,7 +29,11 @@ pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
         | Stmt::Style(_)
         | Stmt::Type(_)
         | Stmt::Enum(_) => false,
-        Stmt::Try(decl) => block_has_await(&decl.body) || block_has_await(&decl.catch),
+        Stmt::Try(decl) => {
+            block_has_await(&decl.body)
+                || decl.catch.as_ref().is_some_and(block_has_await)
+                || decl.finally.as_ref().is_some_and(block_has_await)
+        }
         Stmt::Expr(decl) => expr_has_await(&decl.expr),
         Stmt::Assign(decl) => expr_has_await(&decl.target) || expr_has_await(&decl.value),
         Stmt::Block(block, _) => block_has_await(block),

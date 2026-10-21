@@ -508,6 +508,19 @@ try {
 }
 ```
 
+A `finally` block always runs, with or without an error. It may stand on its own
+or follow a `catch`:
+
+```vey
+try {
+  save(text)
+} catch err {
+  print("could not save: {err.message}")
+} finally {
+  print("done")
+}
+```
+
 ### Modules
 
 ```vey
