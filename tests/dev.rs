@@ -221,3 +221,40 @@ fn the_release_server_serves_the_site_and_not_the_sources() {
     let (status, _) = request(port, "/main.vey").expect("no answer");
     assert!(status.contains("404"), "status: {status}");
 }
+
+#[test]
+fn a_page_that_is_added_while_the_server_runs_is_served() {
+    let dir = temp_dir("new-page");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("src/main.vey"),
+        "component App() {\n  main { h1 { \"Home\" } }\n}\n\nbind(\"#app\", App())\n",
+    )
+    .unwrap();
+
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("dev")
+        .arg(&dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+
+    let (status, _) = wait_for(port, "/", "Home");
+    assert!(status.contains("200"), "status: {status}");
+
+    // A page that is added while the server runs is served as well.
+    fs::write(
+        dir.join("src/about.vey"),
+        "component About() {\n  main { h1 { \"About page\" } }\n}\n\nbind(\"#app\", About())\n",
+    )
+    .unwrap();
+
+    let (status, body) = wait_for(port, "/about.html", "About page");
+    assert!(status.contains("200"), "status: {status}");
+    assert!(body.contains("About page"), "{body}");
+}

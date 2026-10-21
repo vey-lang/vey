@@ -518,6 +518,12 @@ pub(crate) fn dev_snapshot(
     let watch = lock(state).watch.clone();
 
     let mut paths: Vec<PathBuf> = vec![entry.to_path_buf()];
+    // The folder of the pages is watched as well, so that a page that is
+    // added or taken away is noticed.
+    let pages = lock(state).pages.clone();
+    if pages.is_dir() && !paths.contains(&pages) {
+        paths.push(pages);
+    }
     // The files of the project that the build reads.
     for path in &watch {
         if !paths.contains(path) {
