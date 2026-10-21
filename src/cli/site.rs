@@ -13,6 +13,8 @@ pub(crate) struct SiteReport {
     /// The pages that were written.
     pub(crate) pages: Vec<String>,
     pub(crate) assets: usize,
+    /// The pages that could not be built.
+    pub(crate) failed: Vec<(String, BuildError)>,
 }
 
 /// The path without any `.` or `..` in it, with links resolved.
@@ -79,7 +81,7 @@ pub(crate) fn write_site(
     }
 
     let mut watch = Vec::new();
-    let files = site_files(entry, title, &mut watch)?;
+    let (files, failed) = site_files(entry, title, &mut watch)?;
     if output.exists() {
         fs::remove_dir_all(&output).map_err(|err| {
             BuildError::from(format!("cannot clean {}: {}", output.display(), err))
@@ -107,14 +109,19 @@ pub(crate) fn write_site(
     }
     pages.sort();
 
-    Ok(SiteReport { pages, assets })
+    Ok(SiteReport {
+        pages,
+        assets,
+        failed,
+    })
 }
 
+/// The files of the site and the pages that could not be built.
 pub(crate) fn site_files(
     entry: &Path,
     title: Option<&str>,
     watch: &mut Vec<PathBuf>,
-) -> Result<HashMap<String, Vec<u8>>, BuildError> {
+) -> Result<(HashMap<String, Vec<u8>>, Vec<(String, BuildError)>), BuildError> {
     let root = project_root(entry);
     let page_title = title
         .map(str::to_string)
@@ -144,12 +151,14 @@ pub(crate) fn site_files(
     );
     files.insert("404.html".to_string(), not_found_body.into_bytes());
 
-    // Every other page of the project becomes a page of the site.
-    for (name, page) in other_pages(entry, &bundle, watch)? {
+    // Every other page of the project becomes a page of the site. A page
+    // that cannot be built does not stop the others.
+    let mut failed = Vec::new();
+    for (name, page) in other_pages(entry, &bundle, watch, &mut failed) {
         files.insert(name, page.into_bytes());
     }
 
-    Ok(files)
+    Ok((files, failed))
 }
 
 /// The pages of a project, besides the entry and the page of an unknown
@@ -161,7 +170,8 @@ pub(crate) fn other_pages(
     entry: &Path,
     bundle: &Bundle,
     watch: &mut Vec<PathBuf>,
-) -> Result<Vec<(String, String)>, BuildError> {
+    failed: &mut Vec<(String, BuildError)>,
+) -> Vec<(String, String)> {
     let folder = match entry.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
         _ => PathBuf::from("."),
@@ -183,7 +193,13 @@ pub(crate) fn other_pages(
         if file == entry || file.file_name().is_some_and(|name| name == "404.vey") {
             continue;
         }
-        let page = compile_for_site(file, watch)?;
+        let page = match compile_for_site(file, watch) {
+            Ok(page) => page,
+            Err(err) => {
+                failed.push((page_name(&folder, file).unwrap_or_default(), err));
+                continue;
+            }
+        };
         let real = fs::canonicalize(file).unwrap_or_else(|_| file.clone());
         for module in &page.modules {
             // The page is a module of itself, the others are not pages.
@@ -210,7 +226,7 @@ pub(crate) fn other_pages(
         let page_title = format!("{} · {}", title, page_title_of(&file));
         pages.push((name, html_document(&page, &page_title, false)));
     }
-    Ok(pages)
+    pages
 }
 
 /// The name of the page a file becomes.

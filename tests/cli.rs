@@ -232,3 +232,30 @@ fn every_page_of_a_project_becomes_a_page_of_the_site() {
     // A module is not a page.
     assert!(!dir.join("out/shared.html").exists());
 }
+
+#[test]
+fn a_page_that_cannot_be_built_does_not_stop_the_others() {
+    let dir = temp_dir("broken-page");
+    let project = dir.join("project");
+    write(&project.join("src/main.vey"), PAGE);
+    write(
+        &project.join("src/bad.vey"),
+        "component Bad() {\n  main { h1 { missing } }\n}\n\nbind(\"#app\", Bad())\n",
+    );
+
+    let output = vey()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(dir.join("out"))
+        .output()
+        .unwrap();
+
+    // The other pages are written, and the broken one is reported.
+    assert!(dir.join("out/index.html").is_file());
+    assert!(dir.join("out/404.html").is_file());
+    assert!(!dir.join("out/bad.html").exists());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("cannot build bad.html"), "{error}");
+    assert!(error.contains("unknown variable 'missing'"), "{error}");
+}

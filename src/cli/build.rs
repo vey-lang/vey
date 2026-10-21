@@ -48,6 +48,11 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
             if report.assets > 0 {
                 println!("copied {} asset(s) from public/", report.assets);
             }
+            // A page that cannot be built is reported, but the others are
+            // still written.
+            for (page, err) in &report.failed {
+                eprintln!("cannot build {}: {}", page, err);
+            }
             println!("deploy the {} folder directly.", output.display());
             0
         }

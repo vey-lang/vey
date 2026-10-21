@@ -85,6 +85,27 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
 
 pub(crate) const PROJECT_MAIN: &str = r##"use "./styles/site.css"
 
+style {
+  .start {
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 1.5rem;
+    min-height: 100svh;
+    padding: 3rem 1.5rem;
+    text-align: center;
+  }
+
+  .mark {
+    width: 52px;
+    height: 52px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .mark { filter: invert(1); }
+  }
+}
+
 component App() {
   main.start {
     img.mark src="/logo.svg" alt="" width="52" height="52"
@@ -132,27 +153,6 @@ body {
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-}
-
-.start {
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 1.5rem;
-  min-height: 100svh;
-  padding: 3rem 1.5rem;
-  text-align: center;
-}
-
-.mark {
-  width: 52px;
-  height: 52px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .mark {
-    filter: invert(1);
-  }
 }
 
 h1 {

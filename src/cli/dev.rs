@@ -158,11 +158,15 @@ pub(crate) fn refresh_dev(
     let mut guard = lock(state);
     guard.version += 1;
     match result {
-        Ok(files) => {
+        Ok((files, failed)) => {
             let count = files.len();
             guard.files = files;
             guard.error = None;
             guard.watch = watch;
+            // A page that cannot be built does not stop the others.
+            for (name, err) in failed {
+                eprintln!("cannot build {}: {}", name, err);
+            }
             Ok(count)
         }
         Err(err) => {
