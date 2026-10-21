@@ -52,6 +52,11 @@ discovered automatically, so `vey build` works without arguments inside a
 project. When run one level above a project, the only matching entry in a
 subdirectory is used; multiple matches must be passed explicitly.
 
+The build folder is emptied before it is written. Vey refuses to write into
+the project itself or into a folder that holds it, so that a wrong `-o` cannot
+delete the sources. A link in `public/` that points outside the project is left
+out, so that the site never holds files of the machine.
+
 ## Development server
 
 ```sh
@@ -62,12 +67,18 @@ vey dev app.vey
 
 The server rebuilds the site when the entry, any imported `.vey` or `.css` file
 (including modules in other folders) or a `public/` file changes, and reloads
-the browser. Unknown paths serve `404.html` with a `404` status.
+the browser. Other files in the project are left alone, so a note or a log
+file does not cause a reload. A change of the content is noticed even when the
+time and the size of the file stay the same. Unknown paths serve `404.html`
+with a `404` status.
 Compile errors open a styled page with the file, the source line, a caret under
 the failing column, and a hint when Vey can guess the fix (for example
 `use "../style.css"` for a stylesheet in the parent folder). The page
 disappears after the next successful save, so the browser can stay open while
 iterating. The same diagnostic is printed by `vey build` in the terminal.
+
+Any `.vey` file of the project can be previewed by visiting its path, for
+example `http://localhost:4000/about.vey`.
 
 ## Styles
 
@@ -657,8 +668,9 @@ src/types/           gradual type checker
   core.rs            the type representation and the rules between types
   builtins.rs        the signatures of the runtime helpers
   checker.rs         the checker that walks a program
+  stmts.rs           the statements
   exprs.rs           the expressions
-  patterns.rs        the patterns
+  patterns.rs        the patterns and the narrowing
 src/codegen.rs       JavaScript output
   mod.rs             the statements
   exprs.rs           the expressions
@@ -685,6 +697,7 @@ tests/               integration tests
   regressions.rs     bugs that used to give wrong results
   runtime.rs         the runtime
   server.rs          the http server
+  cli.rs             the commands
   dom.rs             rendering in a browser
   dev.rs             the development server
 ```
