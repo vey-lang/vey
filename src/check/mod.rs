@@ -1,7 +1,10 @@
+mod scopes;
+
 use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::builtins::is_builtin;
+use crate::check::scopes::{BindingKind, Scopes};
 use crate::lexer::Pos;
 use crate::suggest::did_you_mean;
 use crate::VeyError;
@@ -9,7 +12,7 @@ use crate::VeyError;
 pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
     let mut checker = Checker {
         file,
-        scopes: vec![HashMap::new()],
+        scopes: Scopes::new(),
         loop_depth: 0,
         function_depth: 0,
         declared_at: HashMap::new(),
@@ -18,51 +21,9 @@ pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
     checker.check_program(program)
 }
 
-#[derive(Clone, Copy)]
-enum BindingKind {
-    Let,
-    Const,
-    Param,
-    Function,
-    Component,
-    Import,
-}
-
-impl BindingKind {
-    fn immutable(self) -> bool {
-        matches!(
-            self,
-            Self::Const | Self::Function | Self::Component | Self::Import
-        )
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Const => "const",
-            Self::Function => "function",
-            Self::Component => "component",
-            Self::Import => "import",
-            Self::Let | Self::Param => "variable",
-        }
-    }
-
-    fn from_var(kind: VarKind) -> Self {
-        match kind {
-            VarKind::Let => Self::Let,
-            VarKind::Const => Self::Const,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Binding {
-    kind: BindingKind,
-    pos: Pos,
-}
-
 struct Checker<'a> {
     file: &'a str,
-    scopes: Vec<HashMap<String, Binding>>,
+    scopes: Scopes,
     loop_depth: usize,
     function_depth: usize,
     /// The statement a value of the top level is declared in.
@@ -76,35 +37,9 @@ impl Checker<'_> {
         VeyError::new(message, self.file, pos.line, pos.col)
     }
 
-    fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    fn pop_scope(&mut self) {
-        self.scopes.pop();
-    }
-
     fn declare(&mut self, name: &str, kind: BindingKind, pos: Pos) -> Result<(), VeyError> {
-        let previous = self
-            .scopes
-            .last()
-            .and_then(|scope| scope.get(name))
-            .copied();
-
-        if let Some(previous) = previous {
-            return Err(self.error(
-                pos,
-                format!(
-                    "duplicate declaration '{}' (first declared on line {})",
-                    name, previous.pos.line
-                ),
-            ));
-        }
-
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), Binding { kind, pos });
-        }
-        Ok(())
+        let file = self.file;
+        self.scopes.declare(name, kind, pos, file)
     }
 
     fn declare_pattern(
@@ -135,22 +70,13 @@ impl Checker<'_> {
         }
     }
 
-    fn resolve(&self, name: &str) -> Option<Binding> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).copied())
+    fn resolve(&self, name: &str) -> Option<scopes::Binding> {
+        self.scopes.resolve(name)
     }
 
     /// The names that are in scope, used to suggest a similar one.
     fn known_names(&self) -> Vec<&str> {
-        let mut names = Vec::new();
-        for scope in &self.scopes {
-            for name in scope.keys() {
-                names.push(name.as_str());
-            }
-        }
-        names
+        self.scopes.known_names()
     }
 
     fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
@@ -228,14 +154,14 @@ impl Checker<'_> {
             }
             Stmt::For(decl) => {
                 self.check_expr(&decl.iter)?;
-                self.push_scope();
+                self.scopes.push();
                 self.declare_pattern(&decl.pattern, BindingKind::Let)?;
                 self.loop_depth += 1;
                 for inner in &decl.body.body {
                     self.check_stmt(inner)?;
                 }
                 self.loop_depth -= 1;
-                self.pop_scope();
+                self.scopes.pop();
             }
             Stmt::Repeat(decl) => {
                 self.check_expr(&decl.count)?;
@@ -263,14 +189,14 @@ impl Checker<'_> {
             }
             Stmt::Try(decl) => {
                 self.check_block(&decl.body)?;
-                self.push_scope();
+                self.scopes.push();
                 if let Some(name) = &decl.name {
                     self.declare(name, BindingKind::Let, decl.pos)?;
                 }
                 for inner in &decl.catch.body {
                     self.check_stmt(inner)?;
                 }
-                self.pop_scope();
+                self.scopes.pop();
             }
             Stmt::Use(decl) => {
                 if !decl.path.ends_with(".css") {
@@ -293,11 +219,11 @@ impl Checker<'_> {
     }
 
     fn check_block(&mut self, block: &Block) -> Result<(), VeyError> {
-        self.push_scope();
+        self.scopes.push();
         for stmt in &block.body {
             self.check_stmt(stmt)?;
         }
-        self.pop_scope();
+        self.scopes.pop();
         Ok(())
     }
 
@@ -305,7 +231,7 @@ impl Checker<'_> {
         let loop_depth = self.loop_depth;
         self.loop_depth = 0;
         self.function_depth += 1;
-        self.push_scope();
+        self.scopes.push();
 
         for param in params {
             if let Some(default) = &param.default {
@@ -319,14 +245,14 @@ impl Checker<'_> {
             self.check_stmt(stmt)?;
         }
 
-        self.pop_scope();
+        self.scopes.pop();
         self.function_depth -= 1;
         self.loop_depth = loop_depth;
         Ok(())
     }
 
     fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {
-        self.push_scope();
+        self.scopes.push();
         for param in &decl.params {
             if let Some(default) = &param.default {
                 self.check_expr(default)?;
@@ -336,7 +262,7 @@ impl Checker<'_> {
             }
         }
         self.check_markup_nodes(&decl.children)?;
-        self.pop_scope();
+        self.scopes.pop();
         Ok(())
     }
 
@@ -357,10 +283,10 @@ impl Checker<'_> {
                 }
                 MarkupNode::For(loop_node) => {
                     self.check_expr(&loop_node.iter)?;
-                    self.push_scope();
+                    self.scopes.push();
                     self.declare(&loop_node.name, BindingKind::Let, loop_node.iter.pos())?;
                     self.check_markup_nodes(&loop_node.body)?;
-                    self.pop_scope();
+                    self.scopes.pop();
                 }
             }
         }
@@ -408,7 +334,7 @@ impl Checker<'_> {
                 // A value of the top level is not hoisted, so it may not be
                 // used before the line that declares it. A function or a
                 // component may use it, because it runs later.
-                if self.scopes.len() == 1 {
+                if self.scopes.depth() == 1 {
                     if let Some(declared) = self.declared_at.get(name) {
                         if *declared > self.statement {
                             return Err(self
@@ -477,7 +403,7 @@ impl Checker<'_> {
             Expr::Match(subject, arms, _) => {
                 self.check_expr(subject)?;
                 for arm in arms {
-                    self.push_scope();
+                    self.scopes.push();
                     for pattern in &arm.patterns {
                         self.check_pattern(pattern)?;
                         if let Pattern::Enum { bindings, .. } = pattern {
@@ -490,7 +416,7 @@ impl Checker<'_> {
                         }
                     }
                     self.check_expr(&arm.body)?;
-                    self.pop_scope();
+                    self.scopes.pop();
                 }
             }
             Expr::Await(arg, _) => self.check_expr(arg)?,
@@ -517,7 +443,7 @@ impl Checker<'_> {
             ArrowBody::Expr(expr) => {
                 let loop_depth = self.loop_depth;
                 self.loop_depth = 0;
-                self.push_scope();
+                self.scopes.push();
                 for param in params {
                     if let Some(default) = &param.default {
                         self.check_expr(default)?;
@@ -527,7 +453,7 @@ impl Checker<'_> {
                     }
                 }
                 self.check_expr(expr)?;
-                self.pop_scope();
+                self.scopes.pop();
                 self.loop_depth = loop_depth;
             }
             ArrowBody::Block(block) => self.check_function(params, block)?,
