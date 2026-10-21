@@ -7,6 +7,8 @@
 pub mod builtins;
 pub mod checker;
 pub mod core;
+mod exprs;
+mod patterns;
 
 pub use checker::{check, ModuleTypeEnv};
 pub use core::{FunctionType, ObjectField, Type};
