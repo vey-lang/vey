@@ -60,9 +60,10 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
         if tests.is_dir() {
             vec![tests]
         } else {
-            eprintln!("no tests/ directory found");
-            eprintln!("create tests/main.vey or pass a file: vey test <file.vey>");
-            return 1;
+            // A project without tests is not a failure.
+            println!("no tests found");
+            println!("add a file in tests/ to start testing");
+            return 0;
         }
     } else {
         parsed.files.iter().map(PathBuf::from).collect()
@@ -83,8 +84,8 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
     files.dedup();
 
     if files.is_empty() {
-        eprintln!("no .vey test files found");
-        return 1;
+        println!("no tests found");
+        return 0;
     }
 
     let mut failed = 0;

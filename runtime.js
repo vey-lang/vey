@@ -370,6 +370,17 @@ function createVeyRuntime(scope, req) {
     return String(text).split(search).join(next === undefined ? "" : next);
   }
 
+  function startsWith(text, prefix) {
+    return String(text).indexOf(String(prefix)) === 0;
+  }
+
+  function endsWith(text, suffix) {
+    var value = String(text);
+    var end = String(suffix);
+    if (end.length > value.length) return false;
+    return value.lastIndexOf(end) === value.length - end.length;
+  }
+
   function includes(haystack, needle) {
     if (typeof haystack === "string") return haystack.indexOf(needle) !== -1;
     if (Array.isArray(haystack)) return haystack.indexOf(needle) !== -1;
@@ -1029,6 +1040,8 @@ function createVeyRuntime(scope, req) {
     trim: trim,
     replace: replace,
     includes: includes,
+    startsWith: startsWith,
+    endsWith: endsWith,
     find: find,
     sort: sort,
     map: map,

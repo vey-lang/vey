@@ -368,3 +368,17 @@ print(html(App()))
         "{text}"
     );
 }
+
+#[test]
+fn the_ends_of_a_text_can_be_checked() {
+    let text = run_ok(
+        "string-ends",
+        r#"
+print(startsWith("hello", "he"))
+print(endsWith("hello", "lo"))
+print(startsWith("hello", "x"))
+"#,
+    );
+    assert!(text.contains("true"), "{text}");
+    assert!(text.contains("false"), "{text}");
+}

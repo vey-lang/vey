@@ -91,6 +91,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             string(),
         )),
         "includes" => Some(builtin_function(vec![any(), any()], bool_ty())),
+        "startsWith" => Some(builtin_function(vec![string(), string()], bool_ty())),
+        "endsWith" => Some(builtin_function(vec![string(), string()], bool_ty())),
         "find" => Some(builtin_function(vec![list_or_text(), any()], any())),
         "sort" => Some(builtin_optional(
             vec![list_or_text(), any()],
