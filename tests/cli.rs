@@ -188,3 +188,47 @@ fn a_new_project_can_be_built() {
     assert!(dir.join("out/index.html").is_file());
     assert!(dir.join("out/404.html").is_file());
 }
+
+#[test]
+fn every_page_of_a_project_becomes_a_page_of_the_site() {
+    let dir = temp_dir("many-pages");
+    let project = dir.join("project");
+    write(&project.join("src/main.vey"), PAGE);
+    write(
+        &project.join("src/about.vey"),
+        "component About() {\n  main { h1 { \"About\" } }\n}\n\nbind(\"#app\", About())\n",
+    );
+    write(
+        &project.join("src/docs/index.vey"),
+        "component Docs() {\n  main { h1 { \"Docs\" } }\n}\n\nbind(\"#app\", Docs())\n",
+    );
+    // A file that is imported is a module and does not become a page.
+    write(
+        &project.join("src/shared.vey"),
+        "export fn shared() { return 1 }\n",
+    );
+    write(
+        &project.join("src/uses.vey"),
+        "use \"./shared.vey\" as shared\n\ncomponent Uses() {\n  main { h1 { \"Uses\" } }\n}\n\nbind(\"#app\", Uses())\n",
+    );
+
+    let output = vey()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(dir.join("out"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(dir.join("out/index.html").is_file());
+    assert!(dir.join("out/about.html").is_file());
+    assert!(dir.join("out/docs/index.html").is_file());
+    assert!(dir.join("out/uses.html").is_file());
+    // A module is not a page.
+    assert!(!dir.join("out/shared.html").exists());
+}

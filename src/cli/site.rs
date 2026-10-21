@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use vey::compiler::{compile_project, Bundle};
 
-use crate::cli::entry::{default_title, project_root};
+use crate::cli::entry::{collect_vey_files, default_title, project_root};
 use crate::cli::error::BuildError;
 use crate::cli::output::{escape_html, html_document};
 
@@ -139,7 +139,114 @@ pub(crate) fn site_files(
     );
     files.insert("404.html".to_string(), not_found_body.into_bytes());
 
+    // Every other page of the project becomes a page of the site.
+    for (name, page) in other_pages(entry, &bundle, watch)? {
+        files.insert(name, page.into_bytes());
+    }
+
     Ok(files)
+}
+
+/// The pages of a project, besides the entry and the page of an unknown
+/// address.
+///
+/// The name of a page follows the file it comes from, so `src/about.vey`
+/// becomes `about.html` and `src/docs/index.vey` becomes `docs/index.html`.
+pub(crate) fn other_pages(
+    entry: &Path,
+    bundle: &Bundle,
+    watch: &mut Vec<PathBuf>,
+) -> Result<Vec<(String, String)>, BuildError> {
+    let folder = match entry.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+
+    let mut found = Vec::new();
+    collect_vey_files(&folder, &mut found);
+    found.sort();
+
+    // Every file is compiled once, to find out which of them are modules.
+    // A file that another page imports is a module and not a page.
+    let mut modules: Vec<PathBuf> = bundle
+        .modules
+        .iter()
+        .map(|module| module.path.clone())
+        .collect();
+    let mut compiled = Vec::new();
+    for file in &found {
+        if file == entry || file.file_name().is_some_and(|name| name == "404.vey") {
+            continue;
+        }
+        let page = compile_for_site(file, watch)?;
+        let real = fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+        for module in &page.modules {
+            // The page is a module of itself, the others are not pages.
+            if module.path == real || modules.contains(&module.path) {
+                continue;
+            }
+            modules.push(module.path.clone());
+        }
+        compiled.push((file.clone(), page));
+    }
+
+    let title = default_title(entry);
+    let mut pages = Vec::new();
+    for (file, page) in compiled {
+        // The modules are held by their real path, so the files have to be
+        // resolved the same way to be compared.
+        let real = fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+        if modules.contains(&real) {
+            continue;
+        }
+        let Some(name) = page_name(&folder, &file) else {
+            continue;
+        };
+        let page_title = format!("{} · {}", title, page_title_of(&file));
+        pages.push((name, html_document(&page, &page_title, false)));
+    }
+    Ok(pages)
+}
+
+/// The name of the page a file becomes.
+fn page_name(folder: &Path, file: &Path) -> Option<String> {
+    let relative = file.strip_prefix(folder).ok()?;
+    let stem = relative.file_stem()?.to_string_lossy().to_string();
+    let mut name = String::new();
+    if let Some(parent) = relative.parent() {
+        for part in parent.components() {
+            let part = part.as_os_str().to_string_lossy();
+            if !part.is_empty() && part != "." {
+                name.push_str(&part);
+                name.push('/');
+            }
+        }
+    }
+    name.push_str(&stem);
+    name.push_str(".html");
+    Some(name)
+}
+
+/// The title of a page, from the name of its file.
+///
+/// A page that is called `main` or `index` takes the name of the folder it is
+/// in, so that `src/docs/index.vey` is the page of the docs.
+fn page_title_of(file: &Path) -> String {
+    let stem = file
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Vey".to_string());
+    if matches!(stem.as_str(), "main" | "index") {
+        if let Some(parent) = file.parent() {
+            if let Some(name) = parent.file_name() {
+                let name = name.to_string_lossy().to_string();
+                if !name.is_empty() && name != "src" {
+                    return name;
+                }
+            }
+        }
+    }
+    stem
 }
 
 /// The page of an unknown address.
