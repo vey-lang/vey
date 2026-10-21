@@ -561,6 +561,7 @@ Rules:
 - Children go inside braces. Use a string or an expression directly for text.
 - `if` and `for` work inside markup.
 - Components start with an uppercase letter and receive attributes as parameters. `Card { ... }` and `Card() { ... }` are equivalent.
+- A component of another module is written `module.Card`.
 - `children` is passed automatically when a component has child nodes.
 - `style`, `script`, `head`, `title`, `meta` and `link` are regular HTML tags inside markup.
 
@@ -588,6 +589,26 @@ component App() {
 
 Named arguments only work in markup. Everywhere else the arguments are
 positional.
+
+A component of another module is used with the name of the module in front of
+it:
+
+```vey
+// ui.vey
+export component Card(title: string) {
+  section { h2 { title } }
+}
+
+// app.vey
+use "./ui.vey" as ui
+
+component App() {
+  ui.Card title="Counter"
+}
+```
+
+The name of a module starts with a small letter and the name of a component
+with a big one, so that `div.card` stays a tag with a class.
 
 ### Browser
 
