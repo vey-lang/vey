@@ -235,6 +235,8 @@ pub struct ComponentParam {
     pub name: String,
     pub ty: Type,
     pub has_default: bool,
+    /// Whether the component takes the rest of the arguments.
+    pub rest: bool,
 }
 
 pub(crate) struct TypeChecker<'a> {

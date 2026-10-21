@@ -159,6 +159,7 @@ impl TypeChecker<'_> {
                     name: name.to_string(),
                     ty: self.param_type(param)?,
                     has_default: param.default.is_some(),
+                    rest: param.rest,
                 }),
                 None => {
                     let ty = self.param_type(param)?;
@@ -167,6 +168,7 @@ impl TypeChecker<'_> {
                             name,
                             ty: ty.clone(),
                             has_default: !required,
+                            rest: false,
                         });
                     }
                 }
@@ -508,6 +510,24 @@ impl TypeChecker<'_> {
                             let actual = self.infer_expr(value)?;
                             if !assignable(&actual, &param.ty) {
                                 return Err(self.type_error(value.pos(), &actual, &param.ty));
+                            }
+                        }
+                        // An argument that the component does not have is a
+                        // mistake, unless it takes the rest of them.
+                        if !params.iter().any(|param| param.name == "children")
+                            && !params.iter().any(|param| param.rest)
+                        {
+                            for (attr, value) in &element.attrs {
+                                if params.iter().any(|param| param.name == *attr) {
+                                    continue;
+                                }
+                                return Err(self.error(
+                                    value.pos(),
+                                    format!(
+                                        "component '{}' has no argument '{}'",
+                                        element.tag, attr
+                                    ),
+                                ));
                             }
                         }
                         // Every parameter without a default needs a value.

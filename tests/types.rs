@@ -536,3 +536,12 @@ fn a_value_that_may_be_nothing_can_be_compared() {
     );
     assert!(error.contains("requires numbers"), "{error}");
 }
+
+#[test]
+fn a_component_has_no_argument_that_is_not_its_own() {
+    let error = check_err(
+        "unknown-argument",
+        "component Card(title) {\n  section { h2 { title } }\n}\ncomponent App() {\n  Card titel=\"x\"\n}\n",
+    );
+    assert!(error.contains("has no argument 'titel'"), "{error}");
+}
