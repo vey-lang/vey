@@ -255,7 +255,9 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
         );
     }
 
-    if path.ends_with(".vey") {
+    // A source file is only previewed while the work is going on. A release
+    // server serves what was built.
+    if state.live && path.ends_with(".vey") {
         if let Some(page) = render_vey_page(state, path) {
             return page;
         }

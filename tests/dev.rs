@@ -190,3 +190,34 @@ fn the_error_page_shows_the_code_with_colours() {
     assert!(body.contains("<b>Hint</b><span>"), "{body}");
     assert!(body.contains("did you mean"), "{body}");
 }
+
+#[test]
+fn the_release_server_serves_the_site_and_not_the_sources() {
+    let dir = temp_dir("release");
+    fs::write(
+        dir.join("main.vey"),
+        "component App() {\n  main { h1 { \"Home\" } }\n}\n\nbind(\"#app\", App())\n",
+    )
+    .unwrap();
+
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("run")
+        .arg(&dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+
+    // The site is served.
+    let (status, body) = wait_for(port, "/", "Home");
+    assert!(status.contains("200"), "status: {status}");
+    assert!(!body.contains("__vey_reload"), "{body}");
+
+    // A source file is not.
+    let (status, _) = request(port, "/main.vey").expect("no answer");
+    assert!(status.contains("404"), "status: {status}");
+}
