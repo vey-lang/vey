@@ -166,11 +166,25 @@ fn every_helper_of_the_checker_is_in_the_runtime() {
 #[test]
 fn every_part_of_the_runtime_is_joined() {
     let source = vey::runtime::source();
-    for part in vey::runtime::parts() {
+    let parts = vey::runtime::parts();
+    for part in &parts {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("runtime")
             .join(part);
         assert!(path.is_file(), "the part {} is missing", part);
+    }
+    // Every file of the folder is a part of the runtime.
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+    for entry in fs::read_dir(&folder).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".js") {
+            continue;
+        }
+        assert!(
+            parts.contains(&name.as_str()),
+            "the part {} is not joined into the runtime",
+            name
+        );
     }
     // The runtime is one function that the program calls.
     assert!(

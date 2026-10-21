@@ -940,6 +940,8 @@ runtime/             the runtime shared by node and the browser
   collections.js     the helpers for lists and objects
   enum.js            the values of the enums of the language
   data.js            JSON, math, time, base64 and URLs
+  date.js            the date and the time
+  web.js             the query of an address and the cookies
   dom.js             the markup and the browser
   http.js            the HTTP client
   server.js          the server of a program

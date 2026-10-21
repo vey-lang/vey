@@ -26,3 +26,4 @@ node --enable-source-maps /tmp/hello.cjs
 | `page.vey` | a page with components |
 | `render.vey` | a page that is rendered to HTML |
 | `server.vey` | a server with a route |
+| `npm-package.vey` | a package of npm (`npm install marked` first) |

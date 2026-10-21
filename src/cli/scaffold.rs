@@ -291,6 +291,17 @@ style {
 
 A stylesheet that is shared by several pages belongs in `src/styles/`.
 
+## Packages
+
+A package of npm is used with the `npm:` prefix:
+
+```vey
+use "npm:marked" as marked
+```
+
+Install it first with `npm install marked`. A package needs Node, so it may
+only be used in a program and not in a page of the site.
+
 ## Pages
 
 `src/404.vey` is the page of an unknown address. Without it, Vey writes a

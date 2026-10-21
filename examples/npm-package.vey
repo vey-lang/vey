@@ -1,0 +1,11 @@
+// A package of npm is used with the `npm:` prefix.
+//
+//   npm install marked
+//
+// The package needs Node, so it only runs as a program and not as a page.
+
+use "npm:marked" as marked
+
+let page = marked.parse("# Vey\n\nA small web language with its own syntax.")
+
+print(page)
