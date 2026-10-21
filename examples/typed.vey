@@ -1,5 +1,8 @@
+// The types that are checked, and the ways to write them.
+
 type User = { name: string, age?: number }
 type Id = number | string
+type Node = { value: number, next: Node | null }
 
 fn greet(user: User) -> string {
   return "Hello, " + user.name
@@ -20,11 +23,34 @@ fn total(...values: number) -> number {
   return sum
 }
 
+// A type parameter with a constraint: every value has to be a number.
+fn largest<T: number>(values: [T]) -> T {
+  let best: T = values[0]
+  for value in values {
+    if value > best {
+      best = value
+    }
+  }
+  return best
+}
+
+// A type that refers to itself, for a list that is built one link at a time.
+fn sum(node: Node | null) -> number {
+  if node == null {
+    return 0
+  }
+  return node.value + sum(node.next)
+}
+
 let ada: User = { name: "Ada", age: 36 }
 let grace: User = { name: "Grace" }
+
+let list: Node = { value: 1, next: { value: 2, next: null } }
 
 print(greet(ada))
 print(greet(grace))
 print(label(7))
 print(label("seven"))
 print(total(1, 2, 3, 4))
+print(largest([3, 9, 4]))
+print(sum(list))

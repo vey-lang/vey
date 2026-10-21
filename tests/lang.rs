@@ -1329,3 +1329,21 @@ fn an_error_needs_a_catch_or_a_block_that_always_runs() {
         "expected a catch or a finally block",
     );
 }
+
+#[test]
+fn the_return_type_is_written_after_an_arrow() {
+    check_error(
+        "fn f(a: number): number {\n  return a\n}\n",
+        "return-type-colon",
+        "the return type is written after '->'",
+    );
+}
+
+#[test]
+fn a_component_has_no_return_type() {
+    check_error(
+        "component C(v: number): {\n  div { v }\n}\n",
+        "component-return-type",
+        "a component has no return type",
+    );
+}

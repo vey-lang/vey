@@ -291,6 +291,10 @@ impl Parser {
         let name = self.expect_ident("function name")?;
         let type_params = self.parse_type_params()?;
         let params = self.parse_params()?;
+        // The return type is written after an arrow, not after a colon.
+        if self.is_punct(":") {
+            return Err(self.error_at(self.tok.pos, "the return type is written after '->'"));
+        }
         let ret = if self.is_op("->") {
             self.advance()?;
             Some(self.parse_type()?)
@@ -319,6 +323,10 @@ impl Parser {
             ));
         }
         let params = self.parse_params()?;
+        // A component has no return type.
+        if self.is_punct(":") {
+            return Err(self.error_at(self.tok.pos, "a component has no return type"));
+        }
         self.expect_punct("{")?;
         let children = self.parse_markup_nodes()?;
         self.expect_punct("}")?;
