@@ -57,6 +57,36 @@ the project itself or into a folder that holds it, so that a wrong `-o` cannot
 delete the sources. A link in `public/` that points outside the project is left
 out, so that the site never holds files of the machine.
 
+## New project
+
+```sh
+vey new myapp
+```
+
+The project that is written is small on purpose:
+
+```
+myapp/
+  src/
+    main.vey         the page
+    styles/
+      site.css       the styles of the site
+  public/
+    logo.svg         the mark of the site
+    favicon.svg      the mark as a favicon
+    robots.txt
+  package.json       the scripts of npm
+  README.md
+  .gitignore
+```
+
+The styles of a page may also be written in a `style { }` block, next to the
+markup they belong to. A page of an unknown address is `src/404.vey`; without
+it, Vey writes a page of its own.
+
+`npm run dev`, `npm run build` and `npm test` call the same commands as
+`vey dev`, `vey build` and `vey test`.
+
 ## Development server
 
 ```sh
@@ -670,6 +700,71 @@ A few details worth knowing:
 
 ## Project layout
 
+```
+src/main.rs          CLI entry point
+src/lib.rs           the library of the compiler
+src/ast/             the shape of a program
+  decl.rs            the declarations
+  expr.rs            the expressions
+  stmt.rs            the statements
+  pattern.rs         the patterns
+  types.rs           the type expressions
+  markup.rs          the markup
+src/lexer/           the tokenizer
+  mod.rs             the tokens
+  strings.rs         the reading of string literals
+src/parser/          the parser
+  mod.rs             the parser and the statements
+  exprs.rs           the expressions
+  patterns.rs        the binding patterns and the match patterns
+  types.rs           the type expressions
+  strings.rs         the string literals
+  markup.rs          the tag syntax
+  html.rs            the HTML tags
+src/check/           the semantic checks
+  mod.rs             the checks
+  scopes.rs          the scopes and the names
+src/types/           the gradual type checker
+  core.rs            the type representation and the rules between types
+  builtins.rs        the signatures of the runtime helpers
+  checker.rs         the checker that walks a program
+  stmts.rs           the statements
+  exprs.rs           the expressions
+  patterns.rs        the patterns and the narrowing
+src/codegen/         the JavaScript output
+  mod.rs             the statements
+  exprs.rs           the expressions
+  markup.rs          the markup
+  js.rs              the JavaScript helpers
+  awaits.rs          finding out whether code uses `await`
+src/compiler/        the module graph
+  mod.rs             the bundle
+  loader.rs          the loading of the modules
+src/sourcemap/       the source map
+  mod.rs             the map
+  vlq.rs             the encoding of the map
+src/cli/             the commands
+  args.rs            command line parsing
+  run.rs             run, test and check
+  build.rs           build and web
+  site.rs            static sites
+  dev.rs             development server
+  scaffold.rs        new projects
+  entry.rs           finding the entry file
+  error.rs           build errors with a source frame
+  output.rs          turning a bundle into runnable output
+src/builtins.rs      the names the runtime provides
+src/suggest.rs       suggestions for names that are close to a known one
+runtime.js           runtime shared by node and the browser
+tests/               integration tests
+  lang.rs            the language
+  types.rs           the type checker
+  regressions.rs     bugs that used to give wrong results
+  runtime.rs         the runtime
+  server.rs          the http server
+  cli.rs             the commands
+  dom.rs             rendering in a browser
+  dev.rs             the development server
 ```
 src/lexer.rs         tokens
 src/parser.rs        AST
