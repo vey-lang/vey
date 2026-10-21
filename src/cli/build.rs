@@ -37,9 +37,14 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
 
     match write_site(&entry, &output, parsed.title.as_deref()) {
         Ok(report) => {
-            println!("built {} page(s) into {}", report.pages, output.display());
-            println!("  {}", output.join("index.html").display());
-            println!("  {}", output.join("404.html").display());
+            println!(
+                "built {} page(s) into {}",
+                report.pages.len(),
+                output.display()
+            );
+            for page in &report.pages {
+                println!("  {}", output.join(page).display());
+            }
             if report.assets > 0 {
                 println!("copied {} asset(s) from public/", report.assets);
             }

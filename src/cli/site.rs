@@ -10,7 +10,8 @@ use crate::cli::error::BuildError;
 use crate::cli::output::{escape_html, html_document};
 
 pub(crate) struct SiteReport {
-    pub(crate) pages: usize,
+    /// The pages that were written.
+    pub(crate) pages: Vec<String>,
     pub(crate) assets: usize,
 }
 
@@ -88,6 +89,7 @@ pub(crate) fn write_site(
         .map_err(|err| BuildError::from(format!("cannot create {}: {}", output.display(), err)))?;
 
     let mut assets = 0;
+    let mut pages = Vec::new();
     for (name, bytes) in &files {
         let path = output.join(name);
         if let Some(parent) = path.parent() {
@@ -97,12 +99,15 @@ pub(crate) fn write_site(
         }
         fs::write(&path, bytes)
             .map_err(|err| BuildError::from(format!("cannot write {}: {}", path.display(), err)))?;
-        if name != "index.html" && name != "404.html" {
+        if name.ends_with(".html") {
+            pages.push(name.clone());
+        } else {
             assets += 1;
         }
     }
+    pages.sort();
 
-    Ok(SiteReport { pages: 2, assets })
+    Ok(SiteReport { pages, assets })
 }
 
 pub(crate) fn site_files(
