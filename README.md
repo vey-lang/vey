@@ -377,6 +377,25 @@ for { id, label } in records {
 
 Object patterns support renamed keys, nested patterns, string keys and a rest binding. Array patterns support nested patterns and a rest binding. Destructuring requires a value, and an exported declaration must bind a single name.
 
+A parameter may take the argument apart as well:
+
+```vey
+fn greet({ name, greeting = "Hello" }) {
+  return greeting + " " + name
+}
+
+greet({ name: "Ada" })
+greet({ name: "Ada", greeting: "Hi" })
+```
+
+A component reads its props the same way:
+
+```vey
+component Card({ title, subtitle }) {
+  section { h2 { title } p { subtitle } }
+}
+```
+
 ### Control flow
 
 ```vey
