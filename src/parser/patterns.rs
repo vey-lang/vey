@@ -6,6 +6,116 @@ use crate::lexer::TokKind;
 use crate::VeyError;
 
 impl Parser {
+    pub(crate) fn parse_pattern(&mut self) -> Result<Pattern, VeyError> {
+        if self.tok.kind == TokKind::Ident && self.tok.value == "_" {
+            self.advance()?;
+            return Ok(Pattern::Wildcard);
+        }
+
+        if self.tok.kind == TokKind::Ident {
+            let next = self.peek()?;
+            if next.kind == TokKind::Punct && next.value == "." {
+                let pos = self.tok.pos;
+                let enum_name = self.advance()?.value;
+                self.advance()?; // "."
+                let variant = self.expect_ident("variant name")?;
+                let mut bindings = Vec::new();
+                if self.is_punct("(") {
+                    self.advance()?;
+                    while !self.is_punct(")") {
+                        let bpos = self.tok.pos;
+                        let first = self.expect_ident("binding name")?;
+                        if self.is_punct(":") {
+                            self.advance()?;
+                            let second = self.expect_ident("binding name")?;
+                            bindings.push(EnumBinding {
+                                field: Some(first),
+                                name: second,
+                                pos: bpos,
+                            });
+                        } else {
+                            bindings.push(EnumBinding {
+                                field: None,
+                                name: first,
+                                pos: bpos,
+                            });
+                        }
+                        if self.is_punct(",") {
+                            self.advance()?;
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect_punct(")")?;
+                }
+                return Ok(Pattern::Enum {
+                    enum_name,
+                    variant,
+                    bindings,
+                    pos,
+                });
+            }
+        }
+
+        let negative = self.eat_op("-")?;
+        let token = self.tok.clone();
+
+        if token.kind == TokKind::Number {
+            self.advance()?;
+            let start = Expr::Number(
+                if negative {
+                    -token.number
+                } else {
+                    token.number
+                },
+                token.pos,
+            );
+            if self.is_op("..") {
+                self.advance()?;
+                let end_neg = self.eat_op("-")?;
+                let end_tok = self.tok.clone();
+                if end_tok.kind != TokKind::Number {
+                    return Err(self.error("expected a number after '..'"));
+                }
+                self.advance()?;
+                let end = Expr::Number(
+                    if end_neg {
+                        -end_tok.number
+                    } else {
+                        end_tok.number
+                    },
+                    end_tok.pos,
+                );
+                return Ok(Pattern::Range(start, end));
+            }
+            return Ok(Pattern::Literal(start));
+        }
+
+        if negative {
+            return Err(self.error("expected a number after '-'"));
+        }
+
+        match token.kind {
+            TokKind::Str => {
+                self.advance()?;
+                Ok(Pattern::Literal(self.parse_string_token(&token)?))
+            }
+            TokKind::Keyword if token.value == "true" => {
+                self.advance()?;
+                Ok(Pattern::Literal(Expr::Bool(true, token.pos)))
+            }
+            TokKind::Keyword if token.value == "false" => {
+                self.advance()?;
+                Ok(Pattern::Literal(Expr::Bool(false, token.pos)))
+            }
+            TokKind::Keyword if token.value == "null" => {
+                self.advance()?;
+                Ok(Pattern::Literal(Expr::Null(token.pos)))
+            }
+            _ => Err(self.error("expected a literal, range or _ in match pattern")),
+        }
+    }
+
     pub(crate) fn parse_binding_pattern(&mut self) -> Result<BindingPattern, VeyError> {
         if self.is_punct("{") {
             return self.parse_object_pattern();
