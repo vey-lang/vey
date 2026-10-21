@@ -14,18 +14,57 @@ pub(crate) struct SiteReport {
     pub(crate) assets: usize,
 }
 
+/// The path without any `.` or `..` in it, with links resolved.
+///
+/// The path does not have to exist, so the deepest part that does is
+/// resolved and the rest is kept as it is.
+pub(crate) fn absolute(path: &Path) -> PathBuf {
+    let start = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
+    let mut current = start.clone();
+    loop {
+        if let Ok(resolved) = current.canonicalize() {
+            let mut out = resolved;
+            for part in rest.iter().rev() {
+                out.push(part);
+            }
+            return out;
+        }
+        match current.file_name() {
+            Some(name) => {
+                rest.push(name.to_os_string());
+                if !current.pop() {
+                    return start;
+                }
+            }
+            None => return start,
+        }
+    }
+}
+
 pub(crate) fn write_site(
     entry: &Path,
     output: &Path,
     title: Option<&str>,
 ) -> Result<SiteReport, BuildError> {
-    let root = project_root(entry);
+    // The paths are compared after they are resolved, so that a relative path
+    // or a `..` cannot point at a directory that holds the project.
+    let root = absolute(&project_root(entry));
+    let output = absolute(output);
+
     if output == root {
         return Err(BuildError::from(
             "refusing to write the build into the project root",
         ));
     }
-    if root.starts_with(output) {
+    if root.starts_with(&output) {
         return Err(BuildError::from(format!(
             "refusing to write the build into {}: it contains the project",
             output.display()
@@ -41,11 +80,11 @@ pub(crate) fn write_site(
     let mut watch = Vec::new();
     let files = site_files(entry, title, &mut watch)?;
     if output.exists() {
-        fs::remove_dir_all(output).map_err(|err| {
+        fs::remove_dir_all(&output).map_err(|err| {
             BuildError::from(format!("cannot clean {}: {}", output.display(), err))
         })?;
     }
-    fs::create_dir_all(output)
+    fs::create_dir_all(&output)
         .map_err(|err| BuildError::from(format!("cannot create {}: {}", output.display(), err)))?;
 
     let mut assets = 0;
@@ -91,7 +130,8 @@ pub(crate) fn site_files(
     let mut files = HashMap::new();
     let public = root.join("public");
     if public.is_dir() {
-        copy_public(&public, "", &mut files)?;
+        let root = absolute(&root);
+        copy_public(&public, "", &mut files, &root)?;
     }
     files.insert(
         "index.html".to_string(),
@@ -106,6 +146,7 @@ pub(crate) fn copy_public(
     directory: &Path,
     prefix: &str,
     files: &mut HashMap<String, Vec<u8>>,
+    root: &Path,
 ) -> Result<(), BuildError> {
     let entries = fs::read_dir(directory)
         .map_err(|err| BuildError::from(format!("cannot read {}: {}", directory.display(), err)))?;
@@ -115,14 +156,28 @@ pub(crate) fn copy_public(
         if name == ".DS_Store" {
             continue;
         }
+        // A link that points outside the project would put files of the
+        // machine into the site, so it is left out.
+        if path.is_symlink() && !stays_inside(&path, root) {
+            eprintln!("skipped {}: it points outside the project", path.display());
+            continue;
+        }
         let key = format!("{}{}", prefix, name);
         if path.is_dir() {
-            copy_public(&path, &format!("{}/", key), files)?;
+            copy_public(&path, &format!("{}/", key), files, root)?;
         } else if let Ok(bytes) = fs::read(&path) {
             files.insert(key, bytes);
         }
     }
     Ok(())
+}
+
+/// Whether the path, once its links are resolved, stays inside the root.
+fn stays_inside(path: &Path, root: &Path) -> bool {
+    let Ok(resolved) = path.canonicalize() else {
+        return false;
+    };
+    resolved.starts_with(root)
 }
 
 pub(crate) fn compile_for_site(

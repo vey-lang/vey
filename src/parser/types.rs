@@ -7,6 +7,13 @@ use crate::VeyError;
 
 impl Parser {
     pub(crate) fn parse_type(&mut self) -> Result<TypeExpr, VeyError> {
+        self.enter()?;
+        let result = self.parse_type_inner();
+        self.leave();
+        result
+    }
+
+    fn parse_type_inner(&mut self) -> Result<TypeExpr, VeyError> {
         let first = self.parse_optional_type()?;
         let mut parts = vec![first];
         while self.is_op("|") {

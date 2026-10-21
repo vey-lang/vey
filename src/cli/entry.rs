@@ -105,10 +105,11 @@ pub(crate) fn project_root(entry: &Path) -> PathBuf {
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     if parent.file_name().is_some_and(|name| name == "src") {
+        // A project that keeps its pages in `src` has its root one level up.
         return parent
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or(parent)
+            .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
     }
     parent.to_path_buf()

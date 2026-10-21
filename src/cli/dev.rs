@@ -25,6 +25,8 @@ pub(crate) struct DevState {
     pub(crate) error: Option<BuildError>,
     pub(crate) version: u64,
     pub(crate) root: PathBuf,
+    /// The title of the site.
+    pub(crate) title: String,
     /// Files imported from outside the project root. They are not covered by
     /// the directory snapshot, so the watcher tracks them explicitly.
     pub(crate) watch: Vec<PathBuf>,
@@ -56,6 +58,7 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
     {
         let mut guard = state.lock().unwrap();
         guard.root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        guard.title = title.clone();
     }
     if let Err(err) = refresh_dev(&entry, &title, &state) {
         eprintln!("{}", err);
@@ -87,22 +90,18 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
     let watcher_title = title.clone();
     let watcher_root = root.canonicalize().unwrap_or_else(|_| root.clone());
     thread::spawn(move || {
-        let mut previous = dev_snapshot(&watcher_root, &watcher_state);
+        let mut previous = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
         loop {
             thread::sleep(Duration::from_millis(300));
-            let current = dev_snapshot(&watcher_root, &watcher_state);
+            let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
             if current == previous {
                 continue;
             }
             thread::sleep(Duration::from_millis(80));
-            let current = dev_snapshot(&watcher_root, &watcher_state);
+            let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
             let started = Instant::now();
             match refresh_dev(&watcher_entry, &watcher_title, &watcher_state) {
-                Ok(count) => println!(
-                    "rebuilt {} file(s) in {} ms",
-                    count,
-                    started.elapsed().as_millis()
-                ),
+                Ok(_) => println!("rebuilt the site in {} ms", started.elapsed().as_millis()),
                 Err(err) => eprintln!("{}", err),
             }
             previous = current;
@@ -265,16 +264,19 @@ pub(crate) fn render_vey_page(
 
     match compile_project(&file) {
         Ok(bundle) => {
-            state.watch.push(file.clone());
-            state.watch.push(bundle.entry_path.clone());
-            for module in &bundle.modules {
-                state.watch.push(module.path.clone());
-            }
-            for style in &bundle.styles {
-                state.watch.push(style.path.clone());
+            // The files of the preview are watched as well, but the list is
+            // kept short so that it does not grow with every request.
+            for path in std::iter::once(file.clone())
+                .chain(std::iter::once(bundle.entry_path.clone()))
+                .chain(bundle.modules.iter().map(|module| module.path.clone()))
+                .chain(bundle.styles.iter().map(|style| style.path.clone()))
+            {
+                if !state.watch.contains(&path) {
+                    state.watch.push(path);
+                }
             }
             let favicon = root.join("public/favicon.svg").is_file();
-            let body = html_document(&bundle, &default_title(&file), favicon);
+            let body = html_document(&bundle, &state.title, favicon);
             Some((
                 200,
                 "text/html; charset=utf-8",
@@ -282,7 +284,10 @@ pub(crate) fn render_vey_page(
             ))
         }
         Err(err) => {
-            state.watch.push(PathBuf::from(&err.file));
+            let path = PathBuf::from(&err.file);
+            if !state.watch.contains(&path) {
+                state.watch.push(path);
+            }
             let body = BuildError::from_vey(&err).render_html();
             Some((
                 500,
@@ -308,7 +313,15 @@ pub(crate) fn missing(state: &DevState) -> (u16, &'static str, Vec<u8>) {
 
 pub(crate) fn accepts_html(path: &str) -> bool {
     let path = path.split('?').next().unwrap_or(path);
-    !path.contains('.') || path.ends_with(".html") || path.ends_with('/')
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+    {
+        None => true,
+        Some(extension) => {
+            extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
+        }
+    }
 }
 
 pub(crate) fn inject_reload(html: &str, version: u64) -> String {
@@ -400,26 +413,49 @@ pub(crate) fn content_type_for(path: &str) -> &'static str {
     }
 }
 
-pub(crate) fn snapshot(root: &Path) -> Vec<(PathBuf, u64, u64)> {
-    let mut paths = Vec::new();
-    collect_files(root, &mut paths);
-    paths.sort();
-    paths.into_iter().map(|path| file_stamp(&path)).collect()
+/// The state of a file, used to notice that it changed.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct FileState {
+    pub(crate) path: PathBuf,
+    /// The time the file was changed.
+    pub(crate) modified: u64,
+    /// A number that depends on the content of the file.
+    pub(crate) content: u64,
 }
 
-pub(crate) fn dev_snapshot(root: &Path, state: &Arc<Mutex<DevState>>) -> Vec<(PathBuf, u64, u64)> {
-    let mut entries = snapshot(root);
+/// The state of the files that the server cares about.
+pub(crate) fn dev_snapshot(
+    root: &Path,
+    entry: &Path,
+    state: &Arc<Mutex<DevState>>,
+) -> Vec<FileState> {
     let watch = state.lock().unwrap().watch.clone();
-    for path in watch {
-        if !entries.iter().any(|(existing, _, _)| existing == &path) {
-            entries.push(file_stamp(&path));
+
+    let mut paths: Vec<PathBuf> = vec![entry.to_path_buf()];
+    // The files of the project that the build reads.
+    for path in &watch {
+        if !paths.contains(path) {
+            paths.push(path.clone());
         }
     }
-    entries.sort();
-    entries
+    // The public folder is served as it is.
+    let public = root.join("public");
+    if public.is_dir() {
+        let mut files = Vec::new();
+        collect_files(&public, &mut files);
+        for path in files {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    let mut out: Vec<FileState> = paths.iter().map(|path| file_state(path)).collect();
+    out.sort_by(|left, right| left.path.cmp(&right.path));
+    out
 }
 
-pub(crate) fn file_stamp(path: &Path) -> (PathBuf, u64, u64) {
+pub(crate) fn file_state(path: &Path) -> FileState {
     let metadata = fs::metadata(path).ok();
     let modified = metadata
         .as_ref()
@@ -427,6 +463,26 @@ pub(crate) fn file_stamp(path: &Path) -> (PathBuf, u64, u64) {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(0);
-    let len = metadata.map(|metadata| metadata.len()).unwrap_or(0);
-    (path.to_path_buf(), modified, len)
+    // The content is hashed as well, because a file may be replaced while
+    // keeping its time and its size.
+    let content = content_hash(path);
+    FileState {
+        path: path.to_path_buf(),
+        modified,
+        content,
+    }
+}
+
+/// A number that depends on the content of the file.
+fn content_hash(path: &Path) -> u64 {
+    let Ok(bytes) = fs::read(path) else {
+        return 0;
+    };
+    // A simple hash, so that a change of the content is always noticed.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
 }

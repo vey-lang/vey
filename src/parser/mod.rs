@@ -21,7 +21,16 @@ pub struct Parser {
     lexer: Lexer,
     file: String,
     tok: Token,
+    /// How deep the parser is in nested code.
+    depth: usize,
 }
+
+/// How deeply code may be nested before the parser gives up.
+///
+/// The parser reads the code with recursion, and every level of an
+/// expression uses a few calls, so a very deep expression would otherwise
+/// use up the stack.
+const MAX_DEPTH: usize = 64;
 
 impl Parser {
     pub fn new(src: &str, file: &str) -> Result<Self, VeyError> {
@@ -35,6 +44,7 @@ impl Parser {
             lexer,
             file: file.to_string(),
             tok,
+            depth: 0,
         })
     }
 
@@ -139,6 +149,20 @@ impl Parser {
         self.error(format!("expected {}", what))
     }
 
+    /// Go one level deeper into the code.
+    pub(crate) fn enter(&mut self) -> Result<(), VeyError> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(self.error("the code is nested too deeply"));
+        }
+        Ok(())
+    }
+
+    /// Leave the current level of the code.
+    pub(crate) fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, VeyError> {
         let mut body = Vec::new();
         while self.tok.kind != TokKind::Eof {
@@ -148,6 +172,13 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, VeyError> {
+        self.enter()?;
+        let result = self.parse_statement_inner();
+        self.leave();
+        result
+    }
+
+    fn parse_statement_inner(&mut self) -> Result<Stmt, VeyError> {
         if self.is_kw("export") {
             self.advance()?;
             let mut stmt = self.parse_declaration()?;
@@ -665,7 +696,10 @@ impl Parser {
     }
 
     pub fn parse_expression(&mut self) -> Result<Expr, VeyError> {
-        self.parse_pipe()
+        self.enter()?;
+        let result = self.parse_pipe();
+        self.leave();
+        result
     }
 }
 
