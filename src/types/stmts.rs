@@ -228,15 +228,7 @@ impl TypeChecker<'_> {
             Stmt::For(decl) => {
                 let iter_ty = self.infer_expr(&decl.iter)?;
                 // Only a list can be walked through.
-                if !matches!(
-                    iter_ty,
-                    Type::Array(_) | Type::String | Type::Any | Type::Var(_)
-                ) {
-                    return Err(self.error(
-                        decl.pos,
-                        format!("cannot walk through a {}", iter_ty.display()),
-                    ));
-                }
+                self.check_iterable(&iter_ty, decl.pos)?;
                 let item_ty = match &decl.ty {
                     Some(annotation) => {
                         let expected = self.resolve_type(annotation)?;
@@ -309,6 +301,14 @@ impl TypeChecker<'_> {
             Stmt::Assign(decl) => self.check_assign(decl),
             Stmt::Block(block, _) => self.check_block(block),
         }
+    }
+
+    /// Only a list can be walked through.
+    pub(crate) fn check_iterable(&self, ty: &Type, pos: Pos) -> Result<(), VeyError> {
+        if !matches!(ty, Type::Array(_) | Type::String | Type::Any | Type::Var(_)) {
+            return Err(self.error(pos, format!("cannot walk through a {}", ty.display())));
+        }
+        Ok(())
     }
 
     /// A condition has to be a yes or a no.
@@ -543,6 +543,7 @@ impl TypeChecker<'_> {
                 }
                 MarkupNode::For(loop_node) => {
                     let iter_ty = self.infer_expr(&loop_node.iter)?;
+                    self.check_iterable(&iter_ty, loop_node.iter.pos())?;
                     let item_ty = element_type(&iter_ty);
                     self.push_scope();
                     self.declare(&loop_node.name, item_ty);
