@@ -96,6 +96,33 @@ impl TypeChecker<'_> {
         Ok(())
     }
 
+    /// Look at the values that are used when a pattern has none.
+    pub(crate) fn check_pattern_defaults(
+        &mut self,
+        pattern: &BindingPattern,
+    ) -> Result<(), VeyError> {
+        match pattern {
+            BindingPattern::Name { default, .. } => {
+                if let Some(default) = default {
+                    self.infer_expr(default)?;
+                }
+                Ok(())
+            }
+            BindingPattern::Array { items, .. } => {
+                for item in items {
+                    self.check_pattern_defaults(item)?;
+                }
+                Ok(())
+            }
+            BindingPattern::Object { fields, .. } => {
+                for field in fields {
+                    self.check_pattern_defaults(&field.pattern)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     pub(crate) fn declare_pattern_typed(&mut self, pattern: &BindingPattern, ty: &Type) {
         match pattern {
             BindingPattern::Name { name, .. } => self.set_binding(name, ty.clone()),

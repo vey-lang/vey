@@ -456,7 +456,11 @@ impl Parser {
                 self.parse_binding_pattern()?
             } else {
                 let name = self.expect_ident("parameter name")?;
-                BindingPattern::Name { name, pos }
+                BindingPattern::Name {
+                    name,
+                    default: None,
+                    pos,
+                }
             };
             let ty = if self.is_punct(":") {
                 self.advance()?;

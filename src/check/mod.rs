@@ -48,7 +48,14 @@ impl Checker<'_> {
         kind: BindingKind,
     ) -> Result<(), VeyError> {
         match pattern {
-            BindingPattern::Name { name, pos } => self.declare(name, kind, *pos),
+            BindingPattern::Name { name, pos, default } => {
+                // The value that is used when there is none is an expression
+                // of its own.
+                if let Some(default) = default {
+                    self.check_expr(default)?;
+                }
+                self.declare(name, kind, *pos)
+            }
             BindingPattern::Array { items, rest, pos } => {
                 for item in items {
                     self.declare_pattern(item, kind)?;

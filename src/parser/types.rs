@@ -142,6 +142,7 @@ impl Parser {
             let optional = self.eat_op("?")?;
             self.expect_punct(":")?;
             let ty = self.parse_type()?;
+            let line = token.pos.line;
             fields.push(TypeField {
                 name,
                 ty,
@@ -151,7 +152,8 @@ impl Parser {
 
             if self.is_punct(",") {
                 self.advance()?;
-            } else {
+            } else if self.tok.kind == TokKind::Eof || self.tok.pos.line <= line {
+                // The fields may also be written one under the other.
                 break;
             }
         }

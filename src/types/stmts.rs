@@ -102,6 +102,8 @@ impl TypeChecker<'_> {
             }
         }
 
+        self.check_pattern_defaults(&decl.pattern)?;
+
         if let Some(expected) = annotation {
             self.declare_pattern_typed(&decl.pattern, &expected);
         } else if decl.kind == VarKind::Const {
@@ -356,6 +358,7 @@ impl TypeChecker<'_> {
     pub(crate) fn declare_params(&mut self, params: &[Param]) -> Result<(), VeyError> {
         for param in params {
             let ty = self.param_type(param)?;
+            self.check_pattern_defaults(&param.pattern)?;
             for (name, _) in param.bindings() {
                 self.declare(name, ty.clone());
             }
@@ -613,11 +616,12 @@ impl TypeChecker<'_> {
 fn prop_bindings(pattern: &BindingPattern) -> Vec<(String, bool)> {
     let mut out = Vec::new();
     match pattern {
-        BindingPattern::Name { name, .. } => out.push((name.clone(), true)),
+        // A prop with a value that is used when there is none may be left out.
+        BindingPattern::Name { name, default, .. } => out.push((name.clone(), default.is_none())),
         BindingPattern::Object { fields, rest, .. } => {
             for field in fields {
-                for (name, _) in field.pattern.bindings() {
-                    out.push((name.to_string(), true));
+                for (name, required) in prop_bindings(&field.pattern) {
+                    out.push((name.to_string(), required));
                 }
             }
             if let Some(rest) = rest {
@@ -626,8 +630,8 @@ fn prop_bindings(pattern: &BindingPattern) -> Vec<(String, bool)> {
         }
         BindingPattern::Array { items, rest, .. } => {
             for item in items {
-                for (name, _) in item.bindings() {
-                    out.push((name.to_string(), true));
+                for (name, required) in prop_bindings(item) {
+                    out.push((name.to_string(), required));
                 }
             }
             if let Some(rest) = rest {

@@ -174,7 +174,7 @@ impl Codegen {
                 } else {
                     "const"
                 };
-                let pattern = self.gen_binding_pattern(&decl.pattern);
+                let pattern = self.gen_binding_pattern(&decl.pattern)?;
                 self.emit(&format!("{} {}{};", keyword, pattern, init));
                 for (name, _) in decl.pattern.bindings() {
                     self.declare(name);
@@ -281,7 +281,7 @@ impl Codegen {
                         }
                         // A pattern takes its values from the named props.
                         pattern => {
-                            for (name, expression) in self.prop_bindings(pattern) {
+                            for (name, expression) in self.prop_bindings(pattern)? {
                                 self.declare(&name);
                                 self.emit(&format!("const _{} = {};", name, expression));
                             }
@@ -318,7 +318,7 @@ impl Codegen {
             }
             Stmt::For(decl) => {
                 let iter = self.gen_expr(&decl.iter)?;
-                let pattern = self.gen_binding_pattern(&decl.pattern);
+                let pattern = self.gen_binding_pattern(&decl.pattern)?;
                 self.emit(&format!("for (let {} of {}) {{", pattern, iter));
                 self.indent += 1;
                 self.push_scope();
@@ -442,34 +442,38 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_binding_pattern(&self, pattern: &BindingPattern) -> String {
+    fn gen_binding_pattern(&mut self, pattern: &BindingPattern) -> Result<String, VeyError> {
         match pattern {
-            BindingPattern::Name { name, .. } => format!("_{}", name),
+            BindingPattern::Name { name, default, .. } => {
+                let name = format!("_{}", name);
+                match default {
+                    Some(default) => Ok(format!("{} = {}", name, self.gen_expr(default)?)),
+                    None => Ok(name),
+                }
+            }
             BindingPattern::Array { items, rest, .. } => {
-                let mut parts: Vec<String> = items
-                    .iter()
-                    .map(|item| self.gen_binding_pattern(item))
-                    .collect();
+                let mut parts: Vec<String> = Vec::new();
+                for item in items {
+                    parts.push(self.gen_binding_pattern(item)?);
+                }
                 if let Some(rest) = rest {
                     parts.push(format!("..._{}", rest));
                 }
-                format!("[{}]", parts.join(", "))
+                Ok(format!("[{}]", parts.join(", ")))
             }
             BindingPattern::Object { fields, rest, .. } => {
-                let mut parts: Vec<String> = fields
-                    .iter()
-                    .map(|field| {
-                        format!(
-                            "{}: {}",
-                            js_key(&field.key),
-                            self.gen_binding_pattern(&field.pattern)
-                        )
-                    })
-                    .collect();
+                let mut parts: Vec<String> = Vec::new();
+                for field in fields {
+                    parts.push(format!(
+                        "{}: {}",
+                        js_key(&field.key),
+                        self.gen_binding_pattern(&field.pattern)?
+                    ));
+                }
                 if let Some(rest) = rest {
                     parts.push(format!("..._{}", rest));
                 }
-                format!("{{ {} }}", parts.join(", "))
+                Ok(format!("{{ {} }}", parts.join(", ")))
             }
         }
     }
@@ -478,17 +482,38 @@ impl Codegen {
     ///
     /// A pattern reads the named props of the component, so `component
     /// Card({ title })` uses the prop `title`.
-    fn prop_bindings(&self, pattern: &BindingPattern) -> Vec<(String, String)> {
-        let mut out = Vec::new();
+    fn prop_bindings(
+        &mut self,
+        pattern: &BindingPattern,
+    ) -> Result<Vec<(String, String)>, VeyError> {
         match pattern {
-            BindingPattern::Name { name, .. } => {
-                out.push((name.clone(), format!("__veyProps[{}]", js_string(name))));
+            BindingPattern::Name { name, default, .. } => {
+                let expression = format!("__veyProps[{}]", js_string(name));
+                let expression = self.with_default(&expression, default.as_ref())?;
+                Ok(vec![(name.clone(), expression)])
+            }
+            BindingPattern::Object { .. } => self.pattern_bindings(pattern, "__veyProps"),
+            BindingPattern::Array { .. } => self.pattern_bindings(pattern, "__veyValues"),
+        }
+    }
+
+    /// The bindings of a pattern that takes its value from an expression.
+    fn pattern_bindings(
+        &mut self,
+        pattern: &BindingPattern,
+        source: &str,
+    ) -> Result<Vec<(String, String)>, VeyError> {
+        match pattern {
+            BindingPattern::Name { name, default, .. } => {
+                let expression = self.with_default(source, default.as_ref())?;
+                Ok(vec![(name.clone(), expression)])
             }
             BindingPattern::Object { fields, rest, .. } => {
+                let mut out = Vec::new();
                 for field in fields {
-                    let expression = format!("__veyProps[{}]", js_string(&field.key));
-                    for (name, _) in field.pattern.bindings() {
-                        out.push((name.to_string(), expression.clone()));
+                    let expression = format!("{}[{}]", source, js_string(&field.key));
+                    for (name, expression) in self.pattern_bindings(&field.pattern, &expression)? {
+                        out.push((name, expression));
                     }
                 }
                 if let Some(rest) = rest {
@@ -496,30 +521,46 @@ impl Codegen {
                         fields.iter().map(|field| js_string(&field.key)).collect();
                     out.push((
                         rest.clone(),
-                        format!("V.omit(__veyProps, [{}])", keys.join(", ")),
+                        format!("V.omit({}, [{}])", source, keys.join(", ")),
                     ));
                 }
+                Ok(out)
             }
             BindingPattern::Array { items, rest, .. } => {
+                let mut out = Vec::new();
                 for (index, item) in items.iter().enumerate() {
-                    let expression = format!("__veyValues[{}]", index);
-                    for (name, _) in item.bindings() {
-                        out.push((name.to_string(), expression.clone()));
+                    let expression = format!("{}[{}]", source, index);
+                    for (name, expression) in self.pattern_bindings(item, &expression)? {
+                        out.push((name, expression));
                     }
                 }
                 if let Some(rest) = rest {
-                    out.push((rest.clone(), format!("__veyValues.slice({})", items.len())));
+                    out.push((rest.clone(), format!("{}.slice({})", source, items.len())));
                 }
+                Ok(out)
             }
         }
-        out
+    }
+
+    /// The value of an expression, with the value that is used when there is
+    /// none.
+    fn with_default(&mut self, source: &str, default: Option<&Expr>) -> Result<String, VeyError> {
+        match default {
+            Some(default) => Ok(format!(
+                "{} !== undefined ? {} : {}",
+                source,
+                source,
+                self.gen_expr(default)?
+            )),
+            None => Ok(source.to_string()),
+        }
     }
 
     fn gen_params(&mut self, params: &[Param]) -> Result<String, VeyError> {
         let mut parts = Vec::new();
         for param in params {
             // A parameter that takes the argument apart becomes a pattern.
-            let pattern = self.gen_binding_pattern(&param.pattern);
+            let pattern = self.gen_binding_pattern(&param.pattern)?;
             if param.rest {
                 parts.push(format!("...{}", pattern));
                 continue;

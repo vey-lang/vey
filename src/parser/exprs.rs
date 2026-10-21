@@ -298,6 +298,7 @@ impl Parser {
                         vec![Param {
                             pattern: BindingPattern::Name {
                                 name: token.value,
+                                default: None,
                                 pos: token.pos,
                             },
                             ty: None,
@@ -376,6 +377,7 @@ impl Parser {
                 params.push(Param {
                     pattern: BindingPattern::Name {
                         name,
+                        default: None,
                         pos: param_pos,
                     },
                     ty,
@@ -490,6 +492,7 @@ impl Parser {
         let pos = self.advance()?.pos;
         let mut props = Vec::new();
         while !self.is_punct("}") {
+            let line = self.tok.pos.line;
             if self.is_op("...") {
                 self.advance()?;
                 props.push(ObjectProp::Spread(self.parse_expression()?));
@@ -530,7 +533,8 @@ impl Parser {
 
             if self.is_punct(",") {
                 self.advance()?;
-            } else {
+            } else if self.tok.kind == TokKind::Eof || self.tok.pos.line <= line {
+                // The fields may also be written one under the other.
                 break;
             }
         }
@@ -568,6 +572,7 @@ fn pattern_from_expr(expr: &Expr) -> Option<BindingPattern> {
     match expr {
         Expr::Ident(name, pos) => Some(BindingPattern::Name {
             name: name.clone(),
+            default: None,
             pos: *pos,
         }),
         Expr::Object(props, pos) => {

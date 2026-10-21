@@ -171,6 +171,7 @@ test("adds numbers", fn() {
   assert(add(2, 3) == 5, "sum should be 5")
 })
 ```
+<!-- check -->
 
 `test(name, fn)` runs immediately. A test that contains `await` returns a promise, and the runner keeps the process alive until it settles. `assert(condition, message)` throws when the condition is false. A failed test marks the process as failed.
 
@@ -206,6 +207,7 @@ let double = n => n * 2
 let numbers = range(1, 6)
 print(numbers |> map(double))
 ```
+<!-- check -->
 
 Strings in double quotes interpolate `{expr}`. Single quoted strings are literal.
 
@@ -228,6 +230,7 @@ let user = { name: "Ada", age: 36 }
 let nothing = null
 let flag = true
 ```
+<!-- check -->
 
 Member access supports optional chaining and nullish fallback:
 
@@ -267,6 +270,7 @@ let ada: User = { name: "Ada", age: 36 }
 print(greet(ada))
 print(add(2, 3))
 ```
+<!-- check -->
 
 Built-in types are `any`, `number`, `string`, `bool`, `null`, `void` and `never`.
 
@@ -278,6 +282,9 @@ Type forms:
 - `T?` optional value
 - `(number, string) -> bool` function
 - `(...number) -> number` rest parameters
+
+The fields of an object may be written one under the other, with or without a
+comma. The same goes for the fields of an object value.
 
 Functions and type aliases can be generic:
 
@@ -294,6 +301,7 @@ let textValue: string = identity("Vey")
 let box: Box<number> = { value: 2 }
 let missing: Maybe<string> = null
 ```
+<!-- check -->
 
 Type arguments are inferred at call sites. A call may also name them:
 
@@ -304,6 +312,7 @@ fn parse<T>(text: string) -> T {
 
 let number = parse<number>("42")
 ```
+<!-- check -->
 
 A type parameter may have a constraint, which every type argument has to
 satisfy:
@@ -330,6 +339,7 @@ for value: number in values {
   print(value * 2)
 }
 ```
+<!-- check -->
 
 The checker verifies assignments, return values, calls, object fields, list elements and component attributes. It narrows unions in simple conditions:
 
@@ -382,6 +392,7 @@ fn area(shape: Shape) -> number {
   }
 }
 ```
+<!-- check -->
 
 Types are module local. Exported type aliases and enums can be used from other modules as `module.TypeName`, and their fields are type-checked. A generic alias can be used from another module as well, with its type arguments filled in:
 
@@ -403,6 +414,7 @@ type Node = { value: number, next: Node | null }
 
 let list: Node = { value: 1, next: { value: 2, next: null } }
 ```
+<!-- check -->
 
 The part of the alias that is still open is checked loosely, because it cannot
 be written out. The other fields are checked as usual.
@@ -426,6 +438,21 @@ for { id, label } in records {
 
 Object patterns support renamed keys, nested patterns, string keys and a rest binding. Array patterns support nested patterns and a rest binding. Destructuring requires a value, and an exported declaration must bind a single name.
 
+A name may have a value that is used when there is none:
+
+```vey
+let user = { name: "Ada" }
+let items = [1, 2]
+
+let { name, greeting = "Hello" } = user
+let [head, second = 0] = items
+
+print(greeting + " " + name)
+print(head)
+print(second)
+```
+<!-- check -->
+
 A parameter may take the argument apart as well:
 
 ```vey
@@ -436,6 +463,7 @@ fn greet({ name, greeting = "Hello" }) {
 greet({ name: "Ada" })
 greet({ name: "Ada", greeting: "Hi" })
 ```
+<!-- check -->
 
 A component reads its props the same way:
 
@@ -444,6 +472,7 @@ component Card({ title, subtitle }) {
   section { h2 { title } p { subtitle } }
 }
 ```
+<!-- check -->
 
 ### Control flow
 
@@ -476,6 +505,7 @@ for i in 0..10 {
   print(i)
 }
 ```
+<!-- check -->
 
 ### Pattern matching
 
@@ -531,6 +561,7 @@ export fn area(radius) {
   return PI * radius ** 2
 }
 ```
+<!-- check -->
 
 ```vey
 // app.vey
@@ -580,6 +611,7 @@ component App() {
   }
 }
 ```
+<!-- check -->
 
 Rules:
 
@@ -613,6 +645,7 @@ component App() {
   Card title="Counter"       // named
 }
 ```
+<!-- check -->
 
 Named arguments only work in markup. Everywhere else the arguments are
 positional.
@@ -679,6 +712,7 @@ app.post("/data", fn(req) {
 app.static("public")
 app.start()
 ```
+<!-- check -->
 
 Unknown routes automatically try `public/404.html` and return it with status
 404. A custom handler takes priority:

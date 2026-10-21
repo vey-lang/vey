@@ -128,6 +128,7 @@ impl Parser {
         let name = self.expect_ident("binding name")?;
         Ok(BindingPattern::Name {
             name,
+            default: None,
             pos: token.pos,
         })
     }
@@ -138,6 +139,7 @@ impl Parser {
         let mut rest = None;
 
         while !self.is_punct("}") {
+            let line = self.tok.pos.line;
             if self.eat_op("...")? {
                 rest = Some(self.expect_ident("rest name")?);
                 if self.is_punct(",") {
@@ -175,9 +177,13 @@ impl Parser {
                 }
                 BindingPattern::Name {
                     name: key.clone(),
+                    default: None,
                     pos: key_token.pos,
                 }
             };
+
+            // A name may have a value that is used when there is none.
+            let pattern = self.attach_default(pattern)?;
 
             fields.push(BindingField {
                 key,
@@ -187,7 +193,8 @@ impl Parser {
 
             if self.is_punct(",") {
                 self.advance()?;
-            } else {
+            } else if self.tok.kind == TokKind::Eof || self.tok.pos.line <= line {
+                // The fields may also be written one under the other.
                 break;
             }
         }
@@ -210,7 +217,8 @@ impl Parser {
                 break;
             }
 
-            items.push(self.parse_binding_pattern()?);
+            let item = self.parse_binding_pattern()?;
+            items.push(self.attach_default(item)?);
             if self.is_punct(",") {
                 self.advance()?;
             } else {
@@ -220,5 +228,27 @@ impl Parser {
 
         self.expect_punct("]")?;
         Ok(BindingPattern::Array { items, rest, pos })
+    }
+
+    /// Give a pattern the value that is used when it has none.
+    fn attach_default(&mut self, pattern: BindingPattern) -> Result<BindingPattern, VeyError> {
+        if !self.is_op("=") {
+            return Ok(pattern);
+        }
+        let pos = self.tok.pos;
+        self.advance()?;
+        let default = self.parse_expression()?;
+        match pattern {
+            BindingPattern::Name {
+                name,
+                pos: name_pos,
+                ..
+            } => Ok(BindingPattern::Name {
+                name,
+                default: Some(default),
+                pos: name_pos,
+            }),
+            _ => Err(self.error_at(pos, "a default value needs a name, such as { name = 1 }")),
+        }
     }
 }

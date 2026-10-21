@@ -1347,3 +1347,78 @@ fn a_component_has_no_return_type() {
         "a component has no return type",
     );
 }
+
+#[test]
+fn a_name_may_have_a_value_that_is_used_when_there_is_none() {
+    let dir = temp_dir("default-value");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+fn greet({ name, greeting = "Hello" }) {
+  return greeting + " " + name
+}
+
+let user = { name: "Ada" }
+let { title, subtitle = "none" } = user
+let [head, second = 0] = [1]
+
+print(greet({ name: "Ada" }))
+print(greet({ name: "Ada", greeting: "Hi" }))
+print(title)
+print(subtitle)
+print(head)
+print(second)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("Hello Ada"), "{text}");
+    assert!(text.contains("Hi Ada"), "{text}");
+    assert!(text.contains("none"), "{text}");
+    assert!(text.contains("0"), "{text}");
+}
+
+#[test]
+fn the_fields_of_an_object_may_be_written_one_under_the_other() {
+    let dir = temp_dir("fields-under");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+type User = {
+  name: string
+  age?: number
+}
+
+let user: User = {
+  name: "Ada"
+  age: 36
+}
+
+let { name, age } = user
+
+print(name)
+print(age)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("Ada"), "{text}");
+    assert!(text.contains("36"), "{text}");
+}
+
+#[test]
+fn a_missing_comma_on_one_line_is_reported() {
+    check_error(
+        "let a = { name: \"Ada\" age: 36 }\n",
+        "missing-comma",
+        "expected '}'",
+    );
+}
