@@ -1,12 +1,86 @@
 //! The part of the checker that works on patterns.
 
 use crate::ast::*;
-use crate::types::core::{element_type, object_rest_type, project_field, Type};
+use crate::types::core::{
+    element_type, object_rest_type, project_field, remove_type, string_literal, type_from_kind,
+    Type,
+};
 use crate::VeyError;
 
 use super::checker::TypeChecker;
 
 impl TypeChecker<'_> {
+    pub(crate) fn narrow_condition(&self, expr: &Expr) -> Option<(String, Type, Type)> {
+        let Expr::Binary(op, left, right, _) = expr else {
+            return None;
+        };
+        if !matches!(op.as_str(), "==" | "===" | "!=" | "!==") {
+            return None;
+        }
+        let (name, then_ty, else_ty) = self.narrow_comparison(left, right)?;
+        if op == "!=" || op == "!==" {
+            Some((name, else_ty, then_ty))
+        } else {
+            Some((name, then_ty, else_ty))
+        }
+    }
+
+    pub(crate) fn narrow_comparison(
+        &self,
+        left: &Expr,
+        right: &Expr,
+    ) -> Option<(String, Type, Type)> {
+        if let Some((name, original)) = self.type_call(left) {
+            if let Some(kind) = string_literal(right) {
+                let target = type_from_kind(kind, &original)?;
+                let else_ty = remove_type(&original, &target);
+                return Some((name, target, else_ty));
+            }
+        }
+
+        if let Some((name, original)) = self.type_call(right) {
+            if let Some(kind) = string_literal(left) {
+                let target = type_from_kind(kind, &original)?;
+                let else_ty = remove_type(&original, &target);
+                return Some((name, target, else_ty));
+            }
+        }
+
+        if let Expr::Ident(name, _) = left {
+            if matches!(right, Expr::Null(_)) {
+                let original = self.lookup(name)?;
+                let else_ty = original.without_null();
+                return Some((name.clone(), Type::Null, else_ty));
+            }
+        }
+
+        if let Expr::Ident(name, _) = right {
+            if matches!(left, Expr::Null(_)) {
+                let original = self.lookup(name)?;
+                let else_ty = original.without_null();
+                return Some((name.clone(), Type::Null, else_ty));
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn type_call(&self, expr: &Expr) -> Option<(String, Type)> {
+        let Expr::Call(callee, args, _, _) = expr else {
+            return None;
+        };
+        let Expr::Ident(name, _) = &**callee else {
+            return None;
+        };
+        if name != "type" || args.len() != 1 {
+            return None;
+        }
+        let Expr::Ident(variable, _) = &args[0] else {
+            return None;
+        };
+        self.lookup(variable).map(|ty| (variable.clone(), ty))
+    }
+
     pub(crate) fn check_pattern(&mut self, pattern: &Pattern) -> Result<(), VeyError> {
         match pattern {
             Pattern::Literal(expr) => {

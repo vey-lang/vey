@@ -9,6 +9,7 @@ pub mod checker;
 pub mod core;
 mod exprs;
 mod patterns;
+mod stmts;
 
 pub use checker::{check, ModuleTypeEnv};
 pub use core::{FunctionType, ObjectField, Type};
