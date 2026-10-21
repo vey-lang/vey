@@ -76,10 +76,12 @@ fn start_server(source: &str) -> (Server, u16) {
         source.replace("{port}", &port.to_string()),
     )
     .unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_vey"));
+    // The program is run with node, the way a script runs.
+    let script = common::build_script(&dir.join("main.vey"));
+    let mut command = Command::new("node");
     command
-        .arg("run")
-        .arg(dir.join("main.vey"))
+        .arg("--enable-source-maps")
+        .arg(&script)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     // The server runs in a group of its own, so that the node process under

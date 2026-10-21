@@ -76,6 +76,13 @@ function createVeyRuntime(scope, req) {
     return name.replace(/-([a-z])/g, function (_, ch) { return ch.toUpperCase(); });
   }
 
+  /** An error that belongs to the program, not to the runtime. */
+  function veyError(message) {
+    var error = new Error(message);
+    error.vey = true;
+    return error;
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -225,7 +232,12 @@ function createVeyRuntime(scope, req) {
   }
 
   function bind(target, node) {
-    if (!doc) throw new Error("bind() is only available in the browser");
+    if (!doc) {
+      throw veyError(
+        "bind() is only available in the browser. Open the page with `vey dev` " +
+          "or build it with `vey web`."
+      );
+    }
     var el = typeof target === "string" ? doc.querySelector(target) : target;
     if (!el) throw new Error("element not found: " + target);
     var nodes = flatten([node]).map(toDom);
@@ -286,7 +298,7 @@ function createVeyRuntime(scope, req) {
   }
 
   function input(prompt) {
-    if (!isNode) throw new Error("input() is only available in Node");
+    if (!isNode) throw veyError("input() is only available in Node.");
     if (prompt) process.stdout.write(String(prompt));
     var fs = nodeModule("node:fs");
     // Read one byte at a time so that only the current line is consumed and
@@ -627,7 +639,7 @@ function createVeyRuntime(scope, req) {
   };
 
   function nodeModule(name) {
-    if (!isNode) throw new Error(name + " is only available in Node");
+    if (!isNode) throw veyError(name + " is only available in Node.");
     return req(name);
   }
 
@@ -803,7 +815,7 @@ function createVeyRuntime(scope, req) {
   });
 
   function server(port) {
-    if (!req) throw new Error("server() is only available in Node");
+    if (!req) throw veyError("server() is only available in Node.");
     var httpModule = req("node:http");
     var fs = req("node:fs");
     var pathModule = req("node:path");

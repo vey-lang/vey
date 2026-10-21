@@ -6,49 +6,35 @@ use std::process::Command;
 use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
-use crate::cli::entry::{collect_vey_files, entry_from};
+use crate::cli::dev::{serve, DEFAULT_PORT};
+use crate::cli::entry::{collect_vey_files, default_title, entry_from};
 use crate::cli::output::{node_script, report, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
-    // The argument may be a file or a folder that holds one.
-    let file = match entry_from(args) {
+    let parsed = parse_args(args);
+    // The page that is served is found the same way as everywhere else.
+    let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
         Err(err) => {
-            eprintln!("usage: vey run <file.vey>");
             eprintln!("{}", err);
+            eprintln!("usage: vey run [entry.vey|directory] [--port 4000]");
             return 1;
         }
     };
 
-    let bundle = match compile_project(&file) {
-        Ok(bundle) => bundle,
-        Err(err) => {
-            report(&err);
-            return 1;
-        }
-    };
+    let host = parsed
+        .host
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = parsed.port.unwrap_or(DEFAULT_PORT);
+    let title = parsed
+        .title
+        .clone()
+        .unwrap_or_else(|| default_title(&entry));
 
-    let script = node_script(&bundle);
-    let temp = temp_file("vey-run", "cjs");
-    if let Err(err) = fs::write(&temp, script) {
-        eprintln!("cannot write temporary file: {}", err);
-        return 1;
-    }
-
-    let status = Command::new("node")
-        .arg("--enable-source-maps")
-        .arg(&temp)
-        .status();
-    let _ = fs::remove_file(&temp);
-
-    match status {
-        Ok(status) => status.code().unwrap_or(1),
-        Err(err) => {
-            eprintln!("cannot start node: {}", err);
-            eprintln!("node is required to run Vey programs");
-            1
-        }
-    }
+    // The site is served the way a host would serve it: without the watcher
+    // and without the reload.
+    serve(&entry, &title, &host, port, false)
 }
 
 pub(crate) fn cmd_test(args: &[String]) -> i32 {

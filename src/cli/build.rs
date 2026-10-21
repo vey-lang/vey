@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use vey::compiler::compile_project;
 
 use crate::cli::args::{parse_args, ParsedArgs};
-use crate::cli::entry::{default_title, entry_from, project_root};
-use crate::cli::output::{html_document, node_script, replace_extension, report};
+use crate::cli::entry::{entry_from, project_root};
+use crate::cli::output::{node_script, replace_extension, report};
 use crate::cli::site::write_site;
 
 /// The folder the site is written to.
@@ -85,44 +85,6 @@ pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
         .clone()
         .unwrap_or_else(|| replace_extension(file, "cjs"));
     if let Err(err) = fs::write(&output, node_script(&bundle)) {
-        eprintln!("cannot write {}: {}", output, err);
-        return 1;
-    }
-
-    println!("built {}", output);
-    0
-}
-
-pub(crate) fn cmd_web(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
-    let entry = match entry_from(&parsed.files) {
-        Ok(entry) => entry,
-        Err(err) => {
-            eprintln!("{}", err);
-            eprintln!("usage: vey web [entry.vey] [-o index.html]");
-            return 1;
-        }
-    };
-
-    let bundle = match compile_project(&entry) {
-        Ok(bundle) => bundle,
-        Err(err) => {
-            report(&err);
-            return 1;
-        }
-    };
-
-    let output = parsed
-        .output
-        .clone()
-        .unwrap_or_else(|| replace_extension(&entry.display().to_string(), "html"));
-    let title = parsed
-        .title
-        .clone()
-        .unwrap_or_else(|| default_title(&entry));
-    let favicon = project_root(&entry).join("public/favicon.svg").is_file();
-
-    if let Err(err) = fs::write(&output, html_document(&bundle, &title, favicon)) {
         eprintln!("cannot write {}: {}", output, err);
         return 1;
     }

@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{assert_prints, run_err, run_ok};
+use common::{assert_prints, run_err, run_fails, run_ok};
 
 #[test]
 fn components_receive_positional_arguments() {
@@ -181,7 +181,7 @@ fn url_parse_accepts_relative_urls() {
 
 #[test]
 fn reduce_reports_an_empty_list() {
-    let error = run_err("reduce-empty", r#"reduce([], fn(a, b) { return a + b })"#);
+    let error = run_fails("reduce-empty", r#"reduce([], fn(a, b) { return a + b })"#);
     assert!(error.contains("initial value"), "{error}");
 }
 
@@ -381,4 +381,24 @@ print(startsWith("hello", "x"))
     );
     assert!(text.contains("true"), "{text}");
     assert!(text.contains("false"), "{text}");
+}
+
+#[test]
+fn a_page_that_needs_a_browser_says_so() {
+    let error = run_fails(
+        "browser-only",
+        r##"
+component App() {
+  main { h1 { "Hi" } }
+}
+
+bind("#app", App())
+"##,
+    );
+    assert!(
+        error.contains("bind() is only available in the browser"),
+        "{error}"
+    );
+    // The message of the program is shown on its own, without a stack.
+    assert!(!error.contains("at Object.bind"), "{error}");
 }

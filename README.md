@@ -18,14 +18,25 @@ cargo build --release
 ## Commands
 
 ```sh
-vey run app.vey                  # compile and run with node
-vey dev                          # live dev server
+vey run                          # serve the site
+vey dev                          # serve the site with a live reload
 vey test                         # run .vey files under tests/
 vey build                        # static site in .dist/
 vey build app.vey --node -o app.cjs  # standalone node script
-vey web app.vey -o index.html    # single file browser page
 vey new myapp                    # project scaffold
-vey check app.vey                # parse, check and resolve imports
+vey check                        # check the whole project
+```
+
+`vey run` serves the site the way a host would: it is built once and then
+served, without a watcher and without the reload. `vey dev` is the same
+server for the work: it watches the files of the project, rebuilds when one
+of them changes and reloads the page in the browser.
+
+A program that is not a page — a script — is built and run with node:
+
+```sh
+vey build script.vey --node -o script.cjs
+node script.cjs
 ```
 
 ## Static sites
@@ -92,20 +103,21 @@ it, Vey writes a page of its own.
 `npm run dev`, `npm run build` and `npm test` call the same commands as
 `vey dev`, `vey build` and `vey test`.
 
-## Development server
+## Servers
 
 ```sh
+vey run
+vey run --port 3000 --host 0.0.0.0
 vey dev
-vey dev --port 3000 --host 0.0.0.0
-vey dev app.vey
 ```
 
-The server rebuilds the site when the entry, any imported `.vey` or `.css` file
-(including modules in other folders) or a `public/` file changes, and reloads
-the browser. Other files in the project are left alone, so a note or a log
-file does not cause a reload. A change of the content is noticed even when the
-time and the size of the file stay the same. Unknown paths serve `404.html`
-with a `404` status.
+`vey run` serves the built site the way a host does. `vey dev` is the same
+server for the work: it rebuilds the site when the entry, any imported `.vey`
+or `.css` file (including modules in other folders) or a `public/` file
+changes, and reloads the browser. Other files in the project are left alone, so
+a note or a log file does not cause a reload. A change of the content is
+noticed even when the time and the size of the file stay the same. Unknown
+paths serve `404.html` with a `404` status.
 Compile errors open a styled page with the file, the source line, a caret under
 the failing column, and a hint when Vey can guess the fix (for example
 `use "../style.css"` for a stylesheet in the parent folder). The page
@@ -136,9 +148,9 @@ are collected in dependency order, so shared styles load before app styles.
 
 ## Debugging
 
-`vey run` enables Node source maps. Runtime errors point to the original `.vey` file and line, including errors inside imported modules.
-
-Built scripts contain an inline source map. Run them with the Node flag:
+Built scripts contain an inline source map, so a runtime error points to the
+original `.vey` file and line, including errors inside imported modules. Run
+them with the Node flag:
 
 ```sh
 node --enable-source-maps app.cjs

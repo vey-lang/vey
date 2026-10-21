@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -23,12 +25,15 @@ fn temp_dir(label: &str) -> PathBuf {
     dir
 }
 
-fn run_file(path: &PathBuf) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_vey"))
-        .arg("run")
-        .arg(path)
+fn run_file(path: &std::path::Path) -> Output {
+    let script = common::build_script(path);
+    let output = Command::new("node")
+        .arg("--enable-source-maps")
+        .arg(&script)
         .output()
-        .expect("failed to start vey")
+        .expect("failed to start node");
+    let _ = fs::remove_file(&script);
+    output
 }
 
 fn stdout(output: &Output) -> String {
@@ -39,12 +44,26 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
+/// Check a file and return the output of the check.
+fn check_file(path: &PathBuf) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("check")
+        .arg(path)
+        .output()
+        .expect("failed to start vey")
+}
+
 fn check_error(source: &str, label: &str, expected: &str) {
     let dir = temp_dir(label);
     let file = dir.join("main.vey");
     fs::write(&file, source).unwrap();
 
-    let output = run_file(&file);
+    // The errors of the compiler are reported by the check.
+    let output = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("check")
+        .arg(&file)
+        .output()
+        .unwrap();
     assert!(!output.status.success(), "expected a failure");
     let text = stderr(&output);
     assert!(text.contains(expected), "{}", text);
@@ -191,9 +210,9 @@ bind("#app", App())
     )
     .unwrap();
 
-    let output_path = app.join("index.html");
+    let output_path = app.join("site");
     let output = Command::new(env!("CARGO_BIN_EXE_vey"))
-        .arg("web")
+        .arg("build")
         .arg(&main)
         .arg("-o")
         .arg(&output_path)
@@ -201,7 +220,7 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(&output_path).unwrap();
+    let html = fs::read_to_string(output_path.join("index.html")).unwrap();
     assert!(html.contains("From elsewhere"), "{}", html);
 }
 
@@ -283,7 +302,7 @@ fn reports_syntax_errors() {
     let file = dir.join("bad.vey");
     fs::write(&file, "let x = \n").unwrap();
 
-    let output = run_file(&file);
+    let output = check_file(&file);
     assert!(!output.status.success());
     let text = stderr(&output);
     assert!(text.contains("bad.vey"));
@@ -296,7 +315,7 @@ fn reports_missing_modules() {
     let file = dir.join("app.vey");
     fs::write(&file, "use \"./nope.vey\" as nope\n").unwrap();
 
-    let output = run_file(&file);
+    let output = check_file(&file);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("module not found"));
 }
@@ -525,9 +544,9 @@ bind("#app", App())
     )
     .unwrap();
 
-    let output_path = dir.join("index.html");
+    let output_path = dir.join("site");
     let output = Command::new(env!("CARGO_BIN_EXE_vey"))
-        .arg("web")
+        .arg("build")
         .arg(&file)
         .arg("-o")
         .arg(&output_path)
@@ -535,7 +554,7 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(&output_path).unwrap();
+    let html = fs::read_to_string(output_path.join("index.html")).unwrap();
     assert!(html.contains("<div id=\"app\"></div>"));
     assert!(html.contains("createVeyRuntime"));
     assert!(html.contains("V.h"));
@@ -574,9 +593,9 @@ bind("#app", App())
     )
     .unwrap();
 
-    let output_path = dir.join("index.html");
+    let output_path = dir.join("site");
     let output = Command::new(env!("CARGO_BIN_EXE_vey"))
-        .arg("web")
+        .arg("build")
         .arg(&file)
         .arg("-o")
         .arg(&output_path)
@@ -584,7 +603,7 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(&output_path).unwrap();
+    let html = fs::read_to_string(output_path.join("index.html")).unwrap();
     assert!(html.contains("data-vey"), "{}", html);
     assert!(html.contains(".from-file"), "{}", html);
     assert!(html.contains(".from-block"), "{}", html);
@@ -1254,7 +1273,7 @@ fn a_file_that_is_not_vey_is_named() {
     let file = dir.join("notes.txt");
     fs::write(&file, "hello\n").unwrap();
 
-    let output = run_file(&file);
+    let output = check_file(&file);
     assert!(!output.status.success());
     let error = stderr(&output);
     assert!(error.contains("is not a Vey file"), "{error}");

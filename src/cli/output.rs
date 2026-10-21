@@ -19,7 +19,7 @@ pub(crate) fn node_script(bundle: &Bundle) -> String {
     let prefix_lines = prefix.matches('\n').count();
     let map = sourcemap::inline(&bundle.sources, &bundle.mappings, prefix_lines);
     format!(
-        "{prefix}{code}\n}})().catch(function (err) {{\n  console.error(err && err.stack ? err.stack : err);\n  process.exitCode = 1;\n}});\n{map}\n",
+        "{prefix}{code}\n}})().catch(function (err) {{\n  console.error(err && err.vey ? err.message : (err && err.stack ? err.stack : err));\n  process.exitCode = 1;\n}});\n{map}\n",
         code = bundle.code
     )
 }
@@ -33,7 +33,7 @@ pub(crate) fn browser_script(bundle: &Bundle) -> String {
     let prefix_lines = prefix.matches('\n').count();
     let map = sourcemap::inline(&bundle.sources, &bundle.mappings, prefix_lines);
     format!(
-        "{prefix}{code}\n  }})().catch(function (err) {{\n    console.error(err);\n    const box = document.createElement(\"pre\");\n    box.style.cssText = \"color:#b00020;white-space:pre-wrap;font:14px ui-monospace,monospace;padding:16px\";\n    box.textContent = \"Vey error: \" + ((err && err.stack) || err);\n    document.body.appendChild(box);\n  }});\n}})();\n{map}\n"
+        "{prefix}{code}\n  }})().catch(function (err) {{\n    console.error(err);\n    const box = document.createElement(\"pre\");\n    box.style.cssText = \"color:#b00020;white-space:pre-wrap;font:14px ui-monospace,monospace;padding:16px\";\n    box.textContent = \"Vey error: \" + ((err && err.vey) ? err.message : ((err && err.stack) || err));\n    document.body.appendChild(box);\n  }});\n}})();\n{map}\n"
     )
 }
 
@@ -147,14 +147,13 @@ pub(crate) fn print_help() {
         r#"Vey {version}
 
 usage:
-  vey run <file.vey>              compile and run with node
-  vey dev [entry] [--port 4000]   start the live dev server
-  vey test [file|dir]             run .vey test files
-  vey build [entry|dir] [-o out]  build a deployable static site (.dist/)
-  vey build <file.vey> --node     build a standalone node script
-  vey web [entry] [-o out]        build a single html page
-  vey new <directory>             create a project
-  vey check [file|dir]           check a file or the whole project
+  vey run [entry|dir]              serve the site
+  vey dev [entry|dir]              serve the site with a live reload
+  vey test [file|dir]              run .vey test files
+  vey build [entry|dir] [-o out]   build the site into .dist/
+  vey build <file.vey> --node      build a standalone node script
+  vey new <directory>              create a project
+  vey check [file|dir]             check a file or the whole project
   vey version                     print version
   vey help                        show this message
 
@@ -163,15 +162,16 @@ build options:
   --title <text>                  page title
   --node                          emit a node script instead of a site
 
-dev options:
+server options:
   --port <n>                      port to listen on (default: 4000)
   --host <host>                   host to bind (default: 127.0.0.1)
 
 example:
   vey new myapp
   cd myapp
-  vey dev
-  vey build
+  vey dev      # the site with a live reload
+  vey run      # the site the way a host serves it
+  vey build    # the site in .dist/
 "#,
         version = env!("CARGO_PKG_VERSION")
     );

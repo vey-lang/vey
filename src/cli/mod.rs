@@ -16,7 +16,7 @@ pub mod run;
 pub mod scaffold;
 pub mod site;
 
-pub(crate) use build::{cmd_build, cmd_web};
+pub(crate) use build::cmd_build;
 pub(crate) use dev::cmd_dev;
 pub(crate) use output::print_help;
 pub(crate) use run::{cmd_check, cmd_run, cmd_test};

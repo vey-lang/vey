@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 mod cli;
 
-use cli::{cmd_build, cmd_check, cmd_dev, cmd_new, cmd_run, cmd_test, cmd_web, print_help};
+use cli::{cmd_build, cmd_check, cmd_dev, cmd_new, cmd_run, cmd_test, print_help};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -21,7 +21,6 @@ fn run(args: &[String]) -> i32 {
         "run" => cmd_run(rest),
         "test" => cmd_test(rest),
         "build" => cmd_build(rest),
-        "web" => cmd_web(rest),
         "dev" => cmd_dev(rest),
         "new" => cmd_new(rest),
         "check" => cmd_check(rest),

@@ -125,7 +125,7 @@ print(b.value)
 "#,
     )
     .unwrap();
-    let output = common::run_file(&dir.join("app.vey"));
+    let output = common::check_file(&dir.join("app.vey"));
     assert!(output.status.success(), "{}", common::stderr(&output));
     assert!(common::stdout(&output).contains('2'));
 }
@@ -154,7 +154,7 @@ fn a_broken_exported_alias_reports_the_real_error() {
         "use \"./bad.vey\" as t\nlet x: t.Bad = { v: 1 }\n",
     )
     .unwrap();
-    let output = common::run_file(&dir.join("app.vey"));
+    let output = common::check_file(&dir.join("app.vey"));
     assert!(!output.status.success());
     let error = common::stderr(&output);
     assert!(error.contains("unknown type 'Nope'"), "{error}");
@@ -356,7 +356,7 @@ fn a_call_to_another_module_is_checked() {
         "use \"./lib.vey\" as lib\nlet n: string = lib.add(1, 2)\n",
     )
     .unwrap();
-    let output = common::run_file(&dir.join("app.vey"));
+    let output = common::check_file(&dir.join("app.vey"));
     assert!(!output.status.success());
     let error = common::stderr(&output);
     assert!(error.contains("expected string, found number"), "{error}");
@@ -375,7 +375,7 @@ fn a_call_to_another_module_with_a_wrong_argument_is_checked() {
         "use \"./lib.vey\" as lib\nlib.add(1, \"two\")\n",
     )
     .unwrap();
-    let output = common::run_file(&dir.join("app.vey"));
+    let output = common::check_file(&dir.join("app.vey"));
     assert!(!output.status.success());
     let error = common::stderr(&output);
     assert!(error.contains("argument 2 expects number"), "{error}");
@@ -394,7 +394,7 @@ fn a_call_to_another_module_with_too_few_arguments_is_checked() {
         "use \"./lib.vey\" as lib\nlib.add(1)\n",
     )
     .unwrap();
-    let output = common::run_file(&dir.join("app.vey"));
+    let output = common::check_file(&dir.join("app.vey"));
     assert!(!output.status.success());
     let error = common::stderr(&output);
     assert!(error.contains("expected at least 2 arguments"), "{error}");

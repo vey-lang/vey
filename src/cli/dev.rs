@@ -49,6 +49,8 @@ pub(crate) struct DevState {
     pub(crate) root: PathBuf,
     /// The folder the pages of the project live in.
     pub(crate) pages: PathBuf,
+    /// Whether the files are watched and the page reloads.
+    pub(crate) live: bool,
     /// The title of the site.
     pub(crate) title: String,
     /// Files imported from outside the project root. They are not covered by
@@ -67,7 +69,6 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
         }
     };
 
-    let root = project_root(&entry);
     let host = parsed
         .host
         .clone()
@@ -78,19 +79,36 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
         .clone()
         .unwrap_or_else(|| default_title(&entry));
 
-    let state = Arc::new(Mutex::new(DevState::default()));
+    serve(&entry, &title, &host, port, true)
+}
+
+/// Serve a project.
+///
+/// With `live` the files are watched, the page reloads when they change and a
+/// page that cannot be built shows the error. Without it the site is served
+/// the way a host would serve it.
+pub(crate) fn serve(entry: &Path, title: &str, host: &str, port: u16, live: bool) -> i32 {
+    let root = project_root(entry);
+    let state = Arc::new(Mutex::new(DevState {
+        live,
+        ..DevState::default()
+    }));
     {
         let mut guard = lock(&state);
         guard.root = root.canonicalize().unwrap_or_else(|_| root.clone());
-        guard.pages = pages_root(&entry);
-        guard.title = title.clone();
+        guard.pages = pages_root(entry);
+        guard.title = title.to_string();
     }
-    if let Err(err) = refresh_dev(&entry, &title, &state) {
+    if let Err(err) = refresh_dev(entry, title, &state) {
         eprintln!("{}", err);
-        eprintln!("waiting for changes...");
+        if live {
+            eprintln!("waiting for changes...");
+        } else {
+            return 1;
+        }
     }
 
-    let listener = match TcpListener::bind((host.as_str(), port)) {
+    let listener = match TcpListener::bind((host, port)) {
         Ok(listener) => listener,
         Err(err) => {
             eprintln!("cannot listen on {}:{}: {}", host, port, err);
@@ -99,39 +117,42 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
     };
 
     println!(
-        "Vey dev server running at http://{}:{}",
-        if host == "0.0.0.0" {
-            "localhost"
-        } else {
-            &host
-        },
+        "Vey {} server running at http://{}:{}",
+        if live { "dev" } else { "release" },
+        if host == "0.0.0.0" { "localhost" } else { host },
         port
     );
     println!("entry: {}", entry.display());
-    println!("watching for changes, press Ctrl+C to stop");
+    if live {
+        println!("watching for changes, press Ctrl+C to stop");
+    } else {
+        println!("press Ctrl+C to stop");
+    }
 
-    let watcher_state = Arc::clone(&state);
-    let watcher_entry = entry.clone();
-    let watcher_title = title.clone();
-    let watcher_root = root.canonicalize().unwrap_or_else(|_| root.clone());
-    thread::spawn(move || {
-        let mut previous = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
-        loop {
-            thread::sleep(Duration::from_millis(300));
-            let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
-            if current == previous {
-                continue;
+    if live {
+        let watcher_state = Arc::clone(&state);
+        let watcher_entry = entry.to_path_buf();
+        let watcher_title = title.to_string();
+        let watcher_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        thread::spawn(move || {
+            let mut previous = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
+            loop {
+                thread::sleep(Duration::from_millis(300));
+                let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
+                if current == previous {
+                    continue;
+                }
+                thread::sleep(Duration::from_millis(80));
+                let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
+                let started = Instant::now();
+                match refresh_dev(&watcher_entry, &watcher_title, &watcher_state) {
+                    Ok(_) => println!("rebuilt the site in {} ms", started.elapsed().as_millis()),
+                    Err(err) => eprintln!("{}", err),
+                }
+                previous = current;
             }
-            thread::sleep(Duration::from_millis(80));
-            let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
-            let started = Instant::now();
-            match refresh_dev(&watcher_entry, &watcher_title, &watcher_state) {
-                Ok(_) => println!("rebuilt the site in {} ms", started.elapsed().as_millis()),
-                Err(err) => eprintln!("{}", err),
-            }
-            previous = current;
-        }
-    });
+        });
+    }
 
     for stream in listener.incoming() {
         match stream {
@@ -234,7 +255,7 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
     }
 
     if let Some(err) = &state.error {
-        if accepts_html(path) {
+        if state.live && accepts_html(path) {
             let body = err.render_html();
             return (
                 500,
@@ -256,7 +277,7 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
 
     if let Some(bytes) = state.files.get(&key) {
         let content_type = content_type_for(&key);
-        let body = if content_type.starts_with("text/html") {
+        let body = if state.live && content_type.starts_with("text/html") {
             inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes()
         } else {
             bytes.clone()
@@ -266,7 +287,11 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
 
     let nested = format!("{}/index.html", key);
     if let Some(bytes) = state.files.get(&nested) {
-        let body = inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes();
+        let body = if state.live {
+            inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes()
+        } else {
+            bytes.clone()
+        };
         return (200, "text/html; charset=utf-8", body);
     }
 
@@ -275,7 +300,11 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
     if !key.contains('.') {
         let page = format!("{}.html", key);
         if let Some(bytes) = state.files.get(&page) {
-            let body = inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes();
+            let body = if state.live {
+                inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes()
+            } else {
+                bytes.clone()
+            };
             return (200, "text/html; charset=utf-8", body);
         }
     }
