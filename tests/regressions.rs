@@ -306,3 +306,18 @@ fn an_unknown_name_without_a_similar_one_has_no_hint() {
     assert!(error.contains("unknown variable"), "{error}");
     assert!(!error.contains("did you mean"), "{error}");
 }
+
+#[test]
+fn a_value_may_not_be_used_before_it_is_declared() {
+    let error = run_err("used-before-declared", "print(value)\nlet value = 1\n");
+    assert!(error.contains("used before it is declared"), "{error}");
+}
+
+#[test]
+fn a_function_may_use_a_value_that_is_declared_later() {
+    let text = run_ok(
+        "forward-in-function",
+        "fn increment() {\n  count = count + 1\n}\n\nlet count = 0\nincrement()\nprint(count)\n",
+    );
+    assert!(text.contains("1"), "{text}");
+}

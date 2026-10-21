@@ -12,6 +12,8 @@ pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
         scopes: vec![HashMap::new()],
         loop_depth: 0,
         function_depth: 0,
+        declared_at: HashMap::new(),
+        statement: 0,
     };
     checker.check_program(program)
 }
@@ -63,6 +65,10 @@ struct Checker<'a> {
     scopes: Vec<HashMap<String, Binding>>,
     loop_depth: usize,
     function_depth: usize,
+    /// The statement a value of the top level is declared in.
+    declared_at: HashMap<String, usize>,
+    /// The statement that is being checked.
+    statement: usize,
 }
 
 impl Checker<'_> {
@@ -148,7 +154,10 @@ impl Checker<'_> {
     }
 
     fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
-        for stmt in &program.body {
+        // The names of the top level are known before the body is checked, so
+        // that a function may be used before it is declared. A value is not
+        // hoisted, so where it is declared matters.
+        for (index, stmt) in program.body.iter().enumerate() {
             match stmt {
                 Stmt::Use(decl) => {
                     if !decl.path.ends_with(".css") {
@@ -156,7 +165,10 @@ impl Checker<'_> {
                     }
                 }
                 Stmt::Var(decl) => {
-                    self.declare_pattern(&decl.pattern, BindingKind::from_var(decl.kind))?
+                    self.declare_pattern(&decl.pattern, BindingKind::from_var(decl.kind))?;
+                    for (name, _) in decl.pattern.bindings() {
+                        self.declared_at.insert(name.to_string(), index);
+                    }
                 }
                 Stmt::Fn(decl) => self.declare(&decl.name, BindingKind::Function, decl.pos)?,
                 Stmt::Component(decl) => {
@@ -167,7 +179,8 @@ impl Checker<'_> {
             }
         }
 
-        for stmt in &program.body {
+        for (index, stmt) in program.body.iter().enumerate() {
+            self.statement = index;
             match stmt {
                 Stmt::Use(_) => {}
                 Stmt::Var(decl) => {
@@ -387,6 +400,17 @@ impl Checker<'_> {
                         error = error.with_hint(hint);
                     }
                     return Err(error);
+                }
+                // A value of the top level is not hoisted, so it may not be
+                // used before the line that declares it. A function or a
+                // component may use it, because it runs later.
+                if self.scopes.len() == 1 {
+                    if let Some(declared) = self.declared_at.get(name) {
+                        if *declared > self.statement {
+                            return Err(self
+                                .error(*pos, format!("'{}' is used before it is declared", name)));
+                        }
+                    }
                 }
             }
             Expr::String(parts, _) => {
