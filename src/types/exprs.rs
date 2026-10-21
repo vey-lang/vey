@@ -161,21 +161,13 @@ impl TypeChecker<'_> {
             }
             Expr::Fn(params, body, ret_ann, pos) => {
                 let ret = self.check_function(params, body, ret_ann.as_ref(), *pos)?;
-                let checked = ret_ann.is_some() || params.iter().any(|param| param.ty.is_some());
-                if checked {
-                    self.function_type_from_parts(params, ret, ret_ann.is_some(), &[])
-                } else {
-                    self.function_type_from_parts(params, Type::Any, false, &[])
-                }
+                // The type of the result is known even when the parameters
+                // are not, so that a closure fits the type it is given.
+                self.function_type_from_parts(params, ret, ret_ann.is_some(), &[])
             }
             Expr::Arrow(params, body, pos) => {
                 let ret = self.check_arrow(params, body, *pos)?;
-                let checked = params.iter().any(|param| param.ty.is_some());
-                if checked {
-                    self.function_type_from_parts(params, ret, false, &[])
-                } else {
-                    self.function_type_from_parts(params, Type::Any, false, &[])
-                }
+                self.function_type_from_parts(params, ret, false, &[])
             }
             Expr::Range(start, end, pos) => {
                 let start_ty = self.infer_expr(start)?;

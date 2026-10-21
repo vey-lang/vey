@@ -446,3 +446,26 @@ print(sum(1, 2, 3))
 "#,
     );
 }
+
+#[test]
+fn a_closure_has_to_fit_the_type_it_is_given() {
+    check_ok(
+        "closure-fits",
+        "let f: (number) -> number = fn(a: number) { return a }\n",
+    );
+
+    let error = check_err(
+        "closure-result",
+        "let f: () -> number = fn() { return \"x\" }\n",
+    );
+    assert!(
+        error.contains("expected () -> number, found () -> string"),
+        "{error}"
+    );
+
+    let error = check_err(
+        "closure-parameter",
+        "let f: (number) -> number = fn(a: string) { return 1 }\n",
+    );
+    assert!(error.contains("expected (number) -> number"), "{error}");
+}
