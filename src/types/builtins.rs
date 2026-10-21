@@ -179,6 +179,13 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "cls" => Some(builtin_rest(any(), string())),
         "server" => Some(builtin_optional(vec![number()], 0, any())),
         "require" => Some(builtin_function(vec![string()], any())),
+        "hash" => Some(builtin_function(vec![any()], string())),
+        "process" => Some(builtin_object(vec![
+            ("cwd", builtin_function(vec![], string())),
+            ("argv", builtin_function(vec![], list(string()))),
+            ("platform", builtin_function(vec![], string())),
+            ("exit", builtin_function(vec![number()], Type::Void)),
+        ])),
         "response" => Some(builtin_optional(vec![any(), any(), any()], 1, any())),
         "redirect" => Some(builtin_optional(vec![string(), number()], 1, any())),
         "json" => Some(builtin_object(vec![

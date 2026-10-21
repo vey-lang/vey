@@ -848,6 +848,8 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `all(list)` / `race(list)` | promise combinators |
 | `env(name, fallback)` | environment variable, Node only |
 | `require(name)` | a package of npm, Node only |
+| `hash(value)` | the fingerprint of a value, Node only |
+| `process.cwd()`, `process.argv()`, `process.platform()`, `process.exit(code)` | the process, Node only |
 | `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
 | `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
 | `keys(object)`, `values(object)`, `entries(object)` | the parts of an object |

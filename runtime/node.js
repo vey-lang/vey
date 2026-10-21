@@ -37,6 +37,33 @@ function veyNode(ctx) {
     }
   }
 
+  // The fingerprint of a value, as text of hexadecimal numbers.
+  function hash(value) {
+    if (!isNode) throw veyError("hash() is only available in Node.");
+    return nodeModule("node:crypto")
+      .createHash("sha256")
+      .update(toText(value))
+      .digest("hex");
+  }
+
+  // What is known about the process that runs the program.
+  //
+  // The name is not `process`, because that would hide the global of Node.
+  var nodeProcess = {
+    cwd: function () {
+      return nodeModule("node:process").cwd();
+    },
+    argv: function () {
+      return nodeModule("node:process").argv.slice();
+    },
+    platform: function () {
+      return nodeModule("node:process").platform;
+    },
+    exit: function (code) {
+      nodeModule("node:process").exit(code === undefined ? 0 : code);
+    }
+  };
+
   var fs = {
     read: function (path, encoding) {
       return nodeModule("node:fs").readFileSync(path, encoding || "utf8");
@@ -86,11 +113,15 @@ function veyNode(ctx) {
   ctx.env = env;
   ctx.nodeModule = nodeModule;
   ctx.require = require;
+  ctx.hash = hash;
+  ctx.process = nodeProcess;
 
   return {
     fs: fs,
     path: path,
     env: env,
     require: require,
+    hash: hash,
+    process: nodeProcess,
   };
 }
