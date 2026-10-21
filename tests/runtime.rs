@@ -12,13 +12,15 @@ use std::process::Command;
 
 use common::temp_dir;
 
-/// Load `runtime.js` and evaluate `script`.
+/// Load the runtime and evaluate `script`.
 ///
 /// The script can use `runtime` for the Node flavoured runtime and `RUNTIME`
 /// for the path of the runtime source.
 fn run_runtime(label: &str, script: &str) -> String {
     let dir = temp_dir(label);
-    let runtime: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime.js");
+    // The runtime is split into parts, so it is put together here.
+    let runtime = dir.join("runtime.js");
+    fs::write(&runtime, vey::runtime::source()).unwrap();
     let harness = dir.join("harness.cjs");
     fs::write(
         &harness,
@@ -132,7 +134,7 @@ try { browser.fs.read("x"); } catch (err) { console.log(err.message); }
 
 #[test]
 fn every_helper_of_the_checker_is_in_the_runtime() {
-    let runtime = fs::read_to_string("runtime.js").expect("the runtime is missing");
+    let runtime = vey::runtime::source();
     let builtins = fs::read_to_string("src/builtins.rs").expect("the list of helpers is missing");
 
     let mut names = Vec::new();
@@ -159,4 +161,24 @@ fn every_helper_of_the_checker_is_in_the_runtime() {
             name
         );
     }
+}
+
+#[test]
+fn every_part_of_the_runtime_is_joined() {
+    let source = vey::runtime::source();
+    for part in vey::runtime::parts() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("runtime")
+            .join(part);
+        assert!(path.is_file(), "the part {} is missing", part);
+    }
+    // The runtime is one function that the program calls.
+    assert!(
+        source.contains("function createVeyRuntime("),
+        "the runtime is broken"
+    );
+    assert!(
+        source.trim_end().ends_with("})();"),
+        "the runtime is broken"
+    );
 }

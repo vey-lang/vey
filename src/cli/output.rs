@@ -8,13 +8,10 @@ use vey::compiler::Bundle;
 use vey::sourcemap;
 use vey::{format_error, VeyError};
 
-/// The runtime that every compiled program carries with it.
-pub(crate) const RUNTIME: &str = include_str!("../../runtime.js");
-
 pub(crate) fn node_script(bundle: &Bundle) -> String {
     let prefix = format!(
         "{runtime}\n\nconst V = createVeyRuntime(globalThis, require);\n\n(async function () {{\n",
-        runtime = RUNTIME
+        runtime = vey::runtime::source()
     );
     let prefix_lines = prefix.matches('\n').count();
     let map = sourcemap::inline(&bundle.sources, &bundle.mappings, prefix_lines);
@@ -25,7 +22,7 @@ pub(crate) fn node_script(bundle: &Bundle) -> String {
 }
 
 pub(crate) fn browser_script(bundle: &Bundle) -> String {
-    let runtime = RUNTIME.replace("</script", "<\\/script");
+    let runtime = vey::runtime::source().replace("</script", "<\\/script");
     let code = bundle.code.replace("</script", "<\\/script");
     let prefix = format!(
         "{runtime}\n(function () {{\n  const V = createVeyRuntime(window, null);\n  (async function () {{\n"
