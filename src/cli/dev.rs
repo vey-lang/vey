@@ -270,6 +270,16 @@ pub(crate) fn respond(state: &mut DevState, path: &str) -> (u16, &'static str, V
         return (200, "text/html; charset=utf-8", body);
     }
 
+    // A path without a name may still be a page, the way a host that serves
+    // "/about" for "/about.html" does it.
+    if !key.contains('.') {
+        let page = format!("{}.html", key);
+        if let Some(bytes) = state.files.get(&page) {
+            let body = inject_reload(&String::from_utf8_lossy(bytes), state.version).into_bytes();
+            return (200, "text/html; charset=utf-8", body);
+        }
+    }
+
     missing(state)
 }
 
