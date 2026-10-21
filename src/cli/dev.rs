@@ -427,9 +427,12 @@ pub(crate) fn write_response(
         _ => "OK",
     };
     // The development server never lets the browser keep a page, because it
-    // changes while it is worked on.
+    // changes while it is worked on. The release server asks the browser to
+    // check the page again, so that a new build is seen at once.
     let cache = if live {
         "Cache-Control: no-store\r\n"
+    } else if content_type.starts_with("text/html") {
+        "Cache-Control: no-cache\r\n"
     } else {
         ""
     };
