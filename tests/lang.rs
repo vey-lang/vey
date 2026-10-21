@@ -662,6 +662,9 @@ fn new_project_builds_and_curate_is_gone() {
         "public/robots.txt",
         "public/logo.svg",
         "public/favicon.svg",
+        "package.json",
+        "README.md",
+        ".gitignore",
     ] {
         assert!(project.join(file).is_file(), "missing {}", file);
     }
@@ -674,11 +677,10 @@ fn new_project_builds_and_curate_is_gone() {
     assert!(build.status.success(), "{}", stderr(&build));
     assert!(!project.join("index.vey").exists());
     let index = fs::read_to_string(project.join("dist/index.html")).unwrap();
-    assert!(index.contains("Welcome to"), "{}", index);
-    assert!(index.contains("main.vey"), "{}", index);
+    assert!(index.contains("A small language for the web."), "{}", index);
     assert!(index.contains("favicon.svg"), "{}", index);
     for removed in [
-        "A small language",
+        "Welcome to",
         "Clicked",
         "See features",
         "What you get",
@@ -691,15 +693,27 @@ fn new_project_builds_and_curate_is_gone() {
         );
     }
 
-    let landing = fs::read_to_string(project.join("main.vey")).unwrap();
-    assert!(landing.contains("width=\"76\""), "{}", landing);
+    // The palette is black and white, so no colour may be in the styles.
     let css = fs::read_to_string(project.join("style.css")).unwrap();
-    assert!(!css.contains("animation"), "logo must not animate: {}", css);
+    for colour in [
+        "#0f172a", "#1e293b", "#334155", "#e2e8f0", "#94a3b8", "#818cf8", "#35d6c6", "#f87171",
+    ] {
+        assert!(
+            !css.contains(colour),
+            "unexpected colour {} in style",
+            colour
+        );
+    }
+    for pattern in ["gradient", "animation", "@keyframes", "box-shadow"] {
+        assert!(!css.contains(pattern), "unexpected {} in style", pattern);
+    }
+
+    let landing = fs::read_to_string(project.join("main.vey")).unwrap();
     assert!(
-        !css.contains("@keyframes"),
-        "logo must not animate: {}",
-        css
+        !landing.contains("img."),
+        "the page should not need an image"
     );
+    assert!(landing.contains("kicker"), "{}", landing);
 
     let logo = fs::read_to_string(project.join("public/logo.svg")).unwrap();
     assert_eq!(logo.matches("<path").count(), 1, "{}", logo);

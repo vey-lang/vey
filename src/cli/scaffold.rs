@@ -1,11 +1,16 @@
 //! The `vey new` command and the project template.
+
 use std::fs;
 use std::path::Path;
 
 use crate::cli::args::parse_args;
 
-/// The logo that is copied into a new project.
+/// The mark of the language, in the colour of the text around it.
 pub(crate) const PROJECT_LOGO: &str = include_str!("../../logo.svg");
+
+/// The mark as a favicon: the same shape on a black ground, so that it is
+/// visible on every browser.
+pub(crate) const PROJECT_FAVICON: &str = include_str!("../../favicon.svg");
 
 pub(crate) fn cmd_new(args: &[String]) -> i32 {
     let parsed = parse_args(args);
@@ -34,19 +39,27 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         return 1;
     }
 
-    let files: [(&str, &str); 9] = [
-        ("main.vey", PROJECT_MAIN),
-        ("404.vey", PROJECT_404),
-        ("style.css", PROJECT_STYLE),
-        ("tests/main.vey", PROJECT_TEST),
-        ("public/logo.svg", PROJECT_LOGO),
-        ("public/favicon.svg", PROJECT_LOGO),
-        ("public/robots.txt", "User-agent: *\nAllow: /\n"),
-        ("README.md", PROJECT_README),
-        (".gitignore", "/dist\n*.cjs\n.DS_Store\nnode_modules\n"),
+    // The name of the project is used in a few places.
+    let project = root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.clone());
+
+    let files: [(&str, String); 11] = [
+        ("main.vey", PROJECT_MAIN.to_string()),
+        ("404.vey", PROJECT_404.to_string()),
+        ("style.css", PROJECT_STYLE.to_string()),
+        ("tests/main.vey", PROJECT_TEST.to_string()),
+        ("public/logo.svg", PROJECT_LOGO.to_string()),
+        ("public/favicon.svg", PROJECT_FAVICON.to_string()),
+        ("public/robots.txt", ROBOTS.to_string()),
+        ("package.json", PROJECT_PACKAGE.replace("{name}", &project)),
+        ("README.md", PROJECT_README.replace("{name}", &project)),
+        (".gitignore", GITIGNORE.to_string()),
+        ("vey.toml", PROJECT_CONFIG.replace("{name}", &project)),
     ];
 
-    for (file, content) in files {
+    for (file, content) in &files {
         let path = root.join(file);
         if path.exists() {
             println!("skipped {}", file);
@@ -59,7 +72,7 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
             }
         }
         if let Err(err) = fs::write(&path, content) {
-            eprintln!("cannot write {}: {}", file, err);
+            eprintln!("cannot write {}: {}", path.display(), err);
             return 1;
         }
         println!("created {}", file);
@@ -69,17 +82,31 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     println!("project ready in {}", name);
     println!("next:");
     println!("  cd {}", name);
-    println!("  vey run dev");
+    println!("  vey dev");
     0
 }
 
 pub(crate) const PROJECT_MAIN: &str = r##"use "./style.css"
 
 component App() {
-  main.welcome {
-    img.sparkle src="/logo.svg" alt="Vey" width="76" height="76"
-    h1 { "Welcome to " span { "Vey" } }
-    p.file { "main.vey" }
+  main.page {
+    p.kicker { "Vey" }
+    h1 { "A small language for the web." }
+    p.lede {
+      "Vey compiles to JavaScript, so the same file runs in the browser and on \
+       the server. Types are optional, and checked when you write them."
+    }
+    hr
+    dl.list {
+      dt { "vey dev" }
+      dd { "Starts the development server." }
+      dt { "vey build" }
+      dd { "Writes the site to dist/." }
+      dt { "vey test" }
+      dd { "Runs the tests of the project." }
+    }
+    hr
+    footer { "Built with Vey." }
   }
 }
 
@@ -89,26 +116,41 @@ bind("#app", App())
 pub(crate) const PROJECT_404: &str = r##"use "./style.css"
 
 component NotFound() {
-  main.error-page {
-    img.sparkle src="/logo.svg" alt="Vey" width="64" height="64"
-    p.error-code { "404" }
-    h1 { "This page is missing." }
-    p { "The link may be broken, or the page may have moved." }
-    a.btn.primary href="/" { "Back home" }
+  main.page {
+    p.kicker { "404" }
+    h1 { "Nothing here." }
+    p.lede { "The address may be wrong, or the page may have moved." }
+    hr
+    p { a href="/" { "Go back home" } }
   }
 }
 
 bind("#app", NotFound())
 "##;
 
-pub(crate) const PROJECT_STYLE: &str = r##":root {
-  color-scheme: dark;
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --border: #334155;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #818cf8;
+pub(crate) const PROJECT_STYLE: &str = r##"/* The styles of the site.
+   The palette is black and white; the dark mode is the same, turned around. */
+
+:root {
+  color-scheme: light dark;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --bg: #ffffff;
+  --fg: #0b0b0b;
+  --muted: #6e6e6e;
+  --line: #e3e3e3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0b;
+    --fg: #f4f4f4;
+    --muted: #8d8d8d;
+    --line: #262626;
+  }
 }
 
 * {
@@ -117,240 +159,168 @@ pub(crate) const PROJECT_STYLE: &str = r##":root {
 
 body {
   margin: 0;
-  min-height: 100vh;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background:
-    radial-gradient(760px 420px at 50% -10%, rgba(129, 140, 248, 0.15), transparent 70%),
-    var(--bg);
-  color: var(--text);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
-  background-size: 72px 72px;
-  -webkit-mask-image: radial-gradient(circle at 50% 44%, black, transparent 70%);
-  mask-image: radial-gradient(circle at 50% 44%, black, transparent 70%);
-  pointer-events: none;
+.page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 6rem 1.5rem 5rem;
+}
+
+.kicker {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 1.25rem 0 0;
+  font-family: var(--serif);
+  font-size: clamp(2.25rem, 8vw, 3.25rem);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 1.5rem 0 0;
+  max-width: 32rem;
+  font-size: 1.0625rem;
+  color: var(--muted);
+}
+
+hr {
+  margin: 3.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.list {
+  margin: 0;
+}
+
+.list dt {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.list dd {
+  margin: 0 0 1.1rem;
+  padding-left: 10.5rem;
+}
+
+@media (max-width: 34rem) {
+  .list dd {
+    padding-left: 0;
+    margin-bottom: 1.5rem;
+  }
 }
 
 a {
   color: inherit;
   text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  transition: border-color 0.15s ease;
 }
 
-.welcome {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  min-height: 100vh;
-  min-height: 100svh;
-  place-content: center;
-  padding: 40px;
-  text-align: center;
+a:hover {
+  border-bottom-color: var(--fg);
 }
 
-.sparkle {
-  display: block;
-  width: 76px;
-  height: 76px;
-  aspect-ratio: 1;
-  margin: 0 auto 30px;
-  filter: drop-shadow(0 0 30px rgba(129, 140, 248, 0.35));
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
 }
 
-.welcome h1 {
-  margin: 0;
-  font-size: clamp(44px, 10vw, 88px);
-  font-weight: 600;
-  letter-spacing: -0.055em;
-  line-height: 0.98;
-  text-wrap: balance;
-}
-
-.welcome h1 span {
-  color: var(--accent);
-}
-
-.file {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin: 30px auto 0;
+footer {
+  margin-top: 0;
   color: var(--muted);
-  font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.08em;
+  font-size: 0.8125rem;
+}
+"##;
+
+pub(crate) const PROJECT_TEST: &str = r##"fn add(a: number, b: number) -> number {
+  return a + b
 }
 
-.file::before {
-  content: "";
-  width: 20px;
-  height: 1px;
-  background: currentColor;
-  opacity: 0.5;
-}
+test("adds numbers", fn() {
+  assert(add(2, 3) == 5, "the sum should be 5")
+})
+"##;
 
-.btn {
-  display: inline-block;
-  padding: 11px 22px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
+const ROBOTS: &str = "User-agent: *\nAllow: /\n";
 
-.btn:hover {
-  border-color: var(--accent);
-  background: #24324a;
-}
+const GITIGNORE: &str = "/dist\n/node_modules\n*.cjs\n.DS_Store\n";
 
-.btn.primary {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--bg);
-}
-
-.btn.primary:hover {
-  background: #93a0ff;
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
-.error-page {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  min-height: 100vh;
-  min-height: 100svh;
-  place-items: center;
-  padding: 32px;
-  text-align: center;
-}
-
-.error-page .sparkle {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 20px;
-}
-
-.error-code {
-  margin: 0;
-  color: var(--accent);
-  font-size: clamp(72px, 16vw, 120px);
-  font-weight: 800;
-  letter-spacing: -0.05em;
-}
-
-.error-page h1 {
-  margin: 0 0 10px;
-  font-size: clamp(22px, 4vw, 30px);
-}
-
-.error-page p {
-  max-width: 400px;
-  margin: 0 auto 24px;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
-@media (max-width: 600px) {
-  .welcome {
-    padding: 24px;
+const PROJECT_PACKAGE: &str = r##"{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A site built with Vey.",
+  "scripts": {
+    "dev": "vey dev",
+    "build": "vey build",
+    "test": "vey test",
+    "check": "vey check main.vey"
   }
 }
 "##;
 
-pub(crate) const PROJECT_TEST: &str = r##"fn greeting() -> string {
-  return "Vey"
-}
+const PROJECT_CONFIG: &str = r##"# The settings of the project.
 
-test("greets", fn() {
-  assert(greeting() == "Vey", "expected Vey")
-})
+[project]
+name = "{name}"
+
+[site]
+title = "{name}"
 "##;
 
-pub(crate) const PROJECT_README: &str = r##"# Vey project
+const PROJECT_README: &str = r##"# {name}
 
-A website written in [Vey](https://vey.dev): components, CSS and a static site
-builder in one binary.
+A site built with [Vey](https://vey-lang.dev).
 
 ## Development
 
 ```sh
-vey run dev
+npm run dev     # or: vey dev
 ```
 
-The dev server prints a local URL, rebuilds on every save and reloads the
-browser. Compile errors show up in the page instead of the terminal only.
-
-```sh
-vey dev --port 3000
-```
+The server watches the files of the project, rebuilds when one of them
+changes and reloads the page in the browser.
 
 ## Build
 
 ```sh
-vey build
+npm run build   # or: vey build
 ```
 
-This writes a deployable folder:
-
-```
-dist/
-  index.html
-  404.html
-  ...files from public/
-```
-
-Upload `dist/` to Netlify, Vercel, GitHub Pages, S3 or any static host.
-
-Use a different output folder with `-o`:
-
-```sh
-vey build -o site
-```
-
-## Styles
-
-CSS lives in `style.css`, imported from `main.vey`:
-
-```vey
-use "./style.css"
-```
-
-Small one-off styles can live inside the entry file:
-
-```vey
-style {
-  .badge { color: rebeccapurple }
-}
-```
-
-Both forms are inlined into the built page, so there is no extra CSS request.
+The site is written to `dist/`. That folder holds everything the server
+needs, so it can be uploaded as it is.
 
 ## Tests
 
 ```sh
-vey test
+npm test        # or: vey test
 ```
 
-## Files
+## Layout
 
-- `main.vey` — the app
-- `style.css` — styles
-- `404.vey` — not found page
-- `public/` — static assets copied into `dist/` (sparkle logo, favicon, robots.txt)
+| Path | What it is |
+| --- | --- |
+| `main.vey` | the page |
+| `404.vey` | the page of an unknown address |
+| `style.css` | the styles of the site |
+| `public/` | the files that are copied as they are |
+| `tests/` | the tests of the project |
 "##;

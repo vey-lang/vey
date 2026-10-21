@@ -215,32 +215,57 @@ pub(crate) fn default_404_page(title: &str) -> String {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 · {title}</title>
 <style>
-  :root {{ color-scheme: dark; }}
+  :root {{
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #0b0b0b;
+    --muted: #6e6e6e;
+    --line: #e3e3e3;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --bg: #0b0b0b; --fg: #f4f4f4; --muted: #8d8d8d; --line: #262626; }}
+  }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0;
     min-height: 100vh;
     display: grid;
     place-items: center;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: radial-gradient(900px 520px at 50% -10%, #1e2a5a, #0b1020 65%);
-    color: #e8ecf8;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
   }}
-  main {{ padding: 32px; text-align: center; }}
-  .code {{ margin: 0; font-size: clamp(72px, 16vw, 160px); font-weight: 800; letter-spacing: -.04em;
-    background: linear-gradient(135deg, #7c8cff, #35d6c6); -webkit-background-clip: text; background-clip: text; color: transparent; }}
-  h1 {{ margin: 8px 0 12px; font-size: clamp(24px, 4vw, 36px); }}
-  p {{ margin: 0 auto 28px; max-width: 420px; color: #9aa6c4; line-height: 1.6; }}
-  a {{ display: inline-block; padding: 12px 24px; border-radius: 999px; color: #0b1020;
-    background: linear-gradient(135deg, #7c8cff, #35d6c6); font-weight: 600; text-decoration: none; }}
+  main {{ max-width: 32rem; padding: 3rem 1.5rem; }}
+  .code {{
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+  }}
+  h1 {{
+    margin: 1.25rem 0 0;
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    font-size: clamp(2rem, 7vw, 2.75rem);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+  }}
+  p {{ margin: 1.25rem 0 0; color: var(--muted); }}
+  hr {{ margin: 2.5rem 0; border: 0; border-top: 1px solid var(--line); }}
+  a {{ color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }}
+  a:hover {{ border-bottom-color: var(--fg); }}
 </style>
 </head>
 <body>
 <main>
   <p class="code">404</p>
-  <h1>This page is missing.</h1>
-  <p>The link may be broken, or the page may have moved. Head back home and try again.</p>
-  <a href="/">Back to home</a>
+  <h1>Nothing here.</h1>
+  <p>The link may be broken, or the page may have moved.</p>
+  <hr>
+  <p><a href="/">Go back home</a></p>
 </main>
 </body>
 </html>
