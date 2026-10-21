@@ -1,0 +1,4 @@
+use "./math.vey" as math
+
+print("area: {math.area(2)}")
+print("pi: {math.PI}")

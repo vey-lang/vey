@@ -1,0 +1,195 @@
+//! Writing a static site.
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use vey::compiler::{compile_project, Bundle};
+
+use crate::cli::entry::{default_title, project_root};
+use crate::cli::error::BuildError;
+use crate::cli::output::{escape_html, html_document};
+
+pub(crate) struct SiteReport {
+    pub(crate) pages: usize,
+    pub(crate) assets: usize,
+}
+
+pub(crate) fn write_site(
+    entry: &Path,
+    output: &Path,
+    title: Option<&str>,
+) -> Result<SiteReport, BuildError> {
+    let root = project_root(entry);
+    if output == root {
+        return Err(BuildError::from(
+            "refusing to write the build into the project root",
+        ));
+    }
+    if root.starts_with(output) {
+        return Err(BuildError::from(format!(
+            "refusing to write the build into {}: it contains the project",
+            output.display()
+        )));
+    }
+    if output.is_file() {
+        return Err(BuildError::from(format!(
+            "{} is a file, not a directory",
+            output.display()
+        )));
+    }
+
+    let mut watch = Vec::new();
+    let files = site_files(entry, title, &mut watch)?;
+    if output.exists() {
+        fs::remove_dir_all(output).map_err(|err| {
+            BuildError::from(format!("cannot clean {}: {}", output.display(), err))
+        })?;
+    }
+    fs::create_dir_all(output)
+        .map_err(|err| BuildError::from(format!("cannot create {}: {}", output.display(), err)))?;
+
+    let mut assets = 0;
+    for (name, bytes) in &files {
+        let path = output.join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                BuildError::from(format!("cannot create {}: {}", parent.display(), err))
+            })?;
+        }
+        fs::write(&path, bytes)
+            .map_err(|err| BuildError::from(format!("cannot write {}: {}", path.display(), err)))?;
+        if name != "index.html" && name != "404.html" {
+            assets += 1;
+        }
+    }
+
+    Ok(SiteReport { pages: 2, assets })
+}
+
+pub(crate) fn site_files(
+    entry: &Path,
+    title: Option<&str>,
+    watch: &mut Vec<PathBuf>,
+) -> Result<HashMap<String, Vec<u8>>, BuildError> {
+    let root = project_root(entry);
+    let page_title = title
+        .map(str::to_string)
+        .unwrap_or_else(|| default_title(entry));
+
+    let bundle = compile_for_site(entry, watch)?;
+    let favicon = root.join("public/favicon.svg").is_file();
+    let not_found = root.join("404.vey");
+    let not_found_body = if not_found.is_file() {
+        let bundle = compile_for_site(&not_found, watch)?;
+        html_document(&bundle, &format!("{} · 404", page_title), favicon)
+    } else {
+        default_404_page(&page_title)
+    };
+
+    // Static files are copied first so generated pages always win over a
+    // stray public/index.html or public/404.html.
+    let mut files = HashMap::new();
+    let public = root.join("public");
+    if public.is_dir() {
+        copy_public(&public, "", &mut files)?;
+    }
+    files.insert(
+        "index.html".to_string(),
+        html_document(&bundle, &page_title, favicon).into_bytes(),
+    );
+    files.insert("404.html".to_string(), not_found_body.into_bytes());
+
+    Ok(files)
+}
+
+pub(crate) fn copy_public(
+    directory: &Path,
+    prefix: &str,
+    files: &mut HashMap<String, Vec<u8>>,
+) -> Result<(), BuildError> {
+    let entries = fs::read_dir(directory)
+        .map_err(|err| BuildError::from(format!("cannot read {}: {}", directory.display(), err)))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".DS_Store" {
+            continue;
+        }
+        let key = format!("{}{}", prefix, name);
+        if path.is_dir() {
+            copy_public(&path, &format!("{}/", key), files)?;
+        } else if let Ok(bytes) = fs::read(&path) {
+            files.insert(key, bytes);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn compile_for_site(
+    entry: &Path,
+    watch: &mut Vec<PathBuf>,
+) -> Result<Bundle, BuildError> {
+    let entry = entry.canonicalize().unwrap_or_else(|_| entry.to_path_buf());
+    watch.push(entry.clone());
+    match compile_project(&entry) {
+        Ok(bundle) => {
+            watch.push(bundle.entry_path.clone());
+            for module in &bundle.modules {
+                watch.push(module.path.clone());
+            }
+            for style in &bundle.styles {
+                watch.push(style.path.clone());
+            }
+            Ok(bundle)
+        }
+        Err(err) => {
+            // Keep watching the file that failed so fixing it triggers a
+            // rebuild even when it lives outside the project root.
+            watch.push(PathBuf::from(&err.file));
+            Err(BuildError::from_vey(&err))
+        }
+    }
+}
+
+pub(crate) fn default_404_page(title: &str) -> String {
+    format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 · {title}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: radial-gradient(900px 520px at 50% -10%, #1e2a5a, #0b1020 65%);
+    color: #e8ecf8;
+  }}
+  main {{ padding: 32px; text-align: center; }}
+  .code {{ margin: 0; font-size: clamp(72px, 16vw, 160px); font-weight: 800; letter-spacing: -.04em;
+    background: linear-gradient(135deg, #7c8cff, #35d6c6); -webkit-background-clip: text; background-clip: text; color: transparent; }}
+  h1 {{ margin: 8px 0 12px; font-size: clamp(24px, 4vw, 36px); }}
+  p {{ margin: 0 auto 28px; max-width: 420px; color: #9aa6c4; line-height: 1.6; }}
+  a {{ display: inline-block; padding: 12px 24px; border-radius: 999px; color: #0b1020;
+    background: linear-gradient(135deg, #7c8cff, #35d6c6); font-weight: 600; text-decoration: none; }}
+</style>
+</head>
+<body>
+<main>
+  <p class="code">404</p>
+  <h1>This page is missing.</h1>
+  <p>The link may be broken, or the page may have moved. Head back home and try again.</p>
+  <a href="/">Back to home</a>
+</main>
+</body>
+</html>
+"##,
+        title = escape_html(title)
+    )
+}

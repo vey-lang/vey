@@ -1,0 +1,52 @@
+use std::env;
+use std::process::ExitCode;
+
+mod cli;
+
+use cli::{cmd_build, cmd_check, cmd_dev, cmd_new, cmd_run, cmd_test, cmd_web, print_help};
+
+fn main() -> ExitCode {
+    let args: Vec<String> = env::args().skip(1).collect();
+    ExitCode::from(run(&args) as u8)
+}
+
+fn run(args: &[String]) -> i32 {
+    let Some(command) = args.first() else {
+        print_help();
+        return 0;
+    };
+
+    let rest = &args[1..];
+    match command.as_str() {
+        "run" => {
+            if rest.first().is_some_and(|arg| arg == "dev") {
+                cmd_dev(&rest[1..])
+            } else {
+                cmd_run(rest)
+            }
+        }
+        "test" => cmd_test(rest),
+        "build" => cmd_build(rest),
+        "web" => cmd_web(rest),
+        "dev" => cmd_dev(rest),
+        "new" => cmd_new(rest),
+        "check" => cmd_check(rest),
+        "curate" => {
+            eprintln!("'vey curate' was removed. Use 'vey new <directory>' instead.");
+            1
+        }
+        "help" | "--help" | "-h" => {
+            print_help();
+            0
+        }
+        "version" | "--version" | "-v" => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            0
+        }
+        other => {
+            eprintln!("unknown command: {}", other);
+            eprintln!("run 'vey help' for usage");
+            1
+        }
+    }
+}

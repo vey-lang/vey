@@ -1,0 +1,628 @@
+<p align="center">
+  <img src="logo.svg" width="84" height="84" alt="Vey sparkle logo">
+</p>
+
+# Vey
+
+Vey is a small web language with its own syntax, compiler and runtime. The compiler is written in Rust and ships as a single binary. It emits JavaScript, so the same `.vey` source runs on Node and in the browser. Types are optional and checked at compile time.
+
+Browsers only execute JavaScript. That is why the output is JavaScript while the toolchain itself is not.
+
+## Build
+
+```sh
+cargo build --release
+./target/release/vey help
+```
+
+## Commands
+
+```sh
+vey run app.vey                  # compile and run with node
+vey run dev                      # live dev server (also: vey dev)
+vey test                         # run .vey files under tests/
+vey build                        # static site in dist/
+vey build app.vey --node -o app.cjs  # standalone node script
+vey web app.vey -o index.html    # single file browser page
+vey new myapp                    # project scaffold
+vey check app.vey                # parse, check and resolve imports
+```
+
+## Static sites
+
+`vey build` compiles the entry file, renders `404.vey` when it exists and copies
+`public/` into a folder that can be uploaded as is:
+
+```sh
+vey build          # -> dist/
+vey build -o site  # -> site/
+```
+
+```
+dist/
+  index.html
+  404.html
+  robots.txt      # from public/
+```
+
+The page title comes from the project directory, or from `--title "My site"`.
+If there is no `404.vey`, Vey writes a styled default 404 page. `main.vey`,
+`index.vey`, `app.vey`, `page.vey`, `src/main.vey` and `src/index.vey` are
+discovered automatically, so `vey build` works without arguments inside a
+project. When run one level above a project, the only matching entry in a
+subdirectory is used; multiple matches must be passed explicitly.
+
+## Development server
+
+```sh
+vey run dev
+vey dev --port 3000 --host 0.0.0.0
+vey dev app.vey
+```
+
+The server rebuilds the site when the entry, any imported `.vey` or `.css` file
+(including modules in other folders) or a `public/` file changes, and reloads
+the browser. Unknown paths serve `404.html` with a `404` status.
+Compile errors open a styled page with the file, the source line, a caret under
+the failing column, and a hint when Vey can guess the fix (for example
+`use "../style.css"` for a stylesheet in the parent folder). The page
+disappears after the next successful save, so the browser can stay open while
+iterating. The same diagnostic is printed by `vey build` in the terminal.
+
+## Styles
+
+CSS is written in `.css` files or in `style { ... }` blocks. Both end up in the
+built page, so there is no extra request and no build step to configure.
+
+```vey
+use "./style.css"
+
+style {
+  body { margin: 0; background: #0b1020; color: white }
+  .card:hover { border-color: #7c8cff }
+  @media (max-width: 600px) { .card { padding: 8px } }
+}
+```
+
+`style` blocks are raw CSS: braces, `@media` rules, `url(...)` values and
+comments survive untouched. Styles from imported modules and `style` blocks
+are collected in dependency order, so shared styles load before app styles.
+
+## Debugging
+
+`vey run` enables Node source maps. Runtime errors point to the original `.vey` file and line, including errors inside imported modules.
+
+Built scripts contain an inline source map. Run them with the Node flag:
+
+```sh
+node --enable-source-maps app.cjs
+```
+
+## Testing
+
+`vey test` runs every `.vey` file under `tests/`. Pass a file or directory to choose another target.
+
+```vey
+fn add(a: number, b: number) -> number {
+  return a + b
+}
+
+test("adds numbers", fn() {
+  assert(add(2, 3) == 5, "sum should be 5")
+})
+```
+
+`test(name, fn)` runs immediately. A test that contains `await` returns a promise, and the runner keeps the process alive until it settles. `assert(condition, message)` throws when the condition is false. A failed test marks the process as failed.
+
+## Checks
+
+`vey check` rejects duplicate declarations, reassignment of constants and imports, `break` or `continue` outside a loop, `return` outside a function, assignment to an unknown variable, the use of an unknown variable and type mismatches in annotated code. The same checks run before every build.
+
+## Language
+
+```vey
+let name = "Vey"
+const version = 0.6
+
+fn greet(who) {
+  return "Hello, " + who
+}
+
+print(greet("world"))
+print("Version {version}")
+
+let double = n => n * 2
+let numbers = range(1, 6)
+print(numbers |> map(double))
+```
+
+Strings in double quotes interpolate `{expr}`. Single quoted strings are literal.
+
+A brace only starts an interpolation when it holds a single expression. Anything
+else, such as a JSON object, stays literal text:
+
+```vey
+print("{\"a\": 1}")   // {"a": 1}
+print("{}")           // {}
+print("value {name}") // the value of `name`
+```
+
+A function that uses `await` is async on its own; there is no `async` keyword.
+
+### Values
+
+```vey
+let items = [1, 2, 3]
+let user = { name: "Ada", age: 36 }
+let nothing = null
+let flag = true
+```
+
+Member access supports optional chaining and nullish fallback:
+
+```vey
+let city = user?.address?.city ?? "unknown"
+```
+
+Spread works in lists, objects and calls:
+
+```vey
+let combined = [0, ...items]
+let merged = { ...defaults, active: true }
+print(add(...args))
+```
+
+### Types
+
+Types are optional. Annotations are checked at compile time and erased from the output. Unannotated `let` bindings, object constants and list constants stay dynamic, so existing code keeps working. Simple `const` values keep their inferred type.
+
+```vey
+type User = {
+  name: string
+  age?: number
+}
+
+type Id = number | string
+
+fn greet(user: User) -> string {
+  return "Hello, " + user.name
+}
+
+fn add(a: number, b: number) -> number {
+  return a + b
+}
+
+let ada: User = { name: "Ada", age: 36 }
+print(greet(ada))
+print(add(2, 3))
+```
+
+Built-in types are `any`, `number`, `string`, `bool`, `null`, `void` and `never`.
+
+Type forms:
+
+- `[T]` list
+- `{ name: string, age?: number }` object
+- `A | B` union
+- `T?` optional value
+- `(number, string) -> bool` function
+- `(...number) -> number` rest parameters
+
+Functions and type aliases can be generic:
+
+```vey
+fn identity<T>(value: T) -> T {
+  return value
+}
+
+type Box<T> = { value: T }
+type Maybe<T> = T | null
+
+let numberValue: number = identity(1)
+let textValue: string = identity("Vey")
+let box: Box<number> = { value: 2 }
+let missing: Maybe<string> = null
+```
+
+Type arguments are inferred at call sites. Explicit type arguments and generic constraints are not supported yet.
+
+Annotations work on `let`, `const`, function parameters, return types, `for` bindings, destructuring patterns, function expressions and arrow parameters.
+
+```vey
+let parse: (string) -> number = (text: string) => num(text)
+let values: [number] = [1, 2, 3]
+
+for value: number in values {
+  print(value * 2)
+}
+```
+
+The checker verifies assignments, return values, calls, object fields, list elements and component attributes. It narrows unions in simple conditions:
+
+```vey
+fn nameOf(user: User | null) -> string {
+  if user != null {
+    return user.name
+  }
+  return "none"
+}
+```
+
+The narrowing also holds for the code after the check, as long as the branch
+that does not match leaves the function:
+
+```vey
+fn age(user: User | null) -> number {
+  if user == null {
+    return 0
+  }
+  return user.age
+}
+```
+
+`type(value)` checks narrow `string`, `number`, `boolean`, `list`, `object`, `function` and `enum` branches. A check only narrows to a type that the value can actually have.
+
+The calls to the runtime helpers are checked as well, so `math.round("x")` and
+`len()` are reported. A function with a return type has to return a value on
+every path, and a component needs a value for each of its parameters that has
+no default.
+
+Enums are declared with `enum Name { Variant, Variant(field: Type) }`. Unit variants are values, payload variants are constructors, and `match` on an enum value checks exhaustiveness unless a wildcard arm is present.
+
+```vey
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+enum Shape {
+  Circle(radius: number)
+  Rect(width: number, height: number)
+}
+
+fn area(shape: Shape) -> number {
+  return match shape {
+    Shape.Circle(r) => r * r,
+    Shape.Rect(w, h) => w * h,
+  }
+}
+```
+
+Types are module local. Recursive aliases are not implemented yet. Exported type aliases and enums can be used from other modules as `module.TypeName`, and their fields are type-checked. A generic alias can be used from another module as well, with its type arguments filled in:
+
+```vey
+// types.vey
+export type Box<T> = { value: T }
+
+// app.vey
+use "./types.vey" as t
+
+let box: t.Box<number> = { value: 2 }
+```
+
+Cross-module value signature checking is not implemented yet.
+
+Unit variants print as `Color.Red`; payload variants print as `Circle(radius=2.5)`. `type(value)` returns `"enum"` for enum values.
+
+### Destructuring
+
+```vey
+let { name, meta: { age }, tags: [first, ...rest] } = user
+let [head, second] = items
+const { title } = post
+
+for { id, label } in records {
+  print("{id}: {label}")
+}
+```
+
+Object patterns support renamed keys, nested patterns, string keys and a rest binding. Array patterns support nested patterns and a rest binding. Destructuring requires a value, and an exported declaration must bind a single name.
+
+### Control flow
+
+```vey
+if count > 10 {
+  print("large")
+} else if count > 5 {
+  print("medium")
+} else {
+  print("small")
+}
+
+for item in items {
+  print(item)
+}
+
+repeat 3 {
+  print("tick")
+}
+
+while count > 0 {
+  count -= 1
+}
+```
+
+`range(a, b)` produces `a` up to `b - 1`. `range(n)` produces `0` up to `n - 1`. The `..` operator does the same:
+
+```vey
+for i in 0..10 {
+  print(i)
+}
+```
+
+### Pattern matching
+
+```vey
+let label = match score {
+  0 => "zero"
+  1 | 2 => "small"
+  3..9 => "medium"
+  _ => "large"
+}
+```
+
+### Pipes and arrows
+
+```vey
+let result = items
+  |> filter(n => n % 2 == 1)
+  |> map(n => n * 10)
+```
+
+`value |> fn(a)` becomes `fn(value, a)`.
+
+### Errors
+
+```vey
+try {
+  json.parse(text)
+} catch err {
+  print("bad json: {err.message}")
+}
+```
+
+### Modules
+
+```vey
+// math.vey
+export const PI = 3.14159
+
+export fn area(radius) {
+  return PI * radius ** 2
+}
+```
+
+```vey
+// app.vey
+use "./math.vey" as math
+
+print(math.area(2))
+```
+
+Imports are resolved at compile time. The compiler bundles every module into one output file. Circular imports are reported as errors.
+
+Exported type aliases and enums are available as `module.TypeName` in annotations:
+
+```vey
+// types.vey
+export type User = { name: string, age: number }
+export enum Status { Active, Inactive }
+
+// app.vey
+use "./types.vey" as t
+
+let user: t.User = { name: "Ada", age: 30 }
+let status: t.Status = t.Status.Active
+```
+
+
+## Components
+
+Vey does not use JSX. Markup is written with tag selectors, without angle brackets or closing tags.
+
+```vey
+component Card(title, children) {
+  section.card {
+    h2 { title }
+    p { "A card body." }
+    children
+  }
+}
+
+component App() {
+  main.page {
+    h1 { "Hello" }
+    Card title="Counter" {
+      button.btn click=fn() {
+        print("clicked")
+      } { "Click me" }
+    }
+  }
+}
+```
+
+Rules:
+
+- A tag is a name with optional `.class` and `#id` selectors: `div.card`, `main#root`, `img.avatar`, `div.nav-row`.
+- Attributes use `name=value`: `class="row"`, `href="/home"`, `click=fn() { ... }`, `disabled=true`.
+- Children go inside braces. Use a string or an expression directly for text.
+- `if` and `for` work inside markup.
+- Components start with an uppercase letter and receive attributes as parameters. `Card { ... }` and `Card() { ... }` are equivalent.
+- `children` is passed automatically when a component has child nodes.
+- `style`, `script`, `head`, `title`, `meta` and `link` are regular HTML tags inside markup.
+
+Event attributes map to DOM handlers: `click`, `dblclick`, `change`, `input`, `submit`, `load`, `focus`, `blur`, `keydown`, `keyup`, `mouseover`, `mouseout`.
+
+### Passing arguments to a component
+
+A component takes its parameters in order. In markup the arguments can also be
+named, which is handy when a parameter has a default value:
+
+```vey
+component Card(title, subtitle = "none") {
+  section.card {
+    h2 { title }
+    p { subtitle }
+  }
+}
+
+component App() {
+  Card("Counter")            // positional
+  Card("Counter", "live")    // positional
+  Card title="Counter"       // named
+}
+```
+
+Named arguments only work in markup. Everywhere else the arguments are
+positional.
+
+### Browser
+
+```vey
+bind("#app", App())
+```
+
+`bind(selector, node)` renders a component into the page.
+
+### Server side rendering
+
+The same component can be rendered to HTML on the server:
+
+```vey
+print(html(App()))
+```
+
+Text children are escaped. Wrap trusted markup with `raw()`:
+
+```vey
+p { raw("<strong>Trusted</strong>") }
+```
+
+## Server
+
+```vey
+let app = server(3000)
+
+app.get("/", fn(req) {
+  return "<h1>Hello</h1>"
+})
+
+app.get('/users/{id}', fn(req) {
+  return { id: req.params.id, query: req.query }
+})
+
+app.post("/data", fn(req) {
+  return response({ received: req.body }, 201)
+})
+
+app.static("public")
+app.start()
+```
+
+Unknown routes automatically try `public/404.html` and return it with status
+404. A custom handler takes priority:
+
+```vey
+app.notFound(fn(req) {
+  return response("<h1>Nothing at {req.path}</h1>", 404)
+})
+```
+
+Route patterns may end with `*` to capture the rest of the path in
+`req.params.splat`:
+
+```vey
+app.get('/files/*', fn(req) {
+  return { file: req.params.splat }
+})
+```
+
+Route patterns use single quotes, so `{id}` is treated as a path parameter instead of string interpolation.
+
+Handler results:
+
+- string: HTML
+- object or array: JSON
+- `response(body, status, headers)`: explicit response
+- `redirect(url, status)`: redirect
+
+The request object contains `path`, `method`, `params`, `query`, `headers`, `body`, `text` and `cookies`.
+
+## Runtime
+
+| Name | Description |
+| --- | --- |
+| `print(...)` | write to the console |
+| `input(prompt)` | read a line from stdin |
+| `len(value)` | string, list or object length |
+| `append(list, ...items)` | new list with items added |
+| `slice(value, start, end)` | slice a string or list |
+| `join(list, sep)` / `split(text, sep)` | list and text conversion |
+| `map`, `filter`, `reduce`, `find`, `sort` | list helpers |
+| `json.parse`, `json.stringify` | JSON |
+| `math.round`, `math.floor`, `math.random`, `math.pi` | math |
+| `time.now()`, `time.iso()` | time |
+| `http.get(url)`, `http.post(url, body)` | HTTP client |
+| `sleep(ms)` | promise based delay |
+| `html(node)` | render a component tree to HTML |
+| `raw(html)` | mark trusted HTML so `html()` does not escape it |
+| `bind(selector, node)` | mount into the DOM |
+| `type(value)` | runtime type name |
+| `assert(condition, message)` | throw when a condition is false |
+| `test(name, fn)` | run a test block |
+| `all(list)` / `race(list)` | promise combinators |
+| `env(name, fallback)` | environment variable, Node only |
+| `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
+| `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
+| `base64.encode(value)` / `base64.decode(value)` | base64 |
+| `url.encode(value)` / `url.decode(value)` / `url.parse(value)` | URL helpers |
+| `fs.read`, `fs.write`, `fs.append`, `fs.exists`, `fs.list`, `fs.remove`, `fs.mkdir` | file system, Node only |
+| `path.join`, `path.dirname`, `path.basename`, `path.extname`, `path.resolve` | paths, Node only |
+
+A few details worth knowing:
+
+- `sort(list)` orders numbers by value and everything else as text. Pass a
+  comparison function to sort in another order.
+- `random()` without arguments returns a fraction between 0 and 1, while
+  `random(min, max)` returns an integer in that range.
+- `reduce(list, fn)` needs an initial value when the list is empty.
+- `json.stringify` always returns text, so a value it cannot encode becomes
+  the text `undefined`.
+- `url.parse` accepts a relative path and resolves it against a local origin.
+
+## Project layout
+
+```
+src/lexer.rs         tokens
+src/parser.rs        AST
+src/check.rs         semantic checks
+src/builtins.rs      the names the runtime provides
+src/types/           gradual type checker
+  core.rs            the type representation and the rules between types
+  builtins.rs        the signatures of the runtime helpers
+  checker.rs         the checker that walks a program
+src/codegen.rs       JavaScript output
+src/compiler.rs      module graph and bundling
+src/sourcemap.rs     inline source map encoding
+src/main.rs          CLI entry point
+src/cli/             the commands
+  args.rs            command line parsing
+  run.rs             run, test and check
+  build.rs           build and web
+  site.rs            static sites
+  dev.rs             development server
+  scaffold.rs        new projects
+  entry.rs           finding the entry file
+  error.rs           build errors with a source frame
+  output.rs          turning a bundle into runnable output
+runtime.js           runtime shared by node and the browser
+tests/               integration tests
+  lang.rs            the language
+  types.rs           the type checker
+  regressions.rs     bugs that used to give wrong results
+  runtime.rs         the runtime
+  server.rs          the http server
+  dom.rs             rendering in a browser
+  dev.rs             the development server
+```

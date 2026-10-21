@@ -1,0 +1,28 @@
+type Box<T> = { value: T }
+type Maybe<T> = T | null
+
+fn identity<T>(value: T) -> T {
+  return value
+}
+
+fn first<T>(items: [T]) -> Maybe<T> {
+  if len(items) == 0 {
+    return null
+  }
+  return items[0]
+}
+
+fn pair<A, B>(first: A, second: B) -> { first: A, second: B } {
+  return { first: first, second: second }
+}
+
+let box: Box<number> = { value: 42 }
+let name: string = identity("Vey")
+let maybe: Maybe<number> = first([3, 5, 8])
+let entry: { first: string, second: number } = pair("answer", 42)
+
+print(box.value)
+print(name)
+print(maybe ?? 0)
+print(entry.first)
+print(entry.second)

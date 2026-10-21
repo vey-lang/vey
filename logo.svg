@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Vey sparkle logo">
+  <defs>
+    <linearGradient id="sparkle" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 5c2 14.1 10.4 22.5 24.5 24.5C42.4 31.5 34 39.9 32 54 30 39.9 21.6 31.5 7.5 29.5 21.6 27.5 30 19.1 32 5Z" fill="url(#sparkle)"/>
+</svg>

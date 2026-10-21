@@ -1,0 +1,15 @@
+let app = server(3000)
+
+app.get("/", fn(req) {
+  return "<h1>Hello from Vey</h1><p>Try /hello/world</p>"
+})
+
+app.get('/hello/{name}', fn(req) {
+  return {
+    hello: req.params.name,
+    query: req.query,
+    time: time.now()
+  }
+})
+
+app.start()

@@ -1,0 +1,4 @@
+/target
+*.cjs
+index.html
+.DS_Store

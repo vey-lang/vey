@@ -1,0 +1,20 @@
+fn add(a: number, b: number) -> number {
+  return a + b
+}
+
+test("adds numbers", fn() {
+  assert(add(2, 3) == 5, "sum should be 5")
+})
+
+test("uppercases text", fn() {
+  assert(upper("vey") == "VEY")
+})
+
+test("joins lists", fn() {
+  assert(join([1, 2, 3], ",") == "1,2,3")
+})
+
+test("waits for async work", fn() {
+  await sleep(5)
+  assert(true)
+})

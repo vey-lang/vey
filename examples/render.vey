@@ -1,0 +1,27 @@
+let count = 2
+
+component Card(heading, children) {
+  section.card {
+    h2 { heading }
+    children
+  }
+}
+
+component App() {
+  main.page {
+    h1 { "Hi" }
+    Card heading="Counter" {
+      p { "body" }
+      if count > 1 {
+        span { "many" }
+      }
+    }
+    ul {
+      for item in ["a", "b"] {
+        li { item }
+      }
+    }
+  }
+}
+
+print(html(App()))

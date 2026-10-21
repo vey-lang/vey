@@ -1,0 +1,33 @@
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+enum Shape {
+  Circle(radius: number)
+  Rect(width: number, height: number)
+}
+
+fn colorName(color: Color) -> string {
+  return match color {
+    Color.Red => "red",
+    Color.Green => "green",
+    Color.Blue => "blue",
+  }
+}
+
+fn area(shape: Shape) -> number {
+  return match shape {
+    Shape.Circle(r) => r * r,
+    Shape.Rect(w, h) => w * h,
+  }
+}
+
+let color = Color.Green
+let shape = Shape.Circle(2.5)
+
+print(colorName(color))
+print(area(shape))
+print(Color.Red)
+print(Shape.Rect(3, 4))

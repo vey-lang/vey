@@ -1,0 +1,32 @@
+let title = "Hello from Vey"
+let count = 0
+
+component Card(heading, children) {
+  section.card {
+    h2 { heading }
+    children
+  }
+}
+
+component App() {
+  main.page {
+    h1 { title }
+    Card heading="Counter" {
+      p { "The button uses plain functions." }
+      button.btn click=fn() {
+        count = count + 1
+        bind("#app", App())
+      } { "Clicked {count} times" }
+    }
+    if count > 2 {
+      p.note { "You clicked more than twice." }
+    }
+    ul {
+      for item in ["one", "two", "three"] {
+        li { item }
+      }
+    }
+  }
+}
+
+bind("#app", App())

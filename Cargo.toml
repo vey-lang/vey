@@ -1,0 +1,18 @@
+[package]
+name = "vey"
+version = "0.6.0"
+edition = "2021"
+description = "Vey language compiler"
+license = "MIT"
+
+[lib]
+name = "vey"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vey"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

@@ -1,0 +1,30 @@
+type User = { name: string, age?: number }
+type Id = number | string
+
+fn greet(user: User) -> string {
+  return "Hello, " + user.name
+}
+
+fn label(id: Id) -> string {
+  if type(id) == "string" {
+    return id
+  }
+  return str(id)
+}
+
+fn total(...values: number) -> number {
+  let sum: number = 0
+  for value in values {
+    sum = sum + value
+  }
+  return sum
+}
+
+let ada: User = { name: "Ada", age: 36 }
+let grace: User = { name: "Grace" }
+
+print(greet(ada))
+print(greet(grace))
+print(label(7))
+print(label("seven"))
+print(total(1, 2, 3, 4))

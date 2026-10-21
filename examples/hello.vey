@@ -1,0 +1,23 @@
+// Vey basics
+let name = "Vey"
+
+fn greet(who) {
+  return "Hello, " + who
+}
+
+print(greet("world"))
+print("This is {name}.")
+
+let numbers = range(0, 6)
+let doubled = numbers |> map(fn(n) { return n * 2 })
+print(doubled)
+
+let label = match 3 {
+  1 | 2 => "small"
+  3..10 => "medium"
+  _ => "large"
+}
+print(label)
+
+let squares = numbers |> map(n => n ** 2)
+print(squares)
