@@ -553,9 +553,19 @@ impl Parser {
                 self.advance()?;
                 patterns.push(self.parse_pattern()?);
             }
+            // A condition may narrow the arm down.
+            let guard = if self.eat_kw("if")? {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
             self.expect_op("=>")?;
             let body = self.parse_expression()?;
-            arms.push(MatchArm { patterns, body });
+            arms.push(MatchArm {
+                patterns,
+                guard,
+                body,
+            });
             if self.is_punct(",") {
                 self.advance()?;
             }

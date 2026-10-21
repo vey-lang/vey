@@ -26,6 +26,8 @@ The language grew a few things:
   `let { name, greeting = "Hello" } = user`.
 - The fields of an object may be written one under the other, in a type, in a
   value and in a pattern.
+- A match may have a condition (`n if n > 10 => ...`) and a name may take the
+  value of the match (`n => ...`).
 - A generic function may have a constraint (`fn first<T: number>(...)`) and a
   call may name its type arguments.
 - A type alias may refer to itself.

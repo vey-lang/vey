@@ -55,6 +55,13 @@ impl Parser {
                     pos,
                 });
             }
+
+            // A name that is not a pattern takes the value of the match.
+            if self.tok.kind == TokKind::Ident {
+                let pos = self.tok.pos;
+                let name = self.advance()?.value;
+                return Ok(Pattern::Binding { name, pos });
+            }
         }
 
         let negative = self.eat_op("-")?;

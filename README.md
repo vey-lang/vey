@@ -520,6 +520,36 @@ let label = match score {
 }
 ```
 
+A name takes the value of the match, and a condition narrows the arm down:
+
+```vey
+let label = match score {
+  n if n > 100 => "a lot"
+  n if n > 10 => "some"
+  _ => "few"
+}
+```
+
+A variant of an enum may take its fields apart as well:
+
+```vey
+enum Size {
+  Small
+  Large(weight: number)
+}
+
+let size = Size.Large(30)
+
+let label = match size {
+  Size.Large(weight) if weight > 10 => "heavy"
+  Size.Large(weight) => "light"
+  Size.Small => "small"
+}
+
+print(label)
+```
+<!-- check -->
+
 ### Pipes and arrows
 
 ```vey

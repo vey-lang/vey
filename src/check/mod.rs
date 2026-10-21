@@ -418,14 +418,36 @@ impl Checker<'_> {
                     self.scopes.push();
                     for pattern in &arm.patterns {
                         self.check_pattern(pattern)?;
-                        if let Pattern::Enum { bindings, .. } = pattern {
-                            let mut seen = std::collections::HashSet::new();
-                            for binding in bindings {
-                                if seen.insert(binding.name.clone()) {
-                                    self.declare(&binding.name, BindingKind::Let, binding.pos)?;
+                        match pattern {
+                            Pattern::Enum { bindings, .. } => {
+                                let mut seen = std::collections::HashSet::new();
+                                for binding in bindings {
+                                    if seen.insert(binding.name.clone()) {
+                                        self.declare(&binding.name, BindingKind::Let, binding.pos)?;
+                                    }
                                 }
                             }
+                            Pattern::Binding { name, pos } => {
+                                self.declare(name, BindingKind::Let, *pos)?;
+                            }
+                            _ => {}
                         }
+                    }
+                    // A name takes the whole value, so it cannot stand next
+                    // to another pattern.
+                    if arm.patterns.len() > 1
+                        && arm
+                            .patterns
+                            .iter()
+                            .any(|pattern| matches!(pattern, Pattern::Binding { .. }))
+                    {
+                        return Err(self.error(
+                            arm.patterns[1].pos(),
+                            "a name cannot be used with other patterns",
+                        ));
+                    }
+                    if let Some(guard) = &arm.guard {
+                        self.check_expr(guard)?;
                     }
                     self.check_expr(&arm.body)?;
                     self.scopes.pop();
@@ -445,6 +467,7 @@ impl Checker<'_> {
                 self.check_expr(end)?;
             }
             Pattern::Wildcard => {}
+            Pattern::Binding { .. } => {}
             Pattern::Enum { .. } => {}
         }
         Ok(())

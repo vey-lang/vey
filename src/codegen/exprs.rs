@@ -203,139 +203,196 @@ impl Codegen {
         let subject = self.gen_expr(subject)?;
         let temp = format!("__match{}", self.temp);
         self.temp += 1;
-        let captured =
-            self.capture(|codegen| {
-                let mut has_default = false;
-                for arm in arms {
-                    if arm.patterns.iter().any(|p| matches!(p, Pattern::Wildcard)) {
-                        let body = codegen.gen_expr(&arm.body)?;
-                        codegen.emit(&format!("return {};", body));
-                        has_default = true;
-                        break;
-                    }
-                    // determine binding names for this arm
-                    let mut binding_names: Vec<String> = Vec::new();
-                    for pattern in &arm.patterns {
-                        if let Pattern::Enum { bindings, .. } = pattern {
-                            for b in bindings {
-                                if !binding_names.contains(&b.name) {
-                                    binding_names.push(b.name.clone());
+        let captured = self.capture(|codegen| {
+            let mut has_default = false;
+            for arm in arms {
+                // The names that the patterns of the arm bind.
+                let mut bound: Vec<String> = Vec::new();
+                for pattern in &arm.patterns {
+                    match pattern {
+                        Pattern::Enum { bindings, .. } => {
+                            for binding in bindings {
+                                if !bound.contains(&binding.name) {
+                                    bound.push(binding.name.clone());
                                 }
                             }
                         }
+                        Pattern::Binding { name, .. } if !bound.contains(name) => {
+                            bound.push(name.clone());
+                        }
+                        _ => {}
                     }
-                    // generate body in a scope with bindings declared
-                    codegen.push_scope();
-                    for name in &binding_names {
-                        codegen.declare(name);
-                    }
-                    let body = codegen.gen_expr(&arm.body)?;
-                    codegen.pop_scope();
+                }
 
-                    // check if any pattern has bindings -> per-pattern blocks
-                    let has_bindings = arm.patterns.iter().any(
-                        |p| matches!(p, Pattern::Enum { bindings, .. } if !bindings.is_empty()),
+                // The body is written in a scope with the names in it.
+                codegen.push_scope();
+                for name in &bound {
+                    codegen.declare(name);
+                }
+                let body = codegen.gen_expr(&arm.body)?;
+                codegen.pop_scope();
+
+                // The condition of the arm is written with the names in
+                // it as well.
+                let guard = match &arm.guard {
+                    Some(guard) => {
+                        codegen.push_scope();
+                        for name in &bound {
+                            codegen.declare(name);
+                        }
+                        let text = codegen.gen_expr(guard)?;
+                        codegen.pop_scope();
+                        Some(text)
+                    }
+                    None => None,
+                };
+
+                // A wildcard without a condition takes every value.
+                if arm.guard.is_none()
+                    && arm
+                        .patterns
+                        .iter()
+                        .any(|pattern| matches!(pattern, Pattern::Wildcard))
+                {
+                    codegen.emit(&format!("return {};", body));
+                    has_default = true;
+                    break;
+                }
+
+                // The condition of every pattern of the arm.
+                let mut conditions: Vec<String> = Vec::new();
+                // The patterns that take the fields of an enum.
+                let mut blocks: Vec<(String, Vec<(String, String)>)> = Vec::new();
+                // The names that take the value of the match.
+                let mut value_names: Vec<String> = Vec::new();
+                for pattern in &arm.patterns {
+                    match pattern {
+                        Pattern::Literal(expr) => {
+                            conditions.push(format!("{} === {}", temp, codegen.gen_expr(expr)?))
+                        }
+                        Pattern::Range(start, end) => conditions.push(format!(
+                            "({} >= {} && {} < {})",
+                            temp,
+                            codegen.gen_expr(start)?,
+                            temp,
+                            codegen.gen_expr(end)?
+                        )),
+                        Pattern::Enum {
+                            enum_name, variant, ..
+                        } => conditions.push(format!(
+                            "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
+                            temp,
+                            temp,
+                            js_string(enum_name),
+                            temp,
+                            js_string(variant)
+                        )),
+                        // A name always holds, it only takes the value.
+                        Pattern::Wildcard => {}
+                        Pattern::Binding { name, .. } => value_names.push(name.clone()),
+                    }
+                }
+
+                // A pattern that takes the fields of an enum needs a
+                // block of its own, because the fields are read after
+                // the variant is known.
+                for pattern in &arm.patterns {
+                    let Pattern::Enum {
+                        enum_name,
+                        variant,
+                        bindings,
+                        ..
+                    } = pattern
+                    else {
+                        continue;
+                    };
+                    if bindings.is_empty() {
+                        continue;
+                    }
+                    let condition = format!(
+                        "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
+                        temp,
+                        temp,
+                        js_string(enum_name),
+                        temp,
+                        js_string(variant)
                     );
-
-                    if has_bindings {
-                        for pattern in &arm.patterns {
-                            match pattern {
-                                Pattern::Enum {
-                                    enum_name,
-                                    variant,
-                                    bindings,
-                                    ..
-                                } => {
-                                    let cond = format!(
-                                    "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
-                                    temp, temp, js_string(enum_name), temp, js_string(variant)
-                                );
-                                    codegen.emit(&format!("if ({}) {{", cond));
-                                    codegen.indent += 1;
-                                    // resolve variant field names from registry
-                                    let variant_fields = codegen
-                                        .enums
-                                        .get(enum_name)
-                                        .and_then(|v| v.get(variant))
-                                        .cloned()
-                                        .unwrap_or_default();
-                                    let mut positional_idx = 0usize;
-                                    for b in bindings {
-                                        let field = if let Some(f) = &b.field {
-                                            f.clone()
-                                        } else {
-                                            let idx = positional_idx;
-                                            positional_idx += 1;
-                                            variant_fields
-                                                .get(idx)
-                                                .cloned()
-                                                .unwrap_or_else(|| b.name.clone())
-                                        };
-                                        codegen.emit(&format!(
-                                            "const _{} = {}.{};",
-                                            b.name, temp, field
-                                        ));
-                                    }
-                                    codegen.emit(&format!("return {};", body));
-                                    codegen.indent -= 1;
-                                    codegen.emit("}");
-                                }
-                                Pattern::Literal(expr) => {
-                                    let cond = format!("{} === {}", temp, codegen.gen_expr(expr)?);
-                                    codegen.emit(&format!("if ({}) return {};", cond, body));
-                                }
-                                Pattern::Range(start, end) => {
-                                    let cond = format!(
-                                        "({} >= {} && {} < {})",
-                                        temp,
-                                        codegen.gen_expr(start)?,
-                                        temp,
-                                        codegen.gen_expr(end)?
-                                    );
-                                    codegen.emit(&format!("if ({}) return {};", cond, body));
-                                }
-                                _ => {}
-                            }
-                        }
-                    } else {
-                        let mut conditions = Vec::new();
-                        for pattern in &arm.patterns {
-                            match pattern {
-                                Pattern::Literal(expr) => conditions.push(format!(
-                                    "{} === {}",
-                                    temp,
-                                    codegen.gen_expr(expr)?
-                                )),
-                                Pattern::Range(start, end) => conditions.push(format!(
-                                    "({} >= {} && {} < {})",
-                                    temp,
-                                    codegen.gen_expr(start)?,
-                                    temp,
-                                    codegen.gen_expr(end)?
-                                )),
-                                Pattern::Enum {
-                                    enum_name, variant, ..
-                                } => {
-                                    conditions.push(format!(
-                                    "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
-                                    temp, temp, js_string(enum_name), temp, js_string(variant)
-                                ));
-                                }
-                                _ => {}
-                            }
-                        }
-                        codegen.emit(&format!(
-                            "if ({}) return {};",
-                            conditions.join(" || "),
-                            body
-                        ));
+                    let variant_fields = codegen
+                        .enums
+                        .get(enum_name)
+                        .and_then(|variants| variants.get(variant))
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut positional = 0usize;
+                    let mut taken: Vec<(String, String)> = Vec::new();
+                    for binding in bindings {
+                        let field = if let Some(field) = &binding.field {
+                            field.clone()
+                        } else {
+                            let index = positional;
+                            positional += 1;
+                            variant_fields
+                                .get(index)
+                                .cloned()
+                                .unwrap_or_else(|| binding.name.clone())
+                        };
+                        taken.push((binding.name.clone(), format!("{}.{}", temp, field)));
                     }
+                    blocks.push((condition, taken));
                 }
-                if !has_default {
-                    codegen.emit("return undefined;");
+
+                // The arm that holds the value of the match.
+                if !value_names.is_empty() {
+                    codegen.emit("{");
+                    codegen.indent += 1;
+                    for name in &value_names {
+                        codegen.emit(&format!("const _{} = {};", name, temp));
+                    }
+                    match &guard {
+                        Some(guard) => codegen.emit(&format!("if ({}) return {};", guard, body)),
+                        None => codegen.emit(&format!("return {};", body)),
+                    }
+                    codegen.indent -= 1;
+                    codegen.emit("}");
+                    continue;
                 }
-                Ok(())
-            })?;
+
+                // The arm that takes the fields of an enum.
+                if !blocks.is_empty() {
+                    for (condition, taken) in &blocks {
+                        codegen.emit(&format!("if ({}) {{", condition));
+                        codegen.indent += 1;
+                        for (name, expression) in taken {
+                            codegen.emit(&format!("const _{} = {};", name, expression));
+                        }
+                        match &guard {
+                            Some(guard) => {
+                                codegen.emit(&format!("if ({}) return {};", guard, body))
+                            }
+                            None => codegen.emit(&format!("return {};", body)),
+                        }
+                        codegen.indent -= 1;
+                        codegen.emit("}");
+                    }
+                    continue;
+                }
+
+                // The arm that is one condition.
+                let mut all = conditions;
+                if let Some(guard) = guard {
+                    all.push(guard);
+                }
+                if all.is_empty() {
+                    codegen.emit(&format!("return {};", body));
+                } else {
+                    codegen.emit(&format!("if ({}) return {};", all.join(" || "), body));
+                }
+            }
+            if !has_default {
+                codegen.emit("return undefined;");
+            }
+            Ok(())
+        })?;
         let pad = "  ".repeat(self.indent);
         // An `await` inside an arm needs an async arrow, otherwise the
         // generated JavaScript is a syntax error.

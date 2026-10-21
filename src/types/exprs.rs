@@ -296,11 +296,28 @@ impl TypeChecker<'_> {
                                 covered.insert(format!("{}.{}", enum_name, variant));
                             }
                             Pattern::Wildcard => {
-                                has_wildcard = true;
+                                if arm.guard.is_none() {
+                                    has_wildcard = true;
+                                }
+                            }
+                            Pattern::Binding { name, .. } => {
+                                // The name takes the value of the match.
+                                self.declare(name, subject_ty.clone());
+                                if arm.guard.is_none() {
+                                    has_wildcard = true;
+                                }
                             }
                             _ => {
                                 self.check_pattern(pattern)?;
                             }
+                        }
+                    }
+                    // The condition of the arm is checked with the names of
+                    // the patterns in it.
+                    if let Some(guard) = &arm.guard {
+                        let actual = self.infer_expr(guard)?;
+                        if !assignable(&actual, &Type::Bool) {
+                            return Err(self.type_error(guard.pos(), &actual, &Type::Bool));
                         }
                     }
                     types.push(self.infer_expr(&arm.body)?);

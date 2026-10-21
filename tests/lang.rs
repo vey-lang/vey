@@ -1422,3 +1422,91 @@ fn a_missing_comma_on_one_line_is_reported() {
         "expected '}'",
     );
 }
+
+#[test]
+fn a_match_may_have_a_condition() {
+    let dir = temp_dir("match-guard");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+let score = 15
+let label = match score {
+  n if n > 10 => "big"
+  n if n > 5 => "medium"
+  _ => "small"
+}
+
+print(label)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("big"), "{}", stdout(&output));
+}
+
+#[test]
+fn a_condition_may_use_the_fields_of_a_variant() {
+    let dir = temp_dir("match-guard-enum");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+enum Size {
+  Small,
+  Large(weight: number)
+}
+
+let size = Size.Large(30)
+let label = match size {
+  Size.Large(weight) if weight > 10 => "heavy"
+  Size.Large(weight) => "light"
+  Size.Small => "small"
+}
+
+print(label)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("heavy"), "{}", stdout(&output));
+}
+
+#[test]
+fn a_name_takes_the_value_of_the_match() {
+    let dir = temp_dir("match-binding");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+let value = 42
+let text = match value {
+  n => "the number {n}"
+}
+
+print(text)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("the number 42"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn a_name_cannot_stand_next_to_another_pattern() {
+    check_error(
+        "let value = 1\nlet label = match value {\n  n | 5 => \"x\"\n}\n",
+        "match-binding-with-other",
+        "a name cannot be used with other patterns",
+    );
+}

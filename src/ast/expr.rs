@@ -13,6 +13,8 @@ pub struct StrPart {
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub patterns: Vec<Pattern>,
+    /// The condition that has to hold as well.
+    pub guard: Option<Expr>,
     pub body: Expr,
 }
 
@@ -21,12 +23,30 @@ pub enum Pattern {
     Literal(Expr),
     Range(Expr, Expr),
     Wildcard,
+    /// A name that takes the value of the match.
+    Binding {
+        name: String,
+        pos: Pos,
+    },
     Enum {
         enum_name: String,
         variant: String,
         bindings: Vec<EnumBinding>,
         pos: Pos,
     },
+}
+
+impl Pattern {
+    /// The place of the pattern.
+    pub fn pos(&self) -> Pos {
+        match self {
+            Self::Literal(expr) => expr.pos(),
+            Self::Range(start, _) => start.pos(),
+            Self::Wildcard => Pos::new(0, 0),
+            Self::Binding { pos, .. } => *pos,
+            Self::Enum { pos, .. } => *pos,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
