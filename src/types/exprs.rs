@@ -70,7 +70,7 @@ impl TypeChecker<'_> {
                         ObjectProp::Spread(value) => {
                             let ty = self.infer_expr(value)?;
                             match ty {
-                                Type::Object(fields) => {
+                                Type::Object(fields) | Type::Named(_, fields) => {
                                     for field in fields {
                                         set_object_field(&mut out, field);
                                     }
@@ -717,7 +717,7 @@ impl TypeChecker<'_> {
                     })
                     .unwrap_or(Ok(Type::Any))
             }
-            Type::Object(fields) => fields
+            Type::Object(fields) | Type::Named(_, fields) => fields
                 .iter()
                 .find(|field| field.name == name)
                 .map(|field| field.ty.clone())

@@ -323,7 +323,7 @@ fn area(shape: Shape) -> number {
 }
 ```
 
-Types are module local. Recursive aliases are not implemented yet. Exported type aliases and enums can be used from other modules as `module.TypeName`, and their fields are type-checked. A generic alias can be used from another module as well, with its type arguments filled in:
+Types are module local. Exported type aliases and enums can be used from other modules as `module.TypeName`, and their fields are type-checked. A generic alias can be used from another module as well, with its type arguments filled in:
 
 ```vey
 // types.vey
@@ -334,6 +334,18 @@ use "./types.vey" as t
 
 let box: t.Box<number> = { value: 2 }
 ```
+
+An alias may refer to itself, which is how a linked list or a tree is
+written:
+
+```vey
+type Node = { value: number, next: Node | null }
+
+let list: Node = { value: 1, next: { value: 2, next: null } }
+```
+
+The part of the alias that is still open is checked loosely, because it cannot
+be written out. The other fields are checked as usual.
 
 The functions and constants of another module keep their signature, so a call
 to them is checked in the same way as a local one.

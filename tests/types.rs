@@ -256,12 +256,27 @@ let d = env("HOME")
 }
 
 #[test]
-fn a_recursive_alias_is_reported() {
-    let error = check_err(
+fn a_recursive_alias_may_be_used() {
+    check_ok(
         "recursive-alias",
-        "type Node = { value: number, next: Node | null }\nlet n: Node = { value: 1, next: null }\n",
+        r#"
+type Node = { value: number, next: Node | null }
+
+let a: Node = { value: 1, next: null }
+let b: Node = { value: 2, next: { value: 3, next: null } }
+print(a.value)
+print(b.next.value)
+"#,
     );
-    assert!(error.contains("recursive type alias"), "{error}");
+}
+
+#[test]
+fn a_recursive_alias_still_checks_its_other_fields() {
+    let error = check_err(
+        "recursive-alias-field",
+        "type Node = { value: number, next: Node | null }\nlet a: Node = { value: \"x\", next: null }\n",
+    );
+    assert!(error.contains("expected Node"), "{error}");
 }
 
 #[test]

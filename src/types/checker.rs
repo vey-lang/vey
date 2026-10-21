@@ -202,6 +202,16 @@ fn inferred_const_type(ty: Type) -> Type {
     }
 }
 
+/// Give an object type the name of the alias it came from.
+///
+/// The name makes the type easier to read in an error message.
+pub(crate) fn name_alias(name: &str, ty: Type) -> Type {
+    match ty {
+        Type::Object(fields) => Type::Named(name.to_string(), fields),
+        other => other,
+    }
+}
+
 pub(crate) fn argument_label(count: usize) -> &'static str {
     if count == 1 {
         "argument"
@@ -270,7 +280,8 @@ pub fn check(
                 if decl.type_params.is_empty() {
                     let mut stack = Vec::new();
                     let ty = checker.resolve_type_with(&alias.body, &mut stack, &HashMap::new())?;
-                    env.types.insert(decl.name.clone(), ty);
+                    env.types
+                        .insert(decl.name.clone(), name_alias(&decl.name, ty));
                 } else {
                     let body = checker
                         .alias_types
@@ -622,9 +633,10 @@ impl TypeChecker<'_> {
                                 ));
                             }
                             if stack.iter().any(|item| item == name) {
-                                return Err(
-                                    self.error(*pos, format!("recursive type alias '{}'", name))
-                                );
+                                // The alias refers to itself. The part that
+                                // is still open cannot be written out, so it
+                                // stays a reference to the alias.
+                                return Ok(Type::Recursion(name.clone()));
                             }
                             // The body of an alias was resolved when it was
                             // declared, so it cannot pick up the type
@@ -636,7 +648,7 @@ impl TypeChecker<'_> {
                             let resolved =
                                 self.resolve_type_with(&alias.body, stack, &HashMap::new());
                             stack.pop();
-                            return resolved;
+                            return resolved.map(|ty| name_alias(name, ty));
                         }
                         if self.enums.contains_key(name) {
                             return Ok(Type::EnumUnion(name.clone()));
@@ -851,9 +863,12 @@ impl TypeChecker<'_> {
                     .iter()
                     .map(|param| (param.name.clone(), Type::Var(param.name.clone())))
                     .collect();
-                let mut stack = Vec::new();
+                // The name of the alias is on the stack, so that a reference
+                // to it inside its own body stays a reference.
+                let mut stack = vec![decl.name.clone()];
                 let ty = self.resolve_type_with(&decl.ty, &mut stack, &vars)?;
-                self.alias_types.insert(decl.name.clone(), ty);
+                self.alias_types
+                    .insert(decl.name.clone(), name_alias(&decl.name, ty));
             }
         }
 

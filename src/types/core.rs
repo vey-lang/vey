@@ -21,6 +21,13 @@ pub enum Type {
     Enum(String, String),
     EnumUnion(String),
     EnumNamespace(String),
+    /// A reference to a type alias that refers back to itself.
+    ///
+    /// The alias cannot be written out, so the part that is still open is
+    /// checked loosely.
+    Recursion(String),
+    /// An object type that has a name, such as a type alias.
+    Named(String, Vec<ObjectField>),
 }
 
 #[derive(Clone)]
@@ -113,6 +120,8 @@ impl Type {
             Self::Enum(name, variant) => format!("{}.{}", name, variant),
             Self::EnumUnion(name) => name.clone(),
             Self::EnumNamespace(name) => format!("enum {}", name),
+            Self::Recursion(name) => name.clone(),
+            Self::Named(name, _) => name.clone(),
         }
     }
 
@@ -163,7 +172,11 @@ pub(crate) fn push_unique(out: &mut Vec<Type>, ty: Type) {
 }
 
 pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
-    if matches!(source, Type::Any) || matches!(target, Type::Any) {
+    // The open part of a recursive alias is checked loosely, because it
+    // cannot be written out.
+    if matches!(source, Type::Any | Type::Recursion(_))
+        || matches!(target, Type::Any | Type::Recursion(_))
+    {
         return true;
     }
     if matches!(source, Type::Never) {
@@ -189,6 +202,9 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
     match (source, target) {
         (Type::Array(source), Type::Array(target)) => assignable(source, target),
         (Type::Object(source), Type::Object(target)) => object_assignable(source, target),
+        (Type::Named(_, source), Type::Object(target)) => object_assignable(source, target),
+        (Type::Object(source), Type::Named(_, target)) => object_assignable(source, target),
+        (Type::Named(_, source), Type::Named(_, target)) => object_assignable(source, target),
         (Type::Function(source), Type::Function(target)) => function_assignable(source, target),
         (Type::Enum(e1, v1), Type::Enum(e2, v2)) => e1 == e2 && v1 == v2,
         (Type::Enum(e, _), Type::EnumUnion(e2)) => e == e2,
@@ -257,6 +273,7 @@ pub(crate) fn type_has_var(ty: &Type) -> bool {
         Type::Var(_) => true,
         Type::Array(inner) => type_has_var(inner),
         Type::Object(fields) => fields.iter().any(|field| type_has_var(&field.ty)),
+        Type::Named(_, fields) => fields.iter().any(|field| type_has_var(&field.ty)),
         Type::Function(function) => function_has_vars(function),
         Type::Union(items) => items.iter().any(type_has_var),
         _ => false,
@@ -293,6 +310,17 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
         Type::Var(_) => Type::Any,
         Type::Array(inner) => Type::Array(Box::new(erase_type_vars(inner))),
         Type::Object(fields) => Type::Object(
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: erase_type_vars(&field.ty),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
+        Type::Named(name, fields) => Type::Named(
+            name.clone(),
             fields
                 .iter()
                 .map(|field| ObjectField {
@@ -341,6 +369,17 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 })
                 .collect(),
         ),
+        Type::Named(name, fields) => Type::Named(
+            name.clone(),
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: substitute_bound(&field.ty, subst),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
         Type::Function(function) => Type::Function(FunctionType {
             params: function
                 .params
@@ -374,6 +413,7 @@ pub(crate) fn has_type_var(ty: &Type) -> bool {
         Type::Var(_) => true,
         Type::Array(inner) => has_type_var(inner),
         Type::Object(fields) => fields.iter().any(|field| has_type_var(&field.ty)),
+        Type::Named(_, fields) => fields.iter().any(|field| has_type_var(&field.ty)),
         Type::Function(function) => {
             function.params.iter().any(has_type_var) || has_type_var(&function.ret)
         }
@@ -392,6 +432,11 @@ pub(crate) fn collect_type_vars(ty: &Type, out: &mut Vec<String>) {
         }
         Type::Array(inner) => collect_type_vars(inner, out),
         Type::Object(fields) => {
+            for field in fields {
+                collect_type_vars(&field.ty, out);
+            }
+        }
+        Type::Named(_, fields) => {
             for field in fields {
                 collect_type_vars(&field.ty, out);
             }
@@ -461,7 +506,9 @@ pub(crate) fn unify_types(
         return false;
     }
 
-    if matches!(actual, Type::Any) || matches!(expected, Type::Any) {
+    if matches!(actual, Type::Any | Type::Recursion(_))
+        || matches!(expected, Type::Any | Type::Recursion(_))
+    {
         return true;
     }
     if matches!(actual, Type::Never) || actual == expected {
@@ -507,7 +554,10 @@ pub(crate) fn unify_types(
 
     match (actual, expected) {
         (Type::Array(actual), Type::Array(expected)) => unify_types(actual, expected, subst),
-        (Type::Object(actual), Type::Object(expected)) => {
+        (Type::Object(actual), Type::Object(expected))
+        | (Type::Named(_, actual), Type::Object(expected))
+        | (Type::Object(actual), Type::Named(_, expected))
+        | (Type::Named(_, actual), Type::Named(_, expected)) => {
             for expected_field in expected {
                 match actual
                     .iter()
@@ -580,6 +630,17 @@ pub(crate) fn substitute_with(
                 })
                 .collect(),
         ),
+        Type::Named(name, fields) => Type::Named(
+            name.clone(),
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: substitute_with(&field.ty, subst, seen),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
         Type::Function(function) => Type::Function(FunctionType {
             params: function
                 .params
@@ -635,6 +696,11 @@ pub(crate) fn project_field(ty: &Type, name: &str) -> Type {
             .find(|field| field.name == name)
             .map(|field| field.ty.clone())
             .unwrap_or(Type::Any),
+        Type::Named(_, fields) => fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| field.ty.clone())
+            .unwrap_or(Type::Any),
         Type::Union(items) => union(items.iter().map(|item| project_field(item, name)).collect()),
         Type::Any => Type::Any,
         _ => Type::Any,
@@ -650,6 +716,14 @@ pub(crate) fn object_rest_type(ty: &Type, bound: &[BindingField]) -> Type {
                 .cloned()
                 .collect();
             Type::Object(remaining)
+        }
+        Type::Named(name, fields) => {
+            let remaining = fields
+                .iter()
+                .filter(|field| !bound.iter().any(|item| item.key == field.name))
+                .cloned()
+                .collect();
+            Type::Named(name.clone(), remaining)
         }
         Type::Any => Type::Any,
         Type::Union(items) => union(
@@ -690,7 +764,7 @@ pub(crate) fn type_from_kind(kind: &str, original: &Type) -> Option<Type> {
             _ => return None,
         },
         "object" => match original {
-            Type::Object(_) => original.clone(),
+            Type::Object(_) | Type::Named(_, _) => original.clone(),
             _ => return None,
         },
         "enum" => match original {

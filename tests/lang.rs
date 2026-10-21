@@ -945,7 +945,7 @@ fn rejects_type_mismatches() {
     check_error(
         "type User = { name: string }\nlet user: User = { name: 1 }\n",
         "type-object",
-        "expected { name: string }, found { name: number }",
+        "expected User, found { name: number }",
     );
     check_error(
         "let user: { name: string } = { name: \"Ada\" }\nprint(user.age)\n",
@@ -968,9 +968,9 @@ fn rejects_type_mismatches() {
         "function must return number",
     );
     check_error(
-        "type Node = { next: Node }\nlet node: Node = { next: null }\n",
+        "type Node = { value: number, next: Node | null }\nlet node: Node = { value: \"x\", next: null }\n",
         "type-recursive",
-        "recursive type alias 'Node'",
+        "expected Node",
     );
     check_error(
         "let f: (number) -> number = (n: string) => n\n",
