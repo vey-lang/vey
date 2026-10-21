@@ -2,6 +2,29 @@
 
 ## 0.7.0
 
+The runtime is now a folder of parts instead of one file: `runtime/` holds the
+frame, the shared helpers and one part for every area, and the compiler joins
+them together.
+
+The runtime grew a few libraries:
+
+- `text.capitalize`, `text.slug`, `text.camel`, `text.kebab` for the shape of
+  a name.
+- `text.padStart`, `text.padEnd`, `text.repeat`, `text.reverse`, `text.words`
+  for the size of a text.
+- `date.now`, `date.iso`, `date.format`, `date.parts`, `date.daysBetween` and
+  `date.addDays` for the date and the time.
+- `query.parse` and `query.stringify` for the query of an address.
+- `cookie.parse` and `cookie.stringify` for the cookies of a request.
+
+The packages of npm may be used with the `npm:` prefix:
+
+```vey
+use "npm:marked" as marked
+```
+
+The `require` helper loads a package without an import.
+
 The toolchain changed the most in this release.
 
 - `vey run` serves the built site the way a host would serve it. `vey dev` is

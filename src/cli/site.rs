@@ -361,6 +361,19 @@ pub(crate) fn compile_for_site(
     watch.push(entry.clone());
     match compile_project(&entry) {
         Ok(bundle) => {
+            // A package of npm needs Node, and a page of a site runs in the
+            // browser.
+            let package = bundle
+                .modules
+                .iter()
+                .flat_map(|module| module.packages.iter().map(|(_, name)| name.clone()))
+                .next();
+            if let Some(package) = package {
+                return Err(BuildError::from(format!(
+                    "the package '{}' is only available in Node, and this page runs in the browser",
+                    package
+                )));
+            }
             watch.push(bundle.entry_path.clone());
             for module in &bundle.modules {
                 watch.push(module.path.clone());

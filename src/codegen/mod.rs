@@ -16,6 +16,8 @@ pub struct Options {
     pub file: String,
     pub module: bool,
     pub deps: Vec<(String, String)>,
+    /// The packages of npm that the program uses, by their alias.
+    pub packages: Vec<(String, String)>,
     pub exports: Vec<String>,
 }
 
@@ -25,6 +27,7 @@ impl Options {
             file: file.to_string(),
             module: false,
             deps: Vec::new(),
+            packages: Vec::new(),
             exports: Vec::new(),
         }
     }
@@ -45,6 +48,7 @@ pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError
         scopes: vec![HashSet::new()],
         temp: 0,
         deps: opts.deps.clone(),
+        packages: opts.packages.clone(),
         module: opts.module,
         exports: opts.exports.clone(),
         enums: build_enum_map(program),
@@ -65,6 +69,7 @@ struct Codegen {
     scopes: Vec<HashSet<String>>,
     temp: usize,
     deps: Vec<(String, String)>,
+    packages: Vec<(String, String)>,
     module: bool,
     exports: Vec<String>,
     enums: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
@@ -402,6 +407,24 @@ impl Codegen {
             Stmt::Style(_) => {}
             Stmt::Use(decl) => {
                 if decl.path.ends_with(".css") {
+                    return Ok(());
+                }
+                // A package of npm is loaded when the program runs.
+                if decl.path.starts_with("npm:") {
+                    let name = self
+                        .packages
+                        .iter()
+                        .find(|(alias, _)| alias == &decl.alias)
+                        .map(|(_, package)| package.clone())
+                        .ok_or_else(|| {
+                            self.err(format!("package '{}' was not resolved", decl.path))
+                        })?;
+                    self.emit(&format!(
+                        "const _{} = V.require({});",
+                        decl.alias,
+                        js_string(&name)
+                    ));
+                    self.declare(&decl.alias);
                     return Ok(());
                 }
                 let target = self

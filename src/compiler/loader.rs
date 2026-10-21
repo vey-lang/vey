@@ -48,6 +48,7 @@ pub(crate) fn load_module(
     let ast = parser.parse_program()?;
 
     let mut deps = Vec::new();
+    let mut packages: Vec<(String, String)> = Vec::new();
     if let Some(parent) = path.parent() {
         for stmt in &ast.body {
             match stmt {
@@ -56,13 +57,31 @@ pub(crate) fn load_module(
                     content: style.css.clone(),
                 }),
                 Stmt::Use(use_stmt) => {
-                    if deps.iter().any(|(existing, _)| existing == &use_stmt.alias) {
+                    if deps.iter().any(|(existing, _)| existing == &use_stmt.alias)
+                        || packages
+                            .iter()
+                            .any(|(existing, _)| existing == &use_stmt.alias)
+                    {
                         return Err(VeyError::new(
                             format!("duplicate module alias '{}'", use_stmt.alias),
                             file_label.clone(),
                             use_stmt.pos.line,
                             use_stmt.pos.col,
                         ));
+                    }
+                    // A package of npm is not a file, it is loaded when the
+                    // program runs.
+                    if let Some(package) = use_stmt.path.strip_prefix("npm:") {
+                        if package.is_empty() {
+                            return Err(VeyError::new(
+                                "the name of the package is missing",
+                                file_label.clone(),
+                                use_stmt.pos.line,
+                                use_stmt.pos.col,
+                            ));
+                        }
+                        packages.push((use_stmt.alias.clone(), package.to_string()));
+                        continue;
                     }
                     let mut target = parent.join(&use_stmt.path);
                     if !target.exists() {
@@ -136,6 +155,7 @@ pub(crate) fn load_module(
         source,
         ast,
         deps,
+        packages,
         exports,
     });
 

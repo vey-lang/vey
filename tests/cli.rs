@@ -348,3 +348,19 @@ fn a_port_that_is_not_a_number_is_reported() {
     let error = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(error.contains("is not a port"), "{error}");
 }
+
+#[test]
+fn a_page_that_uses_a_package_of_npm_is_reported() {
+    let dir = temp_dir("npm-page");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("src/main.vey"),
+        "use \"npm:marked\" as marked\n\ncomponent App() {\n  main { h1 { \"Home\" } }\n}\n",
+    )
+    .unwrap();
+
+    let output = vey().arg("build").arg(&dir).output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("only available in Node"), "{error}");
+}

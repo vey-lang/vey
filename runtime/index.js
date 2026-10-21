@@ -33,6 +33,8 @@ function createVeyRuntime(scope, req) {
   V = Object.assign(V, veyCollections(ctx));
   V = Object.assign(V, veyEnum(ctx));
   V = Object.assign(V, veyData(ctx));
+  V = Object.assign(V, veyDate(ctx));
+  V = Object.assign(V, veyWeb(ctx));
   V = Object.assign(V, veyDom(ctx));
   V = Object.assign(V, veyHttp(ctx));
   V = Object.assign(V, veyServer(ctx));

@@ -1,4 +1,5 @@
-// The parts of Node: the file system, the paths and the environment.
+// The parts of Node: the file system, the paths, the environment and the
+// packages of npm.
 function veyNode(ctx) {
   var isNode = ctx.isNode;
   var req = ctx.req;
@@ -18,6 +19,22 @@ function veyNode(ctx) {
   function nodeModule(name) {
     if (!isNode) throw veyError(name + " is only available in Node.");
     return req(name);
+  }
+
+  // A package of npm, such as `express` or `marked`.
+  //
+  // The package has to be installed in the project, with `npm install`. It
+  // is loaded when the program starts, so that a program only pays for the
+  // packages it uses.
+  function require(name) {
+    if (!isNode) throw veyError("require() is only available in Node.");
+    try {
+      return req(name);
+    } catch (err) {
+      throw veyError(
+        "the package '" + name + "' is not installed (npm install " + name + ")"
+      );
+    }
   }
 
   var fs = {
@@ -68,10 +85,12 @@ function veyNode(ctx) {
   ctx.path = path;
   ctx.env = env;
   ctx.nodeModule = nodeModule;
+  ctx.require = require;
 
   return {
     fs: fs,
     path: path,
     env: env,
+    require: require,
   };
 }

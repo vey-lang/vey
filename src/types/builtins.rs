@@ -85,6 +85,48 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             list(string()),
         )),
         "upper" | "lower" | "trim" => Some(builtin_function(vec![string()], string())),
+        "text" => Some(builtin_object(vec![
+            ("capitalize", builtin_function(vec![string()], string())),
+            ("slug", builtin_function(vec![string()], string())),
+            ("camel", builtin_function(vec![string()], string())),
+            ("kebab", builtin_function(vec![string()], string())),
+            (
+                "padStart",
+                builtin_function(vec![string(), number(), string()], string()),
+            ),
+            (
+                "padEnd",
+                builtin_function(vec![string(), number(), string()], string()),
+            ),
+            (
+                "repeat",
+                builtin_function(vec![string(), number()], string()),
+            ),
+            ("reverse", builtin_function(vec![string()], string())),
+            ("words", builtin_function(vec![string()], list(string()))),
+        ])),
+        "date" => Some(builtin_object(vec![
+            ("now", builtin_function(vec![], number())),
+            ("iso", builtin_function(vec![], string())),
+            ("parts", builtin_function(vec![any()], any())),
+            (
+                "format",
+                builtin_optional(vec![any(), string()], 1, string()),
+            ),
+            (
+                "daysBetween",
+                builtin_function(vec![any(), any()], number()),
+            ),
+            ("addDays", builtin_function(vec![any(), number()], any())),
+        ])),
+        "query" => Some(builtin_object(vec![
+            ("parse", builtin_function(vec![any()], any())),
+            ("stringify", builtin_function(vec![any()], string())),
+        ])),
+        "cookie" => Some(builtin_object(vec![
+            ("parse", builtin_function(vec![any()], any())),
+            ("stringify", builtin_function(vec![any()], string())),
+        ])),
         "replace" => Some(builtin_optional(
             vec![string(), string(), string()],
             2,
@@ -136,6 +178,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "raw" => Some(builtin_function(vec![any()], any())),
         "cls" => Some(builtin_rest(any(), string())),
         "server" => Some(builtin_optional(vec![number()], 0, any())),
+        "require" => Some(builtin_function(vec![string()], any())),
         "response" => Some(builtin_optional(vec![any(), any(), any()], 1, any())),
         "redirect" => Some(builtin_optional(vec![string(), number()], 1, any())),
         "json" => Some(builtin_object(vec![

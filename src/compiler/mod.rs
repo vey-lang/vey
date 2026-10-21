@@ -18,6 +18,8 @@ pub struct Module {
     pub source: String,
     pub ast: Program,
     pub deps: Vec<(String, usize)>,
+    /// The packages of npm that the module uses, by their alias.
+    pub packages: Vec<(String, String)>,
     pub exports: Vec<String>,
 }
 
@@ -91,6 +93,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             file: module.path.display().to_string(),
             module: true,
             deps,
+            packages: module.packages.clone(),
             exports: module.exports.clone(),
         };
         check::check(&module.ast, &module.path.display().to_string())?;
@@ -100,6 +103,10 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             if let Some(env) = type_envs.get(*dep_id) {
                 imports.insert(alias.clone(), env.clone());
             }
+        }
+        // A package of npm is not checked, so it is an empty environment.
+        for (alias, _) in &module.packages {
+            imports.insert(alias.clone(), types::ModuleTypeEnv::default());
         }
         let env = types::check(&module.ast, &module.path.display().to_string(), &imports)?;
         while type_envs.len() < module.id {

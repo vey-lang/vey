@@ -608,6 +608,36 @@ print(math.area(2))
 
 Imports are resolved at compile time. The compiler bundles every module into one output file. Circular imports are reported as errors.
 
+### Packages of npm
+
+A package of npm is used with the `npm:` prefix. The package is loaded when the
+program runs, so it has to be installed in the project:
+
+```sh
+npm install marked
+```
+
+```vey
+use "npm:marked" as marked
+
+let page = marked.parse("# Hello")
+print(page)
+```
+
+A package is not checked, because Vey does not know what is inside it. Its
+members are of the type `any`.
+
+Packages of npm need Node, so they may only be used in a program and not in a
+page of a site. A page that uses one is reported when the site is built.
+
+The `require` helper loads a package without an import, which is handy for one
+that is only used in one place:
+
+```vey
+let marked = require("marked")
+print(marked.parse("# Hello"))
+```
+
 Exported type aliases and enums are available as `module.TypeName` in annotations:
 
 ```vey
@@ -796,6 +826,12 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `upper(text)`, `lower(text)`, `trim(text)` | the text in another shape |
 | `replace(text, search, next)`, `includes(text, part)` | the parts of a text |
 | `startsWith(text, prefix)`, `endsWith(text, suffix)` | the ends of a text |
+| `text.capitalize`, `text.slug`, `text.camel`, `text.kebab` | the shape of a name |
+| `text.padStart`, `text.padEnd`, `text.repeat`, `text.reverse`, `text.words` | the size of a text |
+| `date.now()`, `date.iso()`, `date.format(value, pattern)` | the date and the time |
+| `date.parts(value)`, `date.daysBetween(a, b)`, `date.addDays(value, days)` | the parts of a date |
+| `query.parse(text)`, `query.stringify(object)` | the query of an address |
+| `cookie.parse(header)`, `cookie.stringify(object)` | the cookies of a request |
 | `json.parse`, `json.stringify` | JSON |
 | `math.round`, `math.floor`, `math.random`, `math.pi` | math |
 | `time.now()`, `time.iso()` | time |
@@ -811,6 +847,7 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `error(message)` | throw an error |
 | `all(list)` / `race(list)` | promise combinators |
 | `env(name, fallback)` | environment variable, Node only |
+| `require(name)` | a package of npm, Node only |
 | `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
 | `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
 | `keys(object)`, `values(object)`, `entries(object)` | the parts of an object |

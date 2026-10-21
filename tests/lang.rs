@@ -1545,3 +1545,51 @@ print(html(App()))
     assert!(text.contains("class=\"row\""), "{text}");
     assert!(text.contains("data-count=\"3\""), "{text}");
 }
+
+#[test]
+fn a_package_of_npm_may_be_used() {
+    let dir = temp_dir("npm-package");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+use "npm:node:path" as path
+
+print(path.basename("/a/b.txt"))
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("b.txt"), "{}", stdout(&output));
+}
+
+#[test]
+fn the_libraries_of_the_runtime_are_there() {
+    let dir = temp_dir("libraries");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r##"
+print(text.slug("Hello World"))
+print(text.camel("hello world"))
+print(text.capitalize("vey"))
+print(date.format(0, "YYYY-MM-DD"))
+print(query.parse("?a=1&b=two").b)
+print(query.stringify({ a: 1 }))
+print(cookie.parse("a=1; b=2").b)
+"##,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("hello-world"), "{text}");
+    assert!(text.contains("helloWorld"), "{text}");
+    assert!(text.contains("Vey"), "{text}");
+    assert!(text.contains("1970-01-01"), "{text}");
+    assert!(text.contains("two"), "{text}");
+    assert!(text.contains("a=1"), "{text}");
+}
