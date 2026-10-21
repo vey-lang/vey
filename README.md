@@ -8,6 +8,8 @@ Vey is a small web language with its own syntax, compiler and runtime. The compi
 
 Browsers only execute JavaScript. That is why the output is JavaScript while the toolchain itself is not.
 
+The changes of every release are in the [changelog](CHANGELOG.md).
+
 ## Build
 
 ```sh
