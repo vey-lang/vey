@@ -915,6 +915,21 @@ src/codegen/         the JavaScript output
 src/compiler/        the module graph
   mod.rs             the bundle
   loader.rs          the loading of the modules
+src/runtime.rs       joins the parts of the runtime
+src/runtime/         the runtime shared by node and the browser
+  index.js           the frame that creates the runtime
+  shared.js          the helpers that the other parts share
+  node.js            the file system, the paths, the environment and npm
+  core.js            the console, the conversions and the tests
+  text.js            the helpers for text
+  collections.js     the helpers for lists and objects
+  enum.js            the values of the enums of the language
+  data.js            JSON, math, time, base64 and URLs
+  date.js            the date and the time
+  web.js             the query of an address and the cookies
+  dom.js             the markup and the browser
+  http.js            the HTTP client
+  server.js          the server of a program
 src/sourcemap/       the source map
   mod.rs             the map
   vlq.rs             the encoding of the map
@@ -931,20 +946,6 @@ src/cli/             the commands
   output.rs          turning a bundle into runnable output
 src/builtins.rs      the names the runtime provides
 src/suggest.rs       suggestions for names that are close to a known one
-runtime/             the runtime shared by node and the browser
-  index.js           the frame that creates the runtime
-  shared.js          the helpers that the other parts share
-  node.js            the file system, the paths and the environment
-  core.js            the console, the conversions and the tests
-  text.js            the helpers for text
-  collections.js     the helpers for lists and objects
-  enum.js            the values of the enums of the language
-  data.js            JSON, math, time, base64 and URLs
-  date.js            the date and the time
-  web.js             the query of an address and the cookies
-  dom.js             the markup and the browser
-  http.js            the HTTP client
-  server.js          the server of a program
 tests/               integration tests
   lang.rs            the language
   types.rs           the type checker

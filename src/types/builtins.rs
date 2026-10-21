@@ -1,6 +1,6 @@
 //! The signatures of the runtime helpers.
 //!
-//! The types here mirror the runtime in `runtime/`, so that a call to a helper is
+//! The types here mirror the runtime in `src/runtime/`, so that a call to a helper is
 //! checked in the same way as a call to a function of the program.
 
 use crate::types::core::{union, FunctionType, ObjectField, Type};

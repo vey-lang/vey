@@ -169,12 +169,12 @@ fn every_part_of_the_runtime_is_joined() {
     let parts = vey::runtime::parts();
     for part in &parts {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("runtime")
+            .join("src/runtime")
             .join(part);
         assert!(path.is_file(), "the part {} is missing", part);
     }
     // Every file of the folder is a part of the runtime.
-    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runtime");
     for entry in fs::read_dir(&folder).unwrap().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if !name.ends_with(".js") {
