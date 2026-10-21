@@ -809,6 +809,9 @@ Handler results:
 
 The request object contains `path`, `method`, `params`, `query`, `headers`, `body`, `text` and `cookies`.
 
+The body of a request is read as JSON or as the fields of a form, so
+`req.body.name` holds the name of a field of a form.
+
 ## Runtime
 
 | Name | Description |

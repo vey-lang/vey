@@ -132,3 +132,49 @@ fn a_malformed_path_does_not_take_the_server_down() {
     let (_, body) = wait_for(port, "/users/abc");
     assert!(body.contains("\"id\":\"abc\""), "{body}");
 }
+
+/// Send a request with a body, and wait for the server to be there.
+fn post(port: u16, path: &str, body: &str, content_type: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last = String::new();
+    while Instant::now() < deadline {
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+            let request = format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+                 Content-Type: {content_type}\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            if write!(stream, "{request}").is_ok() {
+                let mut raw = String::new();
+                if stream.read_to_string(&mut raw).is_ok() && !raw.is_empty() {
+                    return raw;
+                }
+                last = raw;
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out sending to {path}; last body: {last}");
+}
+
+#[test]
+fn the_body_of_a_form_is_read() {
+    let (server, port) = start_server(
+        "let app = server({port})\n\
+         app.post('/form', fn(req) { return { name: req.body.name } })\n\
+         app.start()\n\
+         await sleep(10000)\n\
+         app.stop()\n",
+    );
+    let _ = server;
+
+    let raw = post(
+        port,
+        "/form",
+        "name=Ada&x=1",
+        "application/x-www-form-urlencoded",
+    );
+    assert!(raw.contains("\"name\":\"Ada\""), "{raw}");
+}

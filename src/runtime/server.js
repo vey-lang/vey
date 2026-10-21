@@ -1,5 +1,6 @@
 // The server of a program.
 function veyServer(ctx) {
+  var query = ctx.query;
   var print = ctx.print;
   var log = ctx.log;
   var req = ctx.req;
@@ -90,6 +91,9 @@ function veyServer(ctx) {
           var contentType = request.headers["content-type"] || "";
           if (contentType.indexOf("json") !== -1 && raw.trim()) {
             try { parsed = JSON.parse(raw); } catch (err) { parsed = raw; }
+          } else if (contentType.indexOf("application/x-www-form-urlencoded") !== -1) {
+            // The body of a form is a query.
+            parsed = query.parse(raw);
           }
           resolve({ raw: raw, parsed: parsed });
         });
