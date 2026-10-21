@@ -57,11 +57,12 @@ vey build -o site  # -> site/
 ```
 
 The page title comes from the project directory, or from `--title "My site"`.
-If there is no `404.vey`, Vey writes a styled default 404 page. `main.vey`,
-`index.vey`, `app.vey`, `page.vey`, `src/main.vey` and `src/index.vey` are
-discovered automatically, so `vey build` works without arguments inside a
-project. When run one level above a project, the only matching entry in a
-subdirectory is used; multiple matches must be passed explicitly.
+If there is no `404.vey`, Vey writes a styled default 404 page.
+
+`main.vey` is the entry of a project. It is found in `src/` or in the project
+itself, so the commands work without arguments inside a project. When run one
+level above a project, the only matching entry in a subdirectory is used;
+multiple matches must be passed explicitly.
 
 Every other page of the project becomes a page of the site. The name of a
 page follows the file it comes from, so `src/about.vey` becomes `about.html`

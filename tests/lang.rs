@@ -615,7 +615,7 @@ bind("#app", App())
 fn builds_a_deployable_site() {
     let dir = temp_dir("site");
     fs::write(
-        dir.join("index.vey"),
+        dir.join("main.vey"),
         r##"
 component App() {
   main { h1 { "Home page" } }
@@ -696,7 +696,7 @@ fn new_project_builds_and_curate_is_gone() {
         .output()
         .unwrap();
     assert!(build.status.success(), "{}", stderr(&build));
-    assert!(!project.join("index.vey").exists());
+    assert!(!project.join("main.vey").exists());
     let index = fs::read_to_string(project.join(".dist/index.html")).unwrap();
     assert!(index.contains("Welcome to Vey"), "{}", index);
     assert!(index.contains("favicon.svg"), "{}", index);

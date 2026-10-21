@@ -222,8 +222,8 @@ pub(crate) fn other_pages(
     let title = default_title(entry);
     let mut pages = Vec::new();
     for (file, page) in compiled {
-        // The modules are held by their real path, so the files have to be
-        // resolved the same way to be compared.
+        // The page is looked for where it was declared, so that the links of
+        // the site keep working.
         let real = fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
         if modules.contains(&real) {
             continue;
@@ -231,6 +231,19 @@ pub(crate) fn other_pages(
         let Some(name) = page_name(&folder, &file) else {
             continue;
         };
+        // The home of the site and the page of an unknown address have their
+        // own names.
+        if name == "index.html" || name == "404.html" {
+            failed.push((
+                name.clone(),
+                BuildError::from(format!(
+                    "'{}' would take the place of the {} of the site",
+                    file.display(),
+                    name
+                )),
+            ));
+            continue;
+        }
         let page_title = format!("{} · {}", title, page_title_of(&file));
         pages.push((name, html_document(&page, &page_title, false)));
     }

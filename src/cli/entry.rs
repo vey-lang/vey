@@ -3,8 +3,11 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The file names that are tried when a project is built without arguments.
-pub(crate) const ENTRY_NAMES: &[&str] = &["main.vey", "index.vey", "app.vey", "page.vey"];
+/// The name of the entry file of a project.
+///
+/// The entry is always called `main.vey`, so that every project looks the
+/// same.
+pub(crate) const ENTRY_NAME: &str = "main.vey";
 
 pub(crate) fn entry_from(files: &[String]) -> Result<PathBuf, String> {
     if let Some(first) = files.first() {
@@ -31,11 +34,9 @@ pub(crate) fn discover_entry(directory: &Path) -> Result<PathBuf, String> {
     folders.push(directory.to_path_buf());
 
     for folder in &folders {
-        for name in ENTRY_NAMES {
-            let candidate = folder.join(name);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
+        let candidate = folder.join(ENTRY_NAME);
+        if candidate.is_file() {
+            return Ok(candidate);
         }
     }
 
@@ -50,7 +51,7 @@ pub(crate) fn discover_entry(directory: &Path) -> Result<PathBuf, String> {
         0 => Err(format!(
             "no entry file found in {} (looked for {})",
             directory.display(),
-            ENTRY_NAMES.join(", ")
+            ENTRY_NAME
         )),
         1 => Ok(found.remove(0)),
         _ => Err(format!(
@@ -86,10 +87,7 @@ pub(crate) fn find_entries(directory: &Path, depth: usize, found: &mut Vec<PathB
         } else if kind.is_file() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(
-                name.as_ref(),
-                "main.vey" | "index.vey" | "app.vey" | "page.vey"
-            ) {
+            if name == ENTRY_NAME {
                 found.push(path);
             }
         }

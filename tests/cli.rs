@@ -299,3 +299,28 @@ fn a_check_of_a_project_looks_at_every_page() {
     let error = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(error.contains("unknown variable 'missing'"), "{error}");
 }
+
+#[test]
+fn a_page_may_not_take_the_place_of_the_home_of_the_site() {
+    let dir = temp_dir("page-clash");
+    let project = dir.join("project");
+    write(&project.join("src/main.vey"), PAGE);
+    write(
+        &project.join("src/index.vey"),
+        "component Index() {\n  main { h1 { \"Index\" } }\n}\n\nbind(\"#app\", Index())\n",
+    );
+
+    let output = vey()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(dir.join("out"))
+        .output()
+        .unwrap();
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("would take the place"), "{error}");
+
+    // The home of the site is still the page of the entry.
+    let home = std::fs::read_to_string(dir.join("out/index.html")).unwrap();
+    assert!(home.contains("Hi"), "{home}");
+}
