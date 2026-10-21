@@ -800,10 +800,7 @@ impl TypeChecker<'_> {
             ret: Box::new(ret),
             checked,
             constraints,
-            type_params: type_params
-                .iter()
-                .map(|param| param.name.clone())
-                .collect(),
+            type_params: type_params.iter().map(|param| param.name.clone()).collect(),
         }))
     }
 
@@ -1872,10 +1869,9 @@ impl TypeChecker<'_> {
                     // A type parameter that is already bound stands for the
                     // type it was bound to.
                     let expected = match param {
-                        Type::Var(name) => subst
-                            .get(name)
-                            .cloned()
-                            .unwrap_or_else(|| param.clone()),
+                        Type::Var(name) => {
+                            subst.get(name).cloned().unwrap_or_else(|| param.clone())
+                        }
                         other => other.clone(),
                     };
                     let mut trial = subst.clone();

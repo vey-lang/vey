@@ -269,3 +269,118 @@ fn a_mismatch_is_reported() {
     let error = check_err("mismatch", "let x: number = \"str\"\n");
     assert!(error.contains("expected number"), "{error}");
 }
+
+#[test]
+fn a_type_parameter_may_have_a_constraint() {
+    check_ok(
+        "constraint-ok",
+        "fn total<T: number>(list: [T]) -> number {\n  return 0\n}\nprint(total([1, 2]))\n",
+    );
+    let error = check_err(
+        "constraint-broken",
+        "fn total<T: number>(list: [T]) -> number {\n  return 0\n}\nprint(total([\"a\"]))\n",
+    );
+    assert!(
+        error.contains("type argument 'T' expects number"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_constraint_may_be_a_union() {
+    check_ok(
+        "constraint-union",
+        "fn pick<T: number | string>(v: T) -> T {\n  return v\n}\nprint(pick(1))\nprint(pick(\"a\"))\n",
+    );
+}
+
+#[test]
+fn a_call_may_name_its_type_arguments() {
+    check_ok(
+        "explicit-type-argument",
+        "fn id<T>(v: T) -> T {\n  return v\n}\nprint(id<number>(1))\n",
+    );
+    let error = check_err(
+        "explicit-type-argument-count",
+        "fn id<T>(v: T) -> T {\n  return v\n}\nprint(id<number, string>(1))\n",
+    );
+    assert!(error.contains("expected 1 type argument"), "{error}");
+}
+
+#[test]
+fn a_comparison_is_not_a_call_with_type_arguments() {
+    check_ok(
+        "comparison",
+        "let a = 1\nlet b = 2\nprint(a < b)\nprint(a > b)\n",
+    );
+}
+
+#[test]
+fn a_generic_return_takes_the_type_of_the_value() {
+    check_ok(
+        "generic-return",
+        "fn parse<T>(text: string) -> T {\n  return num(text)\n}\nlet n: number = parse(\"42\")\n",
+    );
+    let error = check_err(
+        "generic-return-wrong",
+        "fn parse<T>(text: string) -> T {\n  return num(text)\n}\nlet n: string = parse(\"42\")\n",
+    );
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn a_call_to_another_module_is_checked() {
+    let dir = common::temp_dir("module-signature");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(a: number, b: number) -> number {\n  return a + b\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./lib.vey\" as lib\nlet n: string = lib.add(1, 2)\n",
+    )
+    .unwrap();
+    let output = common::run_file(&dir.join("app.vey"));
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn a_call_to_another_module_with_a_wrong_argument_is_checked() {
+    let dir = common::temp_dir("module-argument");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(a: number, b: number) -> number {\n  return a + b\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./lib.vey\" as lib\nlib.add(1, \"two\")\n",
+    )
+    .unwrap();
+    let output = common::run_file(&dir.join("app.vey"));
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(error.contains("argument 2 expects number"), "{error}");
+}
+
+#[test]
+fn a_call_to_another_module_with_too_few_arguments_is_checked() {
+    let dir = common::temp_dir("module-arity");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(a: number, b: number) -> number {\n  return a + b\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./lib.vey\" as lib\nlib.add(1)\n",
+    )
+    .unwrap();
+    let output = common::run_file(&dir.join("app.vey"));
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(error.contains("expected at least 2 arguments"), "{error}");
+}

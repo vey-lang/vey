@@ -358,7 +358,12 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 .collect(),
             type_params: function.type_params.clone(),
         }),
-        Type::Union(items) => union(items.iter().map(|item| substitute_bound(item, subst)).collect()),
+        Type::Union(items) => union(
+            items
+                .iter()
+                .map(|item| substitute_bound(item, subst))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -588,9 +593,7 @@ pub(crate) fn substitute_with(
             constraints: function
                 .constraints
                 .iter()
-                .map(|(name, constraint)| {
-                    (name.clone(), substitute_with(constraint, subst, seen))
-                })
+                .map(|(name, constraint)| (name.clone(), substitute_with(constraint, subst, seen)))
                 .collect(),
             type_params: function.type_params.clone(),
         }),

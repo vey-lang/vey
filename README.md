@@ -224,7 +224,30 @@ let box: Box<number> = { value: 2 }
 let missing: Maybe<string> = null
 ```
 
-Type arguments are inferred at call sites. Explicit type arguments and generic constraints are not supported yet.
+Type arguments are inferred at call sites. A call may also name them:
+
+```vey
+fn parse<T>(text: string) -> T {
+  return num(text)
+}
+
+let number = parse<number>("42")
+```
+
+A type parameter may have a constraint, which every type argument has to
+satisfy:
+
+```vey
+fn total<T: number>(list: [T]) -> number {
+  return 0
+}
+
+total([1, 2])   // fine
+total(["a"])   // type argument 'T' expects number, found string
+```
+
+A type parameter that only the return value determines is settled by that
+value, so the function is not generic after all.
 
 Annotations work on `let`, `const`, function parameters, return types, `for` bindings, destructuring patterns, function expressions and arrow parameters.
 
@@ -301,7 +324,8 @@ use "./types.vey" as t
 let box: t.Box<number> = { value: 2 }
 ```
 
-Cross-module value signature checking is not implemented yet.
+The functions and constants of another module keep their signature, so a call
+to them is checked in the same way as a local one.
 
 Unit variants print as `Color.Red`; payload variants print as `Circle(radius=2.5)`. `type(value)` returns `"enum"` for enum values.
 

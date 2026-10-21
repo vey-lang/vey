@@ -993,9 +993,9 @@ fn rejects_type_mismatches() {
         "expected string, found number",
     );
     check_error(
-        "fn bad<T>() -> T {\n  return 1\n}\n",
+        "fn bad<T>() -> T {\n  return 1\n}\nlet value: string = bad()\n",
         "type-generic-return",
-        "expected T, found number",
+        "expected string, found number",
     );
     check_error(
         "type Box<T> = { value: T }\nlet box: Box = { value: 1 }\n",

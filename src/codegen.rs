@@ -574,9 +574,12 @@ impl Codegen {
                 }
             }
             // The type arguments are only used by the checker and are erased.
-            Expr::CallGeneric(callee, _, args, optional, _) => {
-                self.gen_expr(&Expr::Call(callee.clone(), args.clone(), *optional, expr.pos()))
-            }
+            Expr::CallGeneric(callee, _, args, optional, _) => self.gen_expr(&Expr::Call(
+                callee.clone(),
+                args.clone(),
+                *optional,
+                expr.pos(),
+            )),
             Expr::Member(object, prop, optional, _) => {
                 let object = self.gen_expr(object)?;
                 match prop {
