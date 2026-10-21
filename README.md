@@ -856,7 +856,8 @@ src/check/           the semantic checks
   mod.rs             the checks
   scopes.rs          the scopes and the names
 src/types/           the gradual type checker
-  core.rs            the type representation and the rules between types
+  core.rs            the type representation
+  rules.rs           the rules that relate two types
   builtins.rs        the signatures of the runtime helpers
   checker.rs         the checker that walks a program
   stmts.rs           the statements
@@ -879,7 +880,7 @@ src/sourcemap/       the source map
 src/cli/             the commands
   args.rs            command line parsing
   run.rs             run, test and check
-  build.rs           build and web
+  build.rs           the build of the site
   site.rs            static sites
   dev.rs             development server
   scaffold.rs        new projects
@@ -899,4 +900,5 @@ tests/               integration tests
   cli.rs             the commands
   dom.rs             rendering in a browser
   dev.rs             the development server
+  readme.rs          the examples of this file
 ```

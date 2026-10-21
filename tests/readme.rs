@@ -7,7 +7,7 @@
 mod common;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The blocks of the readme that are checked.
@@ -88,5 +88,42 @@ fn every_helper_of_the_runtime_is_in_the_readme() {
             "the readme does not mention '{}'",
             name
         );
+    }
+}
+
+#[test]
+fn every_file_of_the_project_is_in_the_layout() {
+    let readme = fs::read_to_string("README.md").expect("the readme is missing");
+    let mut files = Vec::new();
+    for folder in ["src", "tests"] {
+        collect_rust_files(Path::new(folder), &mut files);
+    }
+    assert!(!files.is_empty(), "no files were found");
+
+    for file in files {
+        let name = file
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        assert!(
+            readme.contains(&name),
+            "the readme does not mention '{}'",
+            file.display()
+        );
+    }
+}
+
+/// The Rust files of a folder and the folders below it.
+fn collect_rust_files(folder: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            out.push(path);
+        }
     }
 }
