@@ -16,6 +16,20 @@ use crate::cli::error::BuildError;
 use crate::cli::output::html_document;
 use crate::cli::site::{default_404_page, site_files};
 
+/// The folder the pages of a project live in.
+///
+/// A project that keeps its pages in `src` has them in that folder, so the
+/// server serves them at the same paths as the built site.
+fn pages_root(entry: &Path) -> PathBuf {
+    let path = match entry.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    // The path is resolved, so that it can be compared with the resolved
+    // path of a file.
+    path.canonicalize().unwrap_or(path)
+}
+
 /// The port the development server listens on.
 pub(crate) const DEFAULT_PORT: u16 = 4000;
 
@@ -33,6 +47,8 @@ pub(crate) struct DevState {
     pub(crate) error: Option<BuildError>,
     pub(crate) version: u64,
     pub(crate) root: PathBuf,
+    /// The folder the pages of the project live in.
+    pub(crate) pages: PathBuf,
     /// The title of the site.
     pub(crate) title: String,
     /// Files imported from outside the project root. They are not covered by
@@ -66,6 +82,7 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
     {
         let mut guard = lock(&state);
         guard.root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        guard.pages = pages_root(&entry);
         guard.title = title.clone();
     }
     if let Err(err) = refresh_dev(&entry, &title, &state) {
@@ -264,9 +281,9 @@ pub(crate) fn render_vey_page(
         return None;
     }
 
-    let root = state.root.clone();
-    let file = root.join(&key).canonicalize().ok()?;
-    if !file.starts_with(&root) || !file.is_file() {
+    let pages = state.pages.clone();
+    let file = pages.join(&key).canonicalize().ok()?;
+    if !file.starts_with(&pages) || !file.is_file() {
         return None;
     }
 
@@ -283,7 +300,7 @@ pub(crate) fn render_vey_page(
                     state.watch.push(path);
                 }
             }
-            let favicon = root.join("public/favicon.svg").is_file();
+            let favicon = state.root.join("public/favicon.svg").is_file();
             let body = html_document(&bundle, &state.title, favicon);
             Some((
                 200,

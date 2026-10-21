@@ -116,3 +116,77 @@ fn dev_reports_errors_in_a_readable_page_and_recovers() {
     assert!(status.contains("200"), "status: {status}");
     assert!(body.contains("body { margin: 0; }"), "{body}");
 }
+
+#[test]
+fn the_pages_of_a_project_are_served_at_their_own_paths() {
+    let dir = temp_dir("pages");
+    fs::create_dir_all(dir.join("src/styles")).unwrap();
+    fs::create_dir_all(dir.join("src/test")).unwrap();
+    fs::write(dir.join("src/styles/site.css"), "body { margin: 0; }\n").unwrap();
+    fs::write(
+        dir.join("src/main.vey"),
+        "use \"./styles/site.css\"\n\ncomponent App() {\n  main { h1 { \"Home\" } }\n}\n\nbind(\"#app\", App())\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/test/main.vey"),
+        "use \"../styles/site.css\"\n\ncomponent Test() {\n  main { h1 { \"Test\" } }\n}\n\nbind(\"#app\", Test())\n",
+    )
+    .unwrap();
+
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("dev")
+        .arg(&dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+
+    // The page is served at the path of the file, without the folder of the
+    // pages in front of it.
+    let (status, body) = wait_for(port, "/test/main.vey", "Test");
+    assert!(status.contains("200"), "status: {status}");
+    assert!(body.contains("Test"), "{body}");
+
+    // The folder of the pages is not part of the path.
+    let (status, _) = request(port, "/src/test/main.vey").expect("no answer");
+    assert!(status.contains("404"), "status: {status}");
+}
+
+#[test]
+fn the_error_page_shows_the_code_with_colours() {
+    let dir = temp_dir("colours");
+    fs::write(
+        dir.join("main.vey"),
+        "use \"./missing.vey\"\nlet count = 42 // a comment\nlet name = \"vey\"\n",
+    )
+    .unwrap();
+    // A file with a similar name, so that the error has a hint.
+    fs::write(dir.join("missin.vey"), "export fn value() { return 1 }\n").unwrap();
+
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("dev")
+        .arg(&dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+
+    let (status, body) = wait_for(port, "/", "Compile error");
+    assert!(status.contains("500"), "status: {status}");
+    assert!(body.contains("class=\"cm\""), "the comment is not coloured");
+    assert!(body.contains("class=\"kw\""), "the keyword is not coloured");
+    assert!(body.contains("class=\"str\""), "the text is not coloured");
+    assert!(body.contains("class=\"num\""), "the number is not coloured");
+    // The hint is readable.
+    assert!(body.contains("<b>Hint</b><span>"), "{body}");
+    assert!(body.contains("did you mean"), "{body}");
+}

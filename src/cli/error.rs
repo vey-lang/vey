@@ -4,6 +4,7 @@ use std::path::Path;
 
 use vey::VeyError;
 
+use crate::cli::highlight::highlight;
 use crate::cli::output::escape_html;
 
 #[derive(Clone)]
@@ -86,7 +87,7 @@ impl BuildError {
                 "<span class=\"{}\"><span class=\"no\">{}</span><span class=\"text\">{}</span></span>",
                 class,
                 number,
-                escape_html(lines[number - 1])
+                highlight(lines[number - 1])
             ));
             if number == target {
                 out.push_str(&format!(
@@ -213,23 +214,31 @@ impl BuildError {
     overflow-x: auto;
     border: 1px solid var(--line);
     border-radius: 0.5rem;
-    background: var(--soft);
+    background: #141414;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.8125rem;
     line-height: 1.7;
   }
   .line { display: flex; gap: 1rem; padding: 0 1rem; white-space: pre; }
-  .line.error { background: var(--bg); }
+  .line.error { background: #1c1414; }
   .no {
     flex: none;
     width: 3ch;
-    color: var(--muted);
+    color: #5c5c5c;
     text-align: right;
     user-select: none;
   }
-  .text { color: var(--fg); }
-  .caret { color: var(--fg); font-weight: 700; }
+  .text { color: #d4d4d4; }
+  .caret { color: #f87171; font-weight: 700; }
+  .kw { color: #c4b5fd; }
+  .str { color: #86efac; }
+  .num { color: #fdba74; }
+  .cm { color: #6b7280; font-style: italic; }
+  .fn { color: #93c5fd; }
   .hint {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
     margin-top: 1.25rem;
     padding: 0.875rem 1rem;
     border: 1px solid var(--line);

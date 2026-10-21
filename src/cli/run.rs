@@ -1,25 +1,23 @@
 //! The `vey run`, `vey test` and `vey check` commands.
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
-use crate::cli::entry::{collect_vey_files, discover_entry, entry_from};
+use crate::cli::entry::{collect_vey_files, entry_from};
 use crate::cli::output::{node_script, report, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
-    let file = match args.first() {
-        Some(file) => PathBuf::from(file),
-        None => match discover_entry(Path::new(".")) {
-            Ok(entry) => entry,
-            Err(err) => {
-                eprintln!("usage: vey run <file.vey>");
-                eprintln!("{}", err);
-                return 1;
-            }
-        },
+    // The argument may be a file or a folder that holds one.
+    let file = match entry_from(args) {
+        Ok(entry) => entry,
+        Err(err) => {
+            eprintln!("usage: vey run <file.vey>");
+            eprintln!("{}", err);
+            return 1;
+        }
     };
 
     let bundle = match compile_project(&file) {

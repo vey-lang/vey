@@ -10,6 +10,7 @@ pub mod build;
 pub mod dev;
 pub mod entry;
 pub mod error;
+pub mod highlight;
 pub mod output;
 pub mod run;
 pub mod scaffold;
