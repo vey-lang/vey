@@ -2,9 +2,8 @@
 
 use crate::ast::*;
 use crate::lexer::Pos;
-use crate::types::core::{
-    assignable, element_type, has_type_var, substitute_bound, unify_types, union, Type,
-};
+use crate::types::core::{element_type, union, Type};
+use crate::types::rules::{assignable, has_type_var, substitute_bound, unify_types};
 use crate::VeyError;
 
 use super::checker::{ComponentParam, TypeChecker};

@@ -11,6 +11,7 @@ mod exprs;
 mod helpers;
 mod patterns;
 mod resolve;
+mod rules;
 mod stmts;
 
 pub use checker::{check, ModuleTypeEnv};

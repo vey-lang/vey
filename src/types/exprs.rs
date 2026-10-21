@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
-use crate::types::core::{
+use crate::types::core::{union, FunctionType, ObjectField, Type};
+use crate::types::rules::{
     assignable, collect_type_vars, comparable, erase_type_vars, substitute, substitute_bound,
-    unify_types, union, FunctionType, ObjectField, Type,
+    unify_types,
 };
 use crate::VeyError;
 

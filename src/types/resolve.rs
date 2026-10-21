@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::suggest::did_you_mean;
-use crate::types::core::{substitute, union, FunctionType, ObjectField, Type};
+use crate::types::core::{union, FunctionType, ObjectField, Type};
+use crate::types::rules::substitute;
 use crate::VeyError;
 
 use super::checker::TypeChecker;
