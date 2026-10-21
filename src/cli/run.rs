@@ -107,6 +107,7 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             .arg("--enable-source-maps")
             .arg(&temp)
             .env("VEY_TEST", "1")
+            .envs(node_path(file))
             .status();
         let _ = fs::remove_file(&temp);
 
@@ -178,6 +179,26 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
         eprintln!("{} of {} page(s) could not be checked", failed.len(), pages);
         1
     }
+}
+
+/// The folders node looks for the packages of npm in.
+///
+/// The script of a test lives in a temporary folder, so the folders of the
+/// project are named here.
+fn node_path(file: &Path) -> Vec<(String, String)> {
+    let mut folders = Vec::new();
+    let mut folder = file.parent().map(Path::to_path_buf);
+    while let Some(current) = folder {
+        let modules = current.join("node_modules");
+        if modules.is_dir() {
+            folders.push(modules.to_string_lossy().to_string());
+        }
+        folder = current.parent().map(Path::to_path_buf);
+    }
+    if folders.is_empty() {
+        return Vec::new();
+    }
+    vec![("NODE_PATH".to_string(), folders.join(":"))]
 }
 
 /// The pages of a project, the entry first.

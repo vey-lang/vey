@@ -48,10 +48,31 @@ pub fn run_file(path: &Path) -> Output {
     let output = Command::new("node")
         .arg("--enable-source-maps")
         .arg(&script)
+        .envs(node_path())
         .output()
         .expect("failed to start node");
     let _ = fs::remove_file(&script);
     output
+}
+
+/// The folders node looks for the packages of npm in.
+///
+/// The script of a test lives in a temporary folder, so the packages of the
+/// project are named here.
+pub fn node_path() -> Vec<(String, String)> {
+    let mut folders = Vec::new();
+    let mut folder = std::env::current_dir().ok();
+    while let Some(current) = folder {
+        let modules = current.join("node_modules");
+        if modules.is_dir() {
+            folders.push(modules.to_string_lossy().to_string());
+        }
+        folder = current.parent().map(Path::to_path_buf);
+    }
+    if folders.is_empty() {
+        return Vec::new();
+    }
+    vec![("NODE_PATH".to_string(), folders.join(":"))]
 }
 
 /// Build a Vey file as a node script and return the path of the script.
