@@ -136,7 +136,9 @@ impl Codegen {
         let captured = self.capture(|codegen| {
             codegen.push_scope();
             for param in params {
-                codegen.declare(&param.name);
+                for (name, _) in param.bindings() {
+                    codegen.declare(name);
+                }
             }
             for stmt in &body.body {
                 codegen.gen_stmt(stmt)?;
@@ -171,7 +173,9 @@ impl Codegen {
                 let captured = self.capture(|codegen| {
                     codegen.push_scope();
                     for param in params {
-                        codegen.declare(&param.name);
+                        for (name, _) in param.bindings() {
+                            codegen.declare(name);
+                        }
                     }
                     for stmt in &block.body {
                         codegen.gen_stmt(stmt)?;

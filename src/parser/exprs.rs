@@ -1,7 +1,7 @@
 //! The parsing of expressions.
 
 use crate::ast::*;
-use crate::lexer::TokKind;
+use crate::lexer::{Pos, TokKind};
 use crate::VeyError;
 
 use super::Parser;
@@ -296,7 +296,10 @@ impl Parser {
                     let body = self.parse_arrow_body()?;
                     return Ok(Expr::Arrow(
                         vec![Param {
-                            name: token.value,
+                            pattern: BindingPattern::Name {
+                                name: token.value,
+                                pos: token.pos,
+                            },
                             ty: None,
                             default: None,
                             rest: false,
@@ -371,7 +374,10 @@ impl Parser {
                     None
                 };
                 params.push(Param {
-                    name,
+                    pattern: BindingPattern::Name {
+                        name,
+                        pos: param_pos,
+                    },
                     ty,
                     default,
                     rest,
@@ -430,16 +436,17 @@ impl Parser {
             self.advance()?;
             let mut params = Vec::new();
             for expr in exprs {
-                match expr {
-                    Expr::Ident(name, p) => params.push(Param {
-                        name,
-                        ty: None,
-                        default: None,
-                        rest: false,
-                        pos: p,
-                    }),
-                    _ => return Err(self.error_at(pos, "arrow parameters must be identifiers")),
-                }
+                let Some(pattern) = pattern_from_expr(&expr) else {
+                    return Err(self.error_at(pos, "arrow parameters must be names or patterns"));
+                };
+                let pos = pattern_pos(&pattern);
+                params.push(Param {
+                    pattern,
+                    ty: None,
+                    default: None,
+                    rest: false,
+                    pos,
+                });
             }
             let body = self.parse_arrow_body()?;
             return Ok(Expr::Arrow(params, body, pos));
@@ -551,5 +558,57 @@ impl Parser {
         }
         self.expect_punct("}")?;
         Ok(Expr::Match(Box::new(subject), arms, pos))
+    }
+}
+
+/// The pattern of a parameter, when the expression is one.
+///
+/// An arrow may take its parameters apart, as in `({ name }) => name`.
+fn pattern_from_expr(expr: &Expr) -> Option<BindingPattern> {
+    match expr {
+        Expr::Ident(name, pos) => Some(BindingPattern::Name {
+            name: name.clone(),
+            pos: *pos,
+        }),
+        Expr::Object(props, pos) => {
+            let mut fields = Vec::new();
+            for prop in props {
+                let ObjectProp::Field(key, value) = prop else {
+                    return None;
+                };
+                let pattern = pattern_from_expr(value)?;
+                fields.push(BindingField {
+                    key: key.clone(),
+                    pattern,
+                    pos: *pos,
+                });
+            }
+            Some(BindingPattern::Object {
+                fields,
+                rest: None,
+                pos: *pos,
+            })
+        }
+        Expr::Array(items, pos) => {
+            let mut patterns = Vec::new();
+            for item in items {
+                patterns.push(pattern_from_expr(item)?);
+            }
+            Some(BindingPattern::Array {
+                items: patterns,
+                rest: None,
+                pos: *pos,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The place of a pattern.
+fn pattern_pos(pattern: &BindingPattern) -> Pos {
+    match pattern {
+        BindingPattern::Name { pos, .. }
+        | BindingPattern::Array { pos, .. }
+        | BindingPattern::Object { pos, .. } => *pos,
     }
 }

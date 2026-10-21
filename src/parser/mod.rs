@@ -442,7 +442,14 @@ impl Parser {
         while !self.is_punct(")") {
             let pos = self.tok.pos;
             let rest = self.eat_op("...")?;
-            let name = self.expect_ident("parameter name")?;
+            // A parameter may be a name or a pattern that takes the argument
+            // apart, such as `{ name, age }`.
+            let pattern = if self.is_punct("{") || self.is_punct("[") {
+                self.parse_binding_pattern()?
+            } else {
+                let name = self.expect_ident("parameter name")?;
+                BindingPattern::Name { name, pos }
+            };
             let ty = if self.is_punct(":") {
                 self.advance()?;
                 Some(self.parse_type()?)
@@ -455,7 +462,7 @@ impl Parser {
                 None
             };
             params.push(Param {
-                name,
+                pattern,
                 ty,
                 default,
                 rest,

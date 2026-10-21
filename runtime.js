@@ -101,7 +101,8 @@ function createVeyRuntime(scope, req) {
       // call (`Card("title")`) stays distinguishable from a named one
       // (`Card title="title"`), even when the first argument is an object.
       var named = Object.assign(Object.create(null), attrs);
-      named.__veyProps = true;
+      // The marker is hidden, so that it does not show up in the props.
+      Object.defineProperty(named, "__veyProps", { value: true, enumerable: false });
       if (kids.length) named.children = kids;
       var callArgs = [named];
       if (args) {
@@ -414,6 +415,16 @@ function createVeyRuntime(scope, req) {
   }
 
   function keys(object) { return Object.keys(ownProps(object)); }
+
+  /** The object without the given keys. */
+  function omit(object, names) {
+    var out = {};
+    var source = ownProps(object);
+    for (var key in source) {
+      if (names.indexOf(key) === -1) out[key] = source[key];
+    }
+    return out;
+  }
   function values(object) {
     var props = ownProps(object);
     return Object.keys(props).map(function (key) { return props[key]; });
@@ -1024,6 +1035,7 @@ function createVeyRuntime(scope, req) {
     filter: filter,
     reduce: reduce,
     keys: keys,
+    omit: omit,
     values: values,
     entries: entries,
     range: range,

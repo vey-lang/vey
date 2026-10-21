@@ -151,11 +151,24 @@ impl TypeChecker<'_> {
     ) -> Result<Vec<ComponentParam>, VeyError> {
         let mut params = Vec::new();
         for param in &decl.params {
-            params.push(ComponentParam {
-                name: param.name.clone(),
-                ty: self.param_type(param)?,
-                has_default: param.default.is_some(),
-            });
+            // A pattern of a component parameter names more than one prop.
+            match param.name() {
+                Some(name) => params.push(ComponentParam {
+                    name: name.to_string(),
+                    ty: self.param_type(param)?,
+                    has_default: param.default.is_some(),
+                }),
+                None => {
+                    let ty = self.param_type(param)?;
+                    for (name, required) in prop_bindings(&param.pattern) {
+                        params.push(ComponentParam {
+                            name,
+                            ty: ty.clone(),
+                            has_default: !required,
+                        });
+                    }
+                }
+            }
         }
         Ok(params)
     }
@@ -312,7 +325,9 @@ impl TypeChecker<'_> {
     pub(crate) fn declare_params(&mut self, params: &[Param]) -> Result<(), VeyError> {
         for param in params {
             let ty = self.param_type(param)?;
-            self.declare(&param.name, ty.clone());
+            for (name, _) in param.bindings() {
+                self.declare(name, ty.clone());
+            }
             if let Some(default) = &param.default {
                 let actual = self.infer_expr(default)?;
                 if !assignable(&actual, &ty) {
@@ -532,4 +547,36 @@ impl TypeChecker<'_> {
             _ => Ok(None),
         }
     }
+}
+
+/// The props a pattern of a component parameter takes.
+///
+/// The second value says whether the prop has to be given. A rest binding
+/// takes what is left, so it is never required.
+fn prop_bindings(pattern: &BindingPattern) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    match pattern {
+        BindingPattern::Name { name, .. } => out.push((name.clone(), true)),
+        BindingPattern::Object { fields, rest, .. } => {
+            for field in fields {
+                for (name, _) in field.pattern.bindings() {
+                    out.push((name.to_string(), true));
+                }
+            }
+            if let Some(rest) = rest {
+                out.push((rest.clone(), false));
+            }
+        }
+        BindingPattern::Array { items, rest, .. } => {
+            for item in items {
+                for (name, _) in item.bindings() {
+                    out.push((name.to_string(), true));
+                }
+            }
+            if let Some(rest) = rest {
+                out.push((rest.clone(), false));
+            }
+        }
+    }
+    out
 }

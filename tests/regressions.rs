@@ -321,3 +321,50 @@ fn a_function_may_use_a_value_that_is_declared_later() {
     );
     assert!(text.contains("1"), "{text}");
 }
+
+#[test]
+fn a_parameter_may_take_the_argument_apart() {
+    let text = run_ok(
+        "destructured-parameter",
+        "fn add({ a, b }) { return a + b }\nprint(add({ a: 1, b: 2 }))\n",
+    );
+    assert!(text.contains("3"), "{text}");
+}
+
+#[test]
+fn a_parameter_may_take_a_list_apart() {
+    let text = run_ok(
+        "destructured-list-parameter",
+        "fn add([a, b]) { return a + b }\nprint(add([1, 2]))\n",
+    );
+    assert!(text.contains("3"), "{text}");
+}
+
+#[test]
+fn an_arrow_may_take_the_argument_apart() {
+    let text = run_ok(
+        "destructured-arrow",
+        "let first = ({ name }) => name\nprint(first({ name: \"Ada\" }))\n",
+    );
+    assert!(text.contains("Ada"), "{text}");
+}
+
+#[test]
+fn a_component_may_take_its_props_apart() {
+    let text = run_ok(
+        "destructured-component",
+        r#"
+component Card({ title, subtitle }) {
+  section { h2 { title } p { subtitle } }
+}
+component App() {
+  Card title="T" subtitle="S"
+}
+print(html(App()))
+"#,
+    );
+    assert!(
+        text.contains("<section><h2>T</h2><p>S</p></section>"),
+        "{text}"
+    );
+}

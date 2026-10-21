@@ -311,7 +311,9 @@ impl Checker<'_> {
             if let Some(default) = &param.default {
                 self.check_expr(default)?;
             }
-            self.declare(&param.name, BindingKind::Param, param.pos)?;
+            for (name, _) in param.bindings() {
+                self.declare(name, BindingKind::Param, param.pos)?;
+            }
         }
         for stmt in &body.body {
             self.check_stmt(stmt)?;
@@ -329,7 +331,9 @@ impl Checker<'_> {
             if let Some(default) = &param.default {
                 self.check_expr(default)?;
             }
-            self.declare(&param.name, BindingKind::Param, param.pos)?;
+            for (name, _) in param.bindings() {
+                self.declare(name, BindingKind::Param, param.pos)?;
+            }
         }
         self.check_markup_nodes(&decl.children)?;
         self.pop_scope();
@@ -518,7 +522,9 @@ impl Checker<'_> {
                     if let Some(default) = &param.default {
                         self.check_expr(default)?;
                     }
-                    self.declare(&param.name, BindingKind::Param, param.pos)?;
+                    for (name, _) in param.bindings() {
+                        self.declare(name, BindingKind::Param, param.pos)?;
+                    }
                 }
                 self.check_expr(expr)?;
                 self.pop_scope();

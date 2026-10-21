@@ -195,7 +195,9 @@ impl Codegen {
                 self.indent += 1;
                 self.push_scope();
                 for param in &decl.params {
-                    self.declare(&param.name);
+                    for (name, _) in param.bindings() {
+                        self.declare(name);
+                    }
                 }
                 for inner in &decl.body.body {
                     self.gen_stmt(inner)?;
@@ -260,20 +262,31 @@ impl Codegen {
                      : (__veyFirst === undefined ? [] : [__veyFirst, ...__veyRest]);",
                 );
                 for (index, param) in decl.params.iter().enumerate() {
-                    self.declare(&param.name);
-                    let key = js_string(&param.name);
-                    let named = format!("__veyProps[{}]", key);
-                    let value = match &param.default {
-                        Some(default) => format!(
-                            "__veyValues.length > {index} ? __veyValues[{index}] \
-                             : ({named} !== undefined ? {named} : ({}))",
-                            self.gen_expr(default)?
-                        ),
-                        None => {
-                            format!("__veyValues.length > {index} ? __veyValues[{index}] : {named}")
+                    match &param.pattern {
+                        BindingPattern::Name { name, .. } => {
+                            self.declare(name);
+                            let key = js_string(name);
+                            let named = format!("__veyProps[{}]", key);
+                            let value = match &param.default {
+                                Some(default) => format!(
+                                    "__veyValues.length > {index} ? __veyValues[{index}] \
+                                     : ({named} !== undefined ? {named} : ({}))",
+                                    self.gen_expr(default)?
+                                ),
+                                None => {
+                                    format!("__veyValues.length > {index} ? __veyValues[{index}] : {named}")
+                                }
+                            };
+                            self.emit(&format!("const _{} = {};", name, value));
                         }
-                    };
-                    self.emit(&format!("const _{} = {};", param.name, value));
+                        // A pattern takes its values from the named props.
+                        pattern => {
+                            for (name, expression) in self.prop_bindings(pattern) {
+                                self.declare(&name);
+                                self.emit(&format!("const _{} = {};", name, expression));
+                            }
+                        }
+                    }
                 }
                 let markup = self.gen_markup_nodes(&decl.children)?;
                 self.emit(&format!("return {};", markup));
@@ -443,18 +456,59 @@ impl Codegen {
         }
     }
 
+    /// The values a pattern of a component parameter takes.
+    ///
+    /// A pattern reads the named props of the component, so `component
+    /// Card({ title })` uses the prop `title`.
+    fn prop_bindings(&self, pattern: &BindingPattern) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        match pattern {
+            BindingPattern::Name { name, .. } => {
+                out.push((name.clone(), format!("__veyProps[{}]", js_string(name))));
+            }
+            BindingPattern::Object { fields, rest, .. } => {
+                for field in fields {
+                    let expression = format!("__veyProps[{}]", js_string(&field.key));
+                    for (name, _) in field.pattern.bindings() {
+                        out.push((name.to_string(), expression.clone()));
+                    }
+                }
+                if let Some(rest) = rest {
+                    let keys: Vec<String> =
+                        fields.iter().map(|field| js_string(&field.key)).collect();
+                    out.push((
+                        rest.clone(),
+                        format!("V.omit(__veyProps, [{}])", keys.join(", ")),
+                    ));
+                }
+            }
+            BindingPattern::Array { items, rest, .. } => {
+                for (index, item) in items.iter().enumerate() {
+                    let expression = format!("__veyValues[{}]", index);
+                    for (name, _) in item.bindings() {
+                        out.push((name.to_string(), expression.clone()));
+                    }
+                }
+                if let Some(rest) = rest {
+                    out.push((rest.clone(), format!("__veyValues.slice({})", items.len())));
+                }
+            }
+        }
+        out
+    }
+
     fn gen_params(&mut self, params: &[Param]) -> Result<String, VeyError> {
         let mut parts = Vec::new();
         for param in params {
+            // A parameter that takes the argument apart becomes a pattern.
+            let pattern = self.gen_binding_pattern(&param.pattern);
             if param.rest {
-                parts.push(format!("..._{}", param.name));
+                parts.push(format!("...{}", pattern));
                 continue;
             }
             match &param.default {
-                Some(default) => {
-                    parts.push(format!("_{} = {}", param.name, self.gen_expr(default)?))
-                }
-                None => parts.push(format!("_{}", param.name)),
+                Some(default) => parts.push(format!("{} = {}", pattern, self.gen_expr(default)?)),
+                None => parts.push(pattern),
             }
         }
         Ok(parts.join(", "))

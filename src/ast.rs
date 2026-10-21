@@ -12,11 +12,27 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub name: String,
+    /// The name of the parameter, or a pattern that takes it apart.
+    pub pattern: BindingPattern,
     pub ty: Option<TypeExpr>,
     pub default: Option<Expr>,
     pub rest: bool,
     pub pos: Pos,
+}
+
+impl Param {
+    /// The name of the parameter, when it is a simple one.
+    pub fn name(&self) -> Option<&str> {
+        match &self.pattern {
+            BindingPattern::Name { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
+    /// The names the parameter binds.
+    pub fn bindings(&self) -> Vec<(&str, Pos)> {
+        self.pattern.bindings()
+    }
 }
 
 #[derive(Debug, Clone)]
