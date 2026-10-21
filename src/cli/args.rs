@@ -10,7 +10,7 @@ pub(crate) struct ParsedArgs {
     pub(crate) force: bool,
 }
 
-pub(crate) fn parse_args(args: &[String]) -> ParsedArgs {
+pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut parsed = ParsedArgs {
         files: Vec::new(),
         output: None,
@@ -25,41 +25,34 @@ pub(crate) fn parse_args(args: &[String]) -> ParsedArgs {
     while index < args.len() {
         let arg = &args[index];
         match arg.as_str() {
-            "-o" | "--out" => {
-                index += 1;
-                if index < args.len() {
-                    parsed.output = Some(args[index].clone());
-                }
-            }
+            "-o" | "--out" => parsed.output = Some(value_of(args, &mut index, arg)?),
             "--port" | "-p" => {
-                index += 1;
-                if index < args.len() {
-                    parsed.port = args[index].parse().ok();
-                }
+                let value = value_of(args, &mut index, arg)?;
+                parsed.port = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("'{}' is not a port", value))?,
+                );
             }
-            "--host" => {
-                index += 1;
-                if index < args.len() {
-                    parsed.host = Some(args[index].clone());
-                }
-            }
-            "--title" => {
-                index += 1;
-                if index < args.len() {
-                    parsed.title = Some(args[index].clone());
-                }
-            }
+            "--host" => parsed.host = Some(value_of(args, &mut index, arg)?),
+            "--title" => parsed.title = Some(value_of(args, &mut index, arg)?),
             "--node" => parsed.node = true,
             "--force" => parsed.force = true,
             _ => {
                 if let Some(value) = arg.strip_prefix("--out=") {
                     parsed.output = Some(value.to_string());
                 } else if let Some(value) = arg.strip_prefix("--port=") {
-                    parsed.port = value.parse().ok();
+                    parsed.port = Some(
+                        value
+                            .parse()
+                            .map_err(|_| format!("'{}' is not a port", value))?,
+                    );
                 } else if let Some(value) = arg.strip_prefix("--host=") {
                     parsed.host = Some(value.to_string());
                 } else if let Some(value) = arg.strip_prefix("--title=") {
                     parsed.title = Some(value.to_string());
+                } else if arg.starts_with('-') && arg.len() > 1 {
+                    return Err(format!("unknown option '{}'", arg));
                 } else {
                     parsed.files.push(arg.clone());
                 }
@@ -68,5 +61,14 @@ pub(crate) fn parse_args(args: &[String]) -> ParsedArgs {
         index += 1;
     }
 
-    parsed
+    Ok(parsed)
+}
+
+/// The value of an option.
+fn value_of(args: &[String], index: &mut usize, option: &str) -> Result<String, String> {
+    *index += 1;
+    match args.get(*index) {
+        Some(value) => Ok(value.clone()),
+        None => Err(format!("'{}' needs a value", option)),
+    }
 }

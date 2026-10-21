@@ -11,7 +11,13 @@ use crate::cli::entry::{collect_vey_files, default_title, entry_from};
 use crate::cli::output::{node_script, report, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
+    let parsed = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
     // The page that is served is found the same way as everywhere else.
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
@@ -38,7 +44,13 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
 }
 
 pub(crate) fn cmd_test(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
+    let parsed = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
     let inputs: Vec<PathBuf> = if parsed.files.is_empty() {
         let tests = PathBuf::from("tests");
         if tests.is_dir() {
@@ -119,7 +131,13 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
 }
 
 pub(crate) fn cmd_check(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
+    let parsed = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
         Err(err) => {

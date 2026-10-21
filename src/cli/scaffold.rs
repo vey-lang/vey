@@ -13,7 +13,13 @@ pub(crate) const PROJECT_LOGO: &str = include_str!("../../logo.svg");
 pub(crate) const PROJECT_FAVICON: &str = include_str!("../../favicon.svg");
 
 pub(crate) fn cmd_new(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
+    let parsed = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
     let Some(name) = parsed.files.first() else {
         eprintln!("usage: vey new <directory>");
         return 1;

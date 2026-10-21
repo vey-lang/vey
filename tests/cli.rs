@@ -324,3 +324,27 @@ fn a_page_may_not_take_the_place_of_the_home_of_the_site() {
     let home = std::fs::read_to_string(dir.join("out/index.html")).unwrap();
     assert!(home.contains("Hi"), "{home}");
 }
+
+#[test]
+fn an_option_that_is_not_known_is_reported() {
+    let output = vey().arg("build").arg("--nonsense").output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("unknown option '--nonsense'"), "{error}");
+}
+
+#[test]
+fn an_option_without_a_value_is_reported() {
+    let output = vey().arg("build").arg("--port").output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("needs a value"), "{error}");
+}
+
+#[test]
+fn a_port_that_is_not_a_number_is_reported() {
+    let output = vey().arg("dev").arg("--port").arg("abc").output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(error.contains("is not a port"), "{error}");
+}

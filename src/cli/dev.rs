@@ -59,7 +59,13 @@ pub(crate) struct DevState {
 }
 
 pub(crate) fn cmd_dev(args: &[String]) -> i32 {
-    let parsed = parse_args(args);
+    let parsed = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
         Err(err) => {
