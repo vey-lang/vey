@@ -109,6 +109,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         )),
         "keys" => Some(builtin_function(vec![any()], list(string()))),
         "values" | "entries" => Some(builtin_function(vec![any()], list(any()))),
+        "omit" => Some(builtin_function(vec![any(), list(any())], any())),
         "range" => Some(builtin_optional(
             vec![number(), number()],
             1,

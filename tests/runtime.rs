@@ -129,3 +129,34 @@ try { browser.fs.read("x"); } catch (err) { console.log(err.message); }
     );
     assert!(text.contains("only available in Node"), "{text}");
 }
+
+#[test]
+fn every_helper_of_the_checker_is_in_the_runtime() {
+    let runtime = fs::read_to_string("runtime.js").expect("the runtime is missing");
+    let builtins = fs::read_to_string("src/builtins.rs").expect("the list of helpers is missing");
+
+    let mut names = Vec::new();
+    for line in builtins.lines() {
+        let line = line.trim();
+        let Some(start) = line.find('"') else {
+            continue;
+        };
+        let rest = &line[start + 1..];
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        let name = &rest[..end];
+        if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            names.push(name.to_string());
+        }
+    }
+    assert!(!names.is_empty(), "no helpers were found");
+
+    for name in names {
+        assert!(
+            runtime.contains(&format!("\n    {}:", name)),
+            "the runtime does not have '{}'",
+            name
+        );
+    }
+}

@@ -30,6 +30,7 @@ pub const BUILTINS: &[&str] = &[
     "keys",
     "values",
     "entries",
+    "omit",
     "range",
     "flatMap",
     "error",

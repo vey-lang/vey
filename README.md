@@ -754,6 +754,7 @@ The request object contains `path`, `method`, `params`, `query`, `headers`, `bod
 | `slice(value, start, end)` | slice a string or list |
 | `join(list, sep)` / `split(text, sep)` | list and text conversion |
 | `map`, `filter`, `reduce`, `find`, `sort` | list helpers |
+| `keys`, `values`, `entries`, `omit` | the parts of an object |
 | `startsWith(text, prefix)`, `endsWith(text, suffix)` | the ends of a text |
 | `json.parse`, `json.stringify` | JSON |
 | `math.round`, `math.floor`, `math.random`, `math.pi` | math |
