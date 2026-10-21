@@ -219,7 +219,7 @@ component App() {
             p {
               "A program may serve a site of its own. The routes take the address of the request and hand back what the browser gets."
             }
-            site.Sample(samples.SERVER)
+            site.Sample("server.vey", samples.SERVER)
 
             div.links {
               a.button href="/language.vey" { "The language" }

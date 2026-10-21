@@ -14,6 +14,7 @@
   --muted: #6e6e6e;
   --line: #e4e4e4;
   --soft: #f7f7f7;
+  --bar: #f0f0f0;
   --mark: #0b0b0b;
 
   --kw: #8250df;
@@ -33,6 +34,7 @@
     --muted: #949494;
     --line: #262626;
     --soft: #161616;
+    --bar: #1d1d1d;
     --mark: #f4f4f4;
 
     --kw: #d2a8ff;
@@ -174,9 +176,13 @@ img {
 
 .hero .inner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20rem;
-  gap: 4rem;
-  align-items: end;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 3.5rem;
+  align-items: center;
+}
+
+.hero-text {
+  max-width: 34rem;
 }
 
 .hero h1 {
@@ -196,39 +202,29 @@ img {
   color: var(--muted);
 }
 
-.hero .mark {
-  width: 100%;
-  max-width: 10rem;
-  margin-left: auto;
-  opacity: 0.9;
-}
-
 /* The command that installs Vey */
 
 .command {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.95rem 1.15rem;
+  max-width: var(--measure);
+  padding: 1rem 1.2rem;
   border: 1px solid var(--line);
   background: var(--soft);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow-x: auto;
 }
 
 .command code {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   white-space: nowrap;
 }
 
-.command .label {
-  margin-left: auto;
-  padding-left: 1rem;
-  font-size: 0.6875rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.command .prompt {
+  flex: 0 0 auto;
   color: var(--muted);
-  white-space: nowrap;
+  user-select: none;
 }
 
 /* The parts of the text */
@@ -293,7 +289,8 @@ img {
   color: var(--muted);
 }
 
-.prose code {
+.prose p code,
+.prose li code {
   padding: 0.1em 0.35em;
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -342,25 +339,76 @@ img {
   border-left-color: var(--fg);
 }
 
-/* The samples of the code */
+/* The samples of the code, in a window of their own */
 
 .sample {
   margin: 0 0 2rem;
-  padding: 1.15rem 1.35rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  overflow-x: auto;
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--soft);
+}
+
+.sample-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bar);
+}
+
+.dot {
+  width: 0.68rem;
+  height: 0.68rem;
+  border-radius: 50%;
+}
+
+.dot.red {
+  background: #ff5f57;
+}
+
+.dot.yellow {
+  background: #febc2e;
+}
+
+.dot.green {
+  background: #28c840;
+}
+
+.sample-name {
+  margin-left: 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.sample-code {
+  margin: 0;
+  padding: 1.05rem 1.25rem;
+  overflow-x: auto;
   font-size: 0.875rem;
   line-height: 1.65;
 }
 
-.sample code {
+.sample-code code {
   white-space: pre;
   background: none;
   border: 0;
   padding: 0;
   font-size: inherit;
+}
+
+/* A line of code, without a window */
+
+.line {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--soft);
+  font-size: 0.8125rem;
+  white-space: nowrap;
 }
 
 /* The colours of the code */
@@ -389,10 +437,18 @@ img {
 /* The note on the side */
 
 .note {
-  margin: 0 0 2rem;
-  padding: 0.25rem 0 0.25rem 1.25rem;
-  border-left: 2px solid var(--fg);
+  max-width: var(--measure);
+  margin: 0 0 2.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
   color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.note p {
+  margin: 0 0 0.75rem;
 }
 
 .note p:last-child {
@@ -450,11 +506,12 @@ ul.commands li:first-child {
 }
 
 ul.commands code {
-  flex: 0 0 12rem;
+  flex: 0 0 15rem;
   padding: 0;
   border: 0;
   background: none;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 ul.commands span {
@@ -462,9 +519,41 @@ ul.commands span {
   font-size: 0.9375rem;
 }
 
+/* The cards of the home page */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 2rem;
+}
+
+.card {
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
 /* The steps of the install page */
 
 .steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
   margin: 0 0 2.5rem;
   padding: 0;
   list-style: none;
@@ -472,35 +561,33 @@ ul.commands span {
 }
 
 .steps li {
-  position: relative;
-  margin: 0 0 2.25rem;
-  padding-left: 2.75rem;
+  margin: 0;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
   counter-increment: step;
 }
 
 .steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: 0.05rem;
-  width: 1.7rem;
-  height: 1.7rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  font-size: 0.8125rem;
-  font-variant-numeric: tabular-nums;
+  content: counter(step, decimal-leading-zero);
+  display: block;
+  margin-bottom: 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
 .steps h3 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.9375rem;
 }
 
 .steps p {
   margin: 0 0 0.85rem;
   color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
 /* The buttons that lead to another page */
@@ -568,10 +655,6 @@ ul.commands span {
     gap: 2.5rem;
   }
 
-  .hero .mark {
-    display: none;
-  }
-
   .prose-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 2.5rem;
@@ -616,8 +699,7 @@ ul.commands span {
     gap: 0.5rem;
   }
 
-  .command .label {
-    margin-left: 0;
-    padding-left: 0;
+  .command .prompt {
+    display: none;
   }
 }

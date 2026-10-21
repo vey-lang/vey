@@ -9,14 +9,14 @@ component App() {
     section.hero {
       div.shell {
         div.inner {
-          div {
+          div.hero-text {
             h1 { "A small web language." }
             p {
               "Vey has its own syntax, its own compiler and its own runtime. The compiler is written in Rust and ships as a single binary. It emits JavaScript, so the same source runs on Node and in the browser."
             }
             site.Command("curl -fsSL https://veylang.tech/install.sh | sh")
           }
-          img.mark src="/logo.svg" alt=""
+          site.Sample("hello.vey", samples.HELLO)
         }
       }
     }
@@ -24,36 +24,20 @@ component App() {
     section.prose {
       div.shell {
         h2 { "What it has" }
-        ul.points {
-          li {
-            h3 { "Markup without angle brackets" }
-            p { "A tag is written with its classes and its id, and it has no closing tag." }
-          }
-          li {
-            h3 { "Types when you want them" }
-            p { "A type is checked while the program is compiled and erased from the output." }
-          }
-          li {
-            h3 { "One binary" }
-            p { "The compiler, the runtime and the server of a site are all in the same binary." }
-          }
-          li {
-            h3 { "Modules and packages" }
-            p { "A module of your own, or a package of npm that is installed with npm." }
-          }
-          li {
-            h3 { "A server of your own" }
-            p { "A program may serve a site, with routes, a body and the cookies of a request." }
-          }
-          li {
-            h3 { "Errors that are readable" }
-            p { "The page of an error shows the file, the line and a caret under the wrong part." }
-          }
+        div.cards {
+          site.Card("Markup without angle brackets", "A tag is written with its classes and its id, and it has no closing tag.")
+          site.Card("Types when you want them", "A type is checked while the program is compiled and erased from the output.")
+          site.Card("One binary", "The compiler, the runtime and the server of a site are all in the same binary.")
+          site.Card("Modules and packages", "A module of your own, or a package of npm that is installed with npm.")
+          site.Card("A server of your own", "A program may serve a site, with routes, a body and the cookies of a request.")
+          site.Card("Errors that are readable", "The page of an error shows the file, the line and a caret under the wrong part.")
         }
 
-        h2 { "What it looks like" }
-        site.Sample(samples.HELLO)
-        site.Sample(samples.COMPONENTS)
+        h2 { "A page is a program" }
+        p {
+          "A page is written with tag selectors instead of angle brackets. The components take arguments, and the styles are written in CSS or right next to the markup."
+        }
+        site.Sample("components.vey", samples.COMPONENTS)
 
         h2 { "The tools" }
         ul.commands {
@@ -85,6 +69,7 @@ component App() {
 
         div.links {
           a.button href="/language.vey" { "Read the language" }
+          a.button href="/library.vey" { "The library" }
           a.button href="/install.vey" { "Install Vey" }
         }
       }

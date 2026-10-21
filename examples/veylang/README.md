@@ -6,11 +6,13 @@ The site of Vey, written in Vey.
 | --- | --- |
 | `src/main.vey` | the home page |
 | `src/language.vey` | the guide of the language |
+| `src/library.vey` | the runtime that every program carries |
 | `src/install.vey` | how to install Vey |
 | `src/site.vey` | the parts that every page shares |
 | `src/samples.vey` | the samples of the code |
 | `src/styles/site.css` | the styles of the site |
 | `public/install.sh` | the script that installs Vey with one command |
+| `public/logo.svg` | the mark of the language |
 
 ## Build
 

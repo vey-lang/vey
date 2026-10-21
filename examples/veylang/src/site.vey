@@ -33,18 +33,26 @@ export component Footer() {
   }
 }
 
-// A sample of the language, with the colours of the code.
-export component Sample(text: string) {
-  pre.sample {
-    code { raw(highlight(text)) }
+// A sample of the language, in a window of its own.
+export component Sample(name: string, text: string) {
+  div.sample {
+    div.sample-bar {
+      span.dot.red { }
+      span.dot.yellow { }
+      span.dot.green { }
+      span.sample-name { name }
+    }
+    pre.sample-code {
+      code { raw(highlight(text)) }
+    }
   }
 }
 
 // The command that installs Vey.
 export component Command(command: string) {
   div.command {
+    span.prompt { "$" }
     code { command }
-    span.label { "one line" }
   }
 }
 
@@ -59,5 +67,13 @@ export component Contents(items: [string]) {
         }
       }
     }
+  }
+}
+
+// A card of the home page.
+export component Card(title: string, body: string) {
+  div.card {
+    h3 { title }
+    p { body }
   }
 }

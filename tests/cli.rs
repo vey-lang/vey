@@ -381,11 +381,22 @@ fn the_site_of_the_language_builds() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    for page in ["index.html", "language.html", "install.html"] {
+    for page in [
+        "index.html",
+        "language.html",
+        "library.html",
+        "install.html",
+    ] {
         let path = dir.join("dist").join(page);
         assert!(path.is_file(), "{} is missing", page);
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("Vey"), "{}", page);
+    }
+
+    // Every page is also written under the name of its source.
+    for page in ["language.vey", "library.vey", "install.vey"] {
+        let path = dir.join("dist").join(page);
+        assert!(path.is_file(), "{} is missing", page);
     }
 
     // The script that installs Vey is served with the site.
