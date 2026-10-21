@@ -279,9 +279,13 @@ impl Lexer {
                 look += 1;
             }
             if self.at(look).is_some_and(|c| c.is_ascii_digit()) {
-                raw.push(self.bump().unwrap());
+                if let Some(c) = self.bump() {
+                    raw.push(c);
+                }
                 if matches!(self.at(0), Some('+') | Some('-')) {
-                    raw.push(self.bump().unwrap());
+                    if let Some(c) = self.bump() {
+                        raw.push(c);
+                    }
                 }
                 while let Some(c) = self.at(0) {
                     if c.is_ascii_digit() {

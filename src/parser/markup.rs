@@ -31,8 +31,8 @@ impl Parser {
         if self.tok.kind != TokKind::Ident {
             return Ok(false);
         }
-        let first = self.tok.value.chars().next().unwrap();
-        if first.is_uppercase() {
+        let first = self.tok.value.chars().next();
+        if first.is_some_and(|first| first.is_uppercase()) {
             return Ok(true);
         }
         // A component of another module, such as `ui.Card`.

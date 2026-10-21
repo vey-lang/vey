@@ -210,7 +210,10 @@ impl TypeChecker<'_> {
                                     );
                                 }
                                 let v_fields: Vec<(String, Option<TypeExpr>)> = {
-                                    let info = self.enums.get(enum_name).unwrap();
+                                    let Some(info) = self.enums.get(enum_name) else {
+                                        return Err(self
+                                            .error(*pos, format!("unknown enum '{}'", enum_name)));
+                                    };
                                     let v = info
                                         .variants
                                         .iter()
