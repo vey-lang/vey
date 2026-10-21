@@ -18,13 +18,7 @@ fn run(args: &[String]) -> i32 {
 
     let rest = &args[1..];
     match command.as_str() {
-        "run" => {
-            if rest.first().is_some_and(|arg| arg == "dev") {
-                cmd_dev(&rest[1..])
-            } else {
-                cmd_run(rest)
-            }
-        }
+        "run" => cmd_run(rest),
         "test" => cmd_test(rest),
         "build" => cmd_build(rest),
         "web" => cmd_web(rest),

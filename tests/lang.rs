@@ -157,7 +157,7 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(project.join("dist/index.html")).unwrap();
+    let html = fs::read_to_string(project.join(".dist/index.html")).unwrap();
     assert!(html.contains("Nested entry"), "{}", html);
 }
 
@@ -678,7 +678,7 @@ fn new_project_builds_and_curate_is_gone() {
         .unwrap();
     assert!(build.status.success(), "{}", stderr(&build));
     assert!(!project.join("index.vey").exists());
-    let index = fs::read_to_string(project.join("dist/index.html")).unwrap();
+    let index = fs::read_to_string(project.join(".dist/index.html")).unwrap();
     assert!(index.contains("Welcome to Vey"), "{}", index);
     assert!(index.contains("favicon.svg"), "{}", index);
     for removed in ["Clicked", "See features", "What you get", "Built from"] {
@@ -717,8 +717,8 @@ fn new_project_builds_and_curate_is_gone() {
     );
     let favicon = fs::read_to_string(project.join("public/favicon.svg")).unwrap();
     assert_eq!(favicon.matches("<path").count(), 1, "{}", favicon);
-    assert!(project.join("dist/logo.svg").is_file());
-    assert!(project.join("dist/404.html").is_file());
+    assert!(project.join(".dist/logo.svg").is_file());
+    assert!(project.join(".dist/404.html").is_file());
 
     let curate = Command::new(env!("CARGO_BIN_EXE_vey"))
         .arg("curate")

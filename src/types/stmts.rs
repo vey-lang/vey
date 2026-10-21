@@ -191,7 +191,8 @@ impl TypeChecker<'_> {
             Stmt::Fn(decl) => self.check_fn_decl(decl),
             Stmt::Component(decl) => self.check_component(decl),
             Stmt::If(decl) => {
-                self.infer_expr(&decl.test)?;
+                let test = self.infer_expr(&decl.test)?;
+                self.check_condition(&test, decl.pos)?;
                 let narrowing = self.narrow_condition(&decl.test).filter(|(name, _, _)| {
                     !block_assigns_name(&decl.then_block, name)
                         && !decl
@@ -220,7 +221,8 @@ impl TypeChecker<'_> {
                 Ok(())
             }
             Stmt::While(decl) => {
-                self.infer_expr(&decl.test)?;
+                let test = self.infer_expr(&decl.test)?;
+                self.check_condition(&test, decl.pos)?;
                 self.check_block(&decl.body)
             }
             Stmt::For(decl) => {
@@ -306,6 +308,20 @@ impl TypeChecker<'_> {
             }
             Stmt::Assign(decl) => self.check_assign(decl),
             Stmt::Block(block, _) => self.check_block(block),
+        }
+    }
+
+    /// A condition has to be a yes or a no.
+    ///
+    /// A number or a text is always the same, so it is most likely a
+    /// mistake.
+    pub(crate) fn check_condition(&self, ty: &Type, pos: Pos) -> Result<(), VeyError> {
+        match ty {
+            Type::Number | Type::String => Err(self.error(
+                pos,
+                format!("the condition must be a bool, not a {}", ty.display()),
+            )),
+            _ => Ok(()),
         }
     }
 

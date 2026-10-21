@@ -4,14 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The file names that are tried when a project is built without arguments.
-pub(crate) const ENTRY_NAMES: &[&str] = &[
-    "main.vey",
-    "index.vey",
-    "app.vey",
-    "page.vey",
-    "src/main.vey",
-    "src/index.vey",
-];
+pub(crate) const ENTRY_NAMES: &[&str] = &["main.vey", "index.vey", "app.vey", "page.vey"];
 
 pub(crate) fn entry_from(files: &[String]) -> Result<PathBuf, String> {
     if let Some(first) = files.first() {
@@ -28,10 +21,21 @@ pub(crate) fn entry_from(files: &[String]) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn discover_entry(directory: &Path) -> Result<PathBuf, String> {
-    for name in ENTRY_NAMES {
-        let candidate = directory.join(name);
-        if candidate.is_file() {
-            return Ok(candidate);
+    // The pages are in `src` when that folder is there, and in the project
+    // itself otherwise.
+    let mut folders = Vec::new();
+    let source = directory.join("src");
+    if source.is_dir() {
+        folders.push(source);
+    }
+    folders.push(directory.to_path_buf());
+
+    for folder in &folders {
+        for name in ENTRY_NAMES {
+            let candidate = folder.join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
         }
     }
 
@@ -95,7 +99,15 @@ pub(crate) fn find_entries(directory: &Path, depth: usize, found: &mut Vec<PathB
 pub(crate) fn is_ignored_dir(name: &str) -> bool {
     matches!(
         name,
-        "node_modules" | "target" | ".git" | "dist" | "build" | ".vey" | "tests" | "examples"
+        "node_modules"
+            | "target"
+            | ".git"
+            | "dist"
+            | ".dist"
+            | "build"
+            | ".vey"
+            | "tests"
+            | "examples"
     )
 }
 
@@ -104,8 +116,9 @@ pub(crate) fn project_root(entry: &Path) -> PathBuf {
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+
+    // A folder that is called `src` belongs to the project above it.
     if parent.file_name().is_some_and(|name| name == "src") {
-        // A project that keeps its pages in `src` has its root one level up.
         return parent
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
@@ -177,7 +190,7 @@ pub(crate) fn collect_vey_files(directory: &Path, files: &mut Vec<PathBuf>) {
             let name = name.to_string_lossy();
             if matches!(
                 name.as_ref(),
-                "node_modules" | "target" | ".git" | "dist" | "build" | ".vey"
+                "node_modules" | "target" | ".git" | "dist" | ".dist" | "build" | ".vey"
             ) {
                 continue;
             }
@@ -202,7 +215,7 @@ pub(crate) fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
             let name = name.to_string_lossy();
             if matches!(
                 name.as_ref(),
-                "node_modules" | "target" | ".git" | "dist" | "build" | ".vey"
+                "node_modules" | "target" | ".git" | "dist" | ".dist" | "build" | ".vey"
             ) {
                 continue;
             }

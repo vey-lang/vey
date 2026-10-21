@@ -148,19 +148,18 @@ pub(crate) fn print_help() {
 
 usage:
   vey run <file.vey>              compile and run with node
-  vey run dev [entry]             start the live dev server
   vey dev [entry] [--port 4000]   start the live dev server
   vey test [file|dir]             run .vey test files
-  vey build [entry|dir] [-o out]  build a deployable static site (dist/)
+  vey build [entry|dir] [-o out]  build a deployable static site (.dist/)
   vey build <file.vey> --node     build a standalone node script
   vey web [entry] [-o out]        build a single html page
   vey new <directory>             create a project
-  vey check [file.vey]            parse, check and resolve imports
+  vey check [file|dir]           check a file or the whole project
   vey version                     print version
   vey help                        show this message
 
 build options:
-  -o, --out <dir>                 output directory (default: dist)
+  -o, --out <dir>                 output directory (default: .dist)
   --title <text>                  page title
   --node                          emit a node script instead of a site
 
@@ -171,7 +170,7 @@ dev options:
 example:
   vey new myapp
   cd myapp
-  vey run dev
+  vey dev
   vey build
 "#,
         version = env!("CARGO_PKG_VERSION")

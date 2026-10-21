@@ -1,6 +1,6 @@
 //! The `vey run`, `vey test` and `vey check` commands.
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use vey::compiler::compile_project;
@@ -138,23 +138,48 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
         Ok(entry) => entry,
         Err(err) => {
             eprintln!("{}", err);
-            eprintln!("usage: vey check <file.vey>");
+            eprintln!("usage: vey check [file.vey|directory]");
             return 1;
         }
     };
 
-    match compile_project(&entry) {
-        Ok(bundle) => {
-            println!(
-                "ok: {} module(s), {} style source(s)",
-                bundle.modules.len(),
-                bundle.styles.len()
-            );
-            0
-        }
-        Err(err) => {
+    // The entry is checked first, and then every other page of the project.
+    let mut watch = Vec::new();
+    let mut failed = Vec::new();
+    let mut pages = 0;
+    for file in project_pages(&entry, &mut watch) {
+        pages += 1;
+        if let Err(err) = compile_project(&file) {
             report(&err);
-            1
+            failed.push(file);
         }
     }
+
+    if failed.is_empty() {
+        println!("ok: {} page(s) checked", pages);
+        0
+    } else {
+        eprintln!("{} page(s) could not be checked", failed.len());
+        1
+    }
+}
+
+/// The pages of a project, the entry first.
+fn project_pages(entry: &Path, watch: &mut Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut pages = vec![entry.to_path_buf()];
+    let mut files = Vec::new();
+    let folder = match entry.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    collect_vey_files(&folder, &mut files);
+    files.sort();
+    for file in files {
+        if file == entry {
+            continue;
+        }
+        watch.push(file.clone());
+        pages.push(file);
+    }
+    pages
 }

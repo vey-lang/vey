@@ -469,3 +469,20 @@ fn a_closure_has_to_fit_the_type_it_is_given() {
     );
     assert!(error.contains("expected (number) -> number"), "{error}");
 }
+
+#[test]
+fn a_condition_has_to_be_a_bool() {
+    let error = check_err("condition-number", "if 5 { print(1) }\n");
+    assert!(error.contains("the condition must be a bool"), "{error}");
+
+    let error = check_err(
+        "condition-text",
+        "let s: string = \"a\"\nif s { print(1) }\n",
+    );
+    assert!(error.contains("the condition must be a bool"), "{error}");
+
+    check_ok(
+        "condition-bool",
+        "let b: bool = true\nif b { print(1) }\nlet n = 0\nwhile n < 1 { n += 1 }\n",
+    );
+}

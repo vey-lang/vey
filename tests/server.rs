@@ -16,6 +16,15 @@ impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
+        // The server runs in a group of its own, so that the node process
+        // under the compiler ends as well and leaves nothing behind.
+        #[cfg(unix)]
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(format!("-{}", self.0.id()))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 }
 
@@ -67,20 +76,29 @@ fn start_server(source: &str) -> (Server, u16) {
         source.replace("{port}", &port.to_string()),
     )
     .unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_vey"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vey"));
+    command
         .arg("run")
         .arg(dir.join("main.vey"))
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::null());
+    // The server runs in a group of its own, so that the node process under
+    // the compiler can be ended with it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let child = command.spawn().unwrap();
     (Server(child), port)
 }
 
 const ROUTES: &str = "let app = server({port})\n\
      app.get('/users/{id}', fn(req) { return { id: req.params.id } })\n\
      app.get('/files/*', fn(req) { return { file: req.params.splat } })\n\
-     app.start()\n";
+     app.start()\n\
+     await sleep(10000)\n\
+     app.stop()\n";
 
 #[test]
 fn a_route_returns_its_handler_result() {

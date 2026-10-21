@@ -19,9 +19,9 @@ cargo build --release
 
 ```sh
 vey run app.vey                  # compile and run with node
-vey run dev                      # live dev server (also: vey dev)
+vey dev                          # live dev server
 vey test                         # run .vey files under tests/
-vey build                        # static site in dist/
+vey build                        # static site in .dist/
 vey build app.vey --node -o app.cjs  # standalone node script
 vey web app.vey -o index.html    # single file browser page
 vey new myapp                    # project scaffold
@@ -34,12 +34,12 @@ vey check app.vey                # parse, check and resolve imports
 `public/` into a folder that can be uploaded as is:
 
 ```sh
-vey build          # -> dist/
+vey build          # -> .dist/
 vey build -o site  # -> site/
 ```
 
 ```
-dist/
+.dist/
   index.html
   404.html
   robots.txt      # from public/
@@ -95,7 +95,7 @@ it, Vey writes a page of its own.
 ## Development server
 
 ```sh
-vey run dev
+vey dev
 vey dev --port 3000 --host 0.0.0.0
 vey dev app.vey
 ```

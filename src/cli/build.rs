@@ -9,6 +9,9 @@ use crate::cli::entry::{default_title, entry_from, project_root};
 use crate::cli::output::{html_document, node_script, replace_extension, report};
 use crate::cli::site::write_site;
 
+/// The folder the site is written to.
+pub(crate) const OUTPUT_FOLDER: &str = ".dist";
+
 pub(crate) fn cmd_build(args: &[String]) -> i32 {
     let parsed = parse_args(args);
 
@@ -24,7 +27,7 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
         Ok(entry) => entry,
         Err(err) => {
             eprintln!("{}", err);
-            eprintln!("usage: vey build [entry.vey|directory] [-o dist]");
+            eprintln!("usage: vey build [entry.vey|directory] [-o .dist]");
             return 1;
         }
     };
@@ -33,7 +36,7 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
     let output = parsed
         .output
         .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("dist"));
+        .unwrap_or_else(|| root.join(OUTPUT_FOLDER));
 
     match write_site(&entry, &output, parsed.title.as_deref()) {
         Ok(report) => {

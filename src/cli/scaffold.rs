@@ -193,7 +193,7 @@ a:hover {
 
 const ROBOTS: &str = "User-agent: *\nAllow: /\n";
 
-const GITIGNORE: &str = "/dist\n/node_modules\n*.cjs\n.DS_Store\n";
+const GITIGNORE: &str = "/.dist\n/node_modules\n*.cjs\n.DS_Store\n";
 
 const PROJECT_PACKAGE: &str = r##"{
   "name": "{name}",
@@ -228,7 +228,7 @@ changes and reloads the page in the browser.
 npm run build   # or: vey build
 ```
 
-The site is written to `dist/`. That folder holds everything the server
+The site is written to `.dist/`. That folder holds everything the server
 needs, so it can be uploaded as it is.
 
 ## Layout
