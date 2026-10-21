@@ -234,9 +234,10 @@ const PROJECT_PACKAGE: &str = r##"{
   "description": "A site built with Vey.",
   "scripts": {
     "dev": "vey dev",
+    "start": "vey run",
     "build": "vey build",
     "test": "vey test",
-    "check": "vey check src/main.vey"
+    "check": "vey check"
   }
 }
 "##;
@@ -262,6 +263,12 @@ npm run build   # or: vey build
 
 The site is written to `.dist/`. That folder holds everything the server
 needs, so it can be uploaded as it is.
+
+To serve the built site the way a host serves it:
+
+```sh
+npm start       # or: vey run
+```
 
 ## Layout
 
