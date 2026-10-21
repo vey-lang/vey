@@ -100,8 +100,11 @@ fn dev_reports_errors_in_a_readable_page_and_recovers() {
     );
     assert!(body.contains("class=\"code\""), "{body}");
     assert!(body.contains("main.vey"), "{body}");
-    assert!(body.contains("Watching for changes"), "{body}");
+    assert!(body.contains("watching for changes"), "{body}");
     assert!(!body.contains("Vey could not build this page"), "{body}");
+    // The page is black and white, like the rest of Vey.
+    assert!(!body.contains("#818cf8"), "{body}");
+    assert!(!body.contains("radial-gradient"), "{body}");
 
     fs::write(
         dir.join("main.vey"),

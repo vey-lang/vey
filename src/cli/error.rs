@@ -130,180 +130,140 @@ impl BuildError {
 <title>Build failed · Vey</title>
 <style>
   :root {
-    color-scheme: dark;
-    --bg: #0f172a;
-    --border: #2a3550;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --accent: #818cf8;
-    --danger: #f87171;
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #0b0b0b;
+    --muted: #6e6e6e;
+    --line: #e3e3e3;
+    --soft: #f6f6f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0b0b;
+      --fg: #f4f4f4;
+      --muted: #8d8d8d;
+      --line: #262626;
+      --soft: #141414;
+    }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     min-height: 100vh;
-    display: grid;
-    place-items: center;
-    padding: 32px 20px;
-    background:
-      radial-gradient(620px 320px at 50% -8%, rgba(129, 140, 248, 0.14), transparent 70%),
-      var(--bg);
-    color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 3rem 1.5rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  .panel { width: min(780px, 100%); }
+  main { max-width: 46rem; margin: 0 auto; }
   .top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin: 0 2px 16px;
+    gap: 0.5rem;
     color: var(--muted);
-    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
   }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--text);
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-  .mark { width: 18px; height: 18px; }
-  .card {
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    background: rgba(22, 33, 58, 0.72);
-    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
-  }
-  .head { padding: 26px 26px 0; }
-  .eyebrow {
-    margin: 0 0 10px;
-    color: var(--danger);
-    font-size: 11.5px;
-    font-weight: 650;
-    letter-spacing: 0.15em;
+  .mark { width: 16px; height: 16px; }
+  .kicker {
+    margin: 2.5rem 0 0;
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
   }
   h1 {
-    margin: 0;
-    font-size: clamp(21px, 3vw, 25px);
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    margin: 1rem 0 0;
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    font-size: clamp(1.75rem, 6vw, 2.5rem);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
   }
-  .sub {
-    margin: 10px 0 0;
-    color: var(--muted);
-    font-size: 13.5px;
-    line-height: 1.55;
-  }
+  .sub { margin: 1rem 0 0; max-width: 34rem; color: var(--muted); }
   .location {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-top: 16px;
-    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
   }
-  .file {
-    max-width: 100%;
-    padding: 6px 10px;
-    overflow-wrap: anywhere;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--muted);
-    background: rgba(15, 23, 42, 0.55);
-  }
-  .pos { color: var(--accent); }
-  .body { padding: 20px 26px 26px; }
+  .file { max-width: 100%; overflow-wrap: anywhere; color: var(--muted); }
+  .pos { color: var(--fg); }
   .message {
-    padding: 14px 16px;
-    border-left: 3px solid var(--danger);
-    border-radius: 0 10px 10px 0;
-    background: rgba(248, 113, 113, 0.07);
-    color: #fecaca;
-    font: 13.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-top: 2rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--fg);
+    border-radius: 0 0.5rem 0.5rem 0;
+    background: var(--soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.875rem;
     overflow-wrap: anywhere;
   }
   .code {
-    margin: 16px 0 0;
-    padding: 12px 0;
+    margin: 1.25rem 0 0;
+    padding: 0.75rem 0;
     overflow-x: auto;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: #0b1222;
-    font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, monospace;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: var(--soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.7;
   }
-  .line {
-    display: flex;
-    gap: 14px;
-    padding: 0 16px;
-    white-space: pre;
-  }
-  .line.error { background: rgba(248, 113, 113, 0.09); }
+  .line { display: flex; gap: 1rem; padding: 0 1rem; white-space: pre; }
+  .line.error { background: var(--bg); }
   .no {
     flex: none;
-    width: 2ch;
-    color: #475569;
+    width: 3ch;
+    color: var(--muted);
     text-align: right;
     user-select: none;
   }
-  .text { color: #cbd5e1; }
-  .caret { color: var(--danger); }
+  .text { color: var(--fg); }
+  .caret { color: var(--fg); font-weight: 700; }
   .hint {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
-    padding: 12px 14px;
-    border: 1px solid rgba(129, 140, 248, 0.32);
-    border-radius: 10px;
-    background: rgba(129, 140, 248, 0.08);
-    color: #c7d2fe;
-    font-size: 13.5px;
-    line-height: 1.55;
+    margin-top: 1.25rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    color: var(--muted);
+    font-size: 0.875rem;
   }
-  .hint b { flex: none; color: #e0e7ff; font-weight: 600; }
+  .hint b { color: var(--fg); font-weight: 600; }
   code {
     padding: 1px 5px;
-    border-radius: 5px;
-    background: rgba(15, 23, 42, 0.55);
-    color: #e0e7ff;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border-radius: 4px;
+    background: var(--soft);
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.92em;
   }
-  .footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 16px 2px 0;
+  footer {
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
     color: var(--muted);
-    font-size: 12.5px;
-  }
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #34d399;
-    box-shadow: 0 0 10px rgba(52, 211, 153, 0.6);
+    font-size: 0.8125rem;
   }
 </style>
 </head>
 <body>
-<main class="panel">
+<main>
   <div class="top">
-    <span class="brand">
-      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.7 5.3 3.9 8.5 9.2 9.2-5.3.7-8.5 3.9-9.2 9.2-.7-5.3-3.9-8.5-9.2-9.2C8.1 10.5 11.3 7.3 12 2Z" fill="#818cf8"/></svg>
-      Vey dev
-    </span>
-    <span>Build failed</span>
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2C16 10 22 16 30 16 22 16 16 22 16 30 16 22 10 16 2 16 10 16 16 10 16 2Z" fill="currentColor"/></svg>
+    <span>Vey dev</span>
   </div>
-  <section class="card" role="alert">
-    <div class="head">
-      <p class="eyebrow">Compile error</p>
-      <h1>This page could not be built.</h1>
-      <p class="sub">Vey stopped at the first problem. Fix it and save the file — the page reloads on its own.</p>
+  <p class="kicker">Compile error</p>
+  <h1>This page could not be built.</h1>
+  <p class="sub">Vey stopped at the first problem. Fix it and save the file, the page reloads on its own.</p>
 "##,
         );
 
@@ -322,7 +282,6 @@ impl BuildError {
             out.push_str("</div>");
         }
 
-        out.push_str("</div><div class=\"body\">");
         out.push_str(&format!(
             "<div class=\"message\">{}</div>",
             escape_html(&self.message)
@@ -336,9 +295,7 @@ impl BuildError {
                 inline_code(hint)
             ));
         }
-        out.push_str(
-            "</div></section><div class=\"footer\"><span class=\"dot\"></span><span>Watching for changes. Save the file to rebuild.</span></div></main></body></html>",
-        );
+        out.push_str("<footer>Vey dev &middot; watching for changes</footer></main></body></html>");
         out
     }
 }
