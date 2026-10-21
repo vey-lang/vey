@@ -175,7 +175,11 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
         println!("ok: {} page(s) checked", pages);
         0
     } else {
-        eprintln!("{} page(s) could not be checked", failed.len());
+        eprintln!(
+            "{} of {} page(s) could not be checked",
+            failed.len(),
+            pages
+        );
         1
     }
 }

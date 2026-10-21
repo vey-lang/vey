@@ -24,10 +24,21 @@ fn area(shape: Shape) -> number {
   }
 }
 
+// A condition narrows the arm down.
+fn describe(size: number) -> string {
+  return match size {
+    n if n > 100 => "huge",
+    n if n > 10 => "big",
+    _ => "small",
+  }
+}
+
 let color = Color.Green
 let shape = Shape.Circle(2.5)
 
 print(colorName(color))
 print(area(shape))
+print(describe(50))
+print(describe(2))
 print(Color.Red)
 print(Shape.Rect(3, 4))

@@ -38,8 +38,10 @@ A program that is not a page — a script — is built and run with node:
 
 ```sh
 vey build script.vey --node -o script.cjs
-node script.cjs
+node --enable-source-maps script.cjs
 ```
+
+The flag makes a runtime error point to the line of the `.vey` file.
 
 ## Static sites
 

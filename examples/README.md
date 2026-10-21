@@ -12,7 +12,7 @@ A file that is a script is built and run with node:
 
 ```sh
 vey build examples/hello.vey --node -o /tmp/hello.cjs
-node /tmp/hello.cjs
+node --enable-source-maps /tmp/hello.cjs
 ```
 
 | File | What it shows |
