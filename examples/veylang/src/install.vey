@@ -1,0 +1,67 @@
+use "./styles/site.css"
+use "./site.vey" as site
+
+export component App() {
+  main {
+    site.Header("install")
+
+    section.prose {
+      div.shell {
+        h2 { "Install Vey" }
+        p.lead {
+          "Vey is one binary. It compiles the programs, it runs the server of a site, and it carries the runtime that the programs need."
+        }
+
+        site.Command("curl -fsSL https://veylang.tech/install.sh | sh")
+
+        div.note {
+          p {
+            "The script puts the binary in ~/.local/bin. When that folder is not in your path, move it somewhere that is:"
+          }
+          site.Sample('export PATH="$HOME/.local/bin:$PATH"')
+        }
+
+        ol.steps {
+          li {
+            h3 { "Check that it works" }
+            p { "The version of the compiler is printed." }
+            site.Sample('vey version')
+          }
+          li {
+            h3 { "Write a program" }
+            p { "A new project has a page, the styles of the site and the files that are copied as they are." }
+            site.Sample(text.dedent('vey new myapp
+              cd myapp'))
+          }
+          li {
+            h3 { "See it in the browser" }
+            p { "The server watches the files of the project and reloads the page when one of them changes." }
+            site.Sample('vey dev')
+          }
+          li {
+            h3 { "Build the site" }
+            p { "The site is written to .dist. That folder holds everything a host needs." }
+            site.Sample('vey build')
+          }
+        }
+
+        h3 { "From the source" }
+        p {
+          "The compiler is written in Rust. A release is built with the toolchain of Rust:"
+        }
+        site.Sample(text.dedent('git clone https://github.com/vey-lang/vey
+          cd vey
+          cargo build --release
+          ./target/release/vey help'))
+
+        div.links {
+          a.button href="/language.html" { "Read the language" }
+        }
+      }
+    }
+
+    site.Footer()
+  }
+}
+
+bind("#app", App())

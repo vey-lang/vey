@@ -17,6 +17,17 @@ cargo build --release
 ./target/release/vey help
 ```
 
+## Install
+
+Vey is one binary. The script puts it in `~/.local/bin`:
+
+```sh
+curl -fsSL https://veylang.tech/install.sh | sh
+```
+
+The site of the language is at [veylang.tech](https://veylang.tech), and it is
+written in Vey. Its source is in `examples/veylang`.
+
 ## Commands
 
 ```sh
@@ -831,6 +842,7 @@ The body of a request is read as JSON or as the fields of a form, so
 | `startsWith(text, prefix)`, `endsWith(text, suffix)` | the ends of a text |
 | `text.capitalize`, `text.slug`, `text.camel`, `text.kebab` | the shape of a name |
 | `text.padStart`, `text.padEnd`, `text.repeat`, `text.reverse`, `text.words` | the size of a text |
+| `text.dedent(text)` | a text with the indent that all of its lines share taken away |
 | `date.now()`, `date.iso()`, `date.format(value, pattern)` | the date and the time |
 | `date.parts(value)`, `date.daysBetween(a, b)`, `date.addDays(value, days)` | the parts of a date |
 | `query.parse(text)`, `query.stringify(object)` | the query of an address |

@@ -1,6 +1,6 @@
 //! Parsing of markup.
 
-use super::html::{is_html_tag, is_void_tag};
+use super::html::is_html_tag;
 use super::Parser;
 use crate::ast::*;
 use crate::lexer::TokKind;
@@ -74,9 +74,6 @@ impl Parser {
             return Ok(is_html_tag(&self.tok.value));
         }
         if self.attr_ahead()? {
-            return Ok(true);
-        }
-        if is_void_tag(&self.tok.value) {
             return Ok(true);
         }
         Ok(false)

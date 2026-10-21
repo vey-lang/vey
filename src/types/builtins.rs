@@ -104,6 +104,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ),
             ("reverse", builtin_function(vec![string()], string())),
             ("words", builtin_function(vec![string()], list(string()))),
+            ("dedent", builtin_function(vec![string()], string())),
         ])),
         "date" => Some(builtin_object(vec![
             ("now", builtin_function(vec![], number())),

@@ -1,0 +1,48 @@
+// The parts that every page of the site shares.
+
+// The bar at the top of every page.
+//
+// The name of the page that is open is marked, so that the reader knows
+// where they are.
+export component Header(active: string) {
+  header.masthead {
+    div.shell {
+      a.brand href="/" {
+        img src="/logo.svg" alt="" width="22" height="22"
+        span { "Vey" }
+      }
+      nav.nav {
+        a class={active == "language" ? "on" : ""} href="/language.html" { "Language" }
+        a class={active == "install" ? "on" : ""} href="/install.html" { "Install" }
+      }
+    }
+  }
+}
+
+// The bar at the bottom of every page.
+export component Footer() {
+  footer.footer {
+    div.shell {
+      span.spark {
+        img src="/logo.svg" alt="" width="15" height="15"
+        span { "A small web language with its own syntax, compiler and runtime." }
+      }
+      a href="https://github.com/vey-lang/vey" { "The source" }
+    }
+  }
+}
+
+// A sample of the language.
+export component Sample(text: string) {
+  pre.sample {
+    code { text }
+  }
+}
+
+// The command that installs Vey.
+export component Command(command: string) {
+  div.command {
+    code { command }
+    span.label { "one line" }
+  }
+}

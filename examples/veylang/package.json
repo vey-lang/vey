@@ -1,0 +1,13 @@
+{
+  "name": "veylang",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A site built with Vey.",
+  "scripts": {
+    "dev": "vey dev",
+    "start": "vey run",
+    "build": "vey build",
+    "test": "vey test",
+    "check": "vey check"
+  }
+}

@@ -104,23 +104,3 @@ const HTML_TAGS: &[&str] = &[
 pub(crate) fn is_html_tag(name: &str) -> bool {
     HTML_TAGS.contains(&name)
 }
-
-pub(crate) fn is_void_tag(name: &str) -> bool {
-    matches!(
-        name,
-        "area"
-            | "base"
-            | "br"
-            | "col"
-            | "embed"
-            | "hr"
-            | "img"
-            | "input"
-            | "link"
-            | "meta"
-            | "param"
-            | "source"
-            | "track"
-            | "wbr"
-    )
-}

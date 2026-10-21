@@ -1,0 +1,55 @@
+use "./styles/site.css"
+use "./site.vey" as site
+use "./samples.vey" as samples
+
+export component App() {
+  main {
+    site.Header("")
+
+    section.hero {
+      div.shell {
+        h1 { "A small web language." }
+        p {
+          "Vey has its own syntax, its own compiler and its own runtime. The compiler is written in Rust and ships as a single binary. It emits JavaScript, so the same source runs on Node and in the browser."
+        }
+        site.Command("curl -fsSL https://veylang.tech/install.sh | sh")
+      }
+    }
+
+    section.prose {
+      div.shell {
+        h2 { "What it looks like" }
+        site.Sample(samples.HELLO)
+
+        h2 { "What it has" }
+        ul.points {
+          li {
+            h3 { "Markup without angle brackets" }
+            p { "A tag is written with its classes and its id, and it has no closing tag." }
+          }
+          li {
+            h3 { "Types when you want them" }
+            p { "A type is checked while the program is compiled and erased from the output. A program without types stays as it is." }
+          }
+          li {
+            h3 { "One binary" }
+            p { "The compiler, the runtime and the server of a site are all in the same binary." }
+          }
+          li {
+            h3 { "Modules and packages" }
+            p { "A module of your own, or a package of npm that is installed with npm." }
+          }
+        }
+
+        div.links {
+          a.button href="/language.html" { "Read the language" }
+          a.button href="/install.html" { "Install Vey" }
+        }
+      }
+    }
+
+    site.Footer()
+  }
+}
+
+bind("#app", App())

@@ -87,6 +87,26 @@ function veyText(ctx) {
     // The words of a text.
     words: function (value) {
       return String(value).split(/\s+/).filter(Boolean);
+    },
+    // A text with the indent that all of its lines share taken away.
+    //
+    // The first line is left alone, because it usually starts right behind
+    // the quote of the text.
+    dedent: function (value) {
+      var lines = String(value).split("\n");
+      var indent = null;
+      lines.forEach(function (line, index) {
+        if (index === 0 || !line.trim()) return;
+        var spaces = line.length - line.replace(/^\s+/, "").length;
+        if (indent === null || spaces < indent) indent = spaces;
+      });
+      if (!indent) return String(value);
+      return lines
+        .map(function (line, index) {
+          if (index === 0) return line;
+          return line.slice(indent);
+        })
+        .join("\n");
     }
   };
 

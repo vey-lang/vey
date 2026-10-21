@@ -1,0 +1,74 @@
+use "./styles/site.css"
+use "./site.vey" as site
+use "./samples.vey" as samples
+
+export component App() {
+  main {
+    site.Header("language")
+
+    section.prose {
+      div.shell {
+        h2 { "The language" }
+        p.lead {
+          "A program is a list of statements and expressions. The syntax is small, and everything that is not in it is a library."
+        }
+
+        h3 { "Values" }
+        p {
+          "There are numbers, texts, booleans, nothing, lists and objects. A name holds a value, and a function takes arguments and hands back a value."
+        }
+        site.Sample(samples.VALUES)
+
+        h3 { "Types" }
+        p {
+          "Types are optional. A type is checked while the program is compiled and taken out of the output afterwards, so a program with types runs as fast as one without."
+        }
+        site.Sample(samples.TYPES)
+
+        h3 { "Pipes" }
+        p {
+          "A pipe hands the value on its left to the function on its right. It reads from the top down, like a list of steps."
+        }
+        site.Sample(samples.PIPES)
+
+        h3 { "Components" }
+        p {
+          "A component is a piece of a page. It takes arguments, and the markup of the page is written with tag selectors instead of angle brackets."
+        }
+        site.Sample(samples.COMPONENTS)
+
+        h3 { "Matching" }
+        p {
+          "A match looks at a value and picks the arm that fits it. A name takes the value of the match, and a condition narrows the arm down."
+        }
+        site.Sample(samples.MATCH)
+
+        h3 { "Errors" }
+        p {
+          "A block of code may fail. A catch handles the error, and a finally always runs, with or without one."
+        }
+        site.Sample(samples.ERRORS)
+
+        h3 { "Modules" }
+        p {
+          "A file that is imported is a module. The compiler joins every module of a program into one file."
+        }
+        site.Sample(samples.MODULES)
+
+        h3 { "Servers" }
+        p {
+          "A program may serve a site of its own. The routes take the address of the request and hand back what the browser gets."
+        }
+        site.Sample(samples.SERVER)
+
+        div.links {
+          a.button href="/install.html" { "Install Vey" }
+        }
+      }
+    }
+
+    site.Footer()
+  }
+}
+
+bind("#app", App())

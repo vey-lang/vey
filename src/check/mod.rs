@@ -6,6 +6,7 @@ use crate::ast::*;
 use crate::builtins::is_builtin;
 use crate::check::scopes::{BindingKind, Scopes};
 use crate::lexer::Pos;
+use crate::parser::html::is_html_tag;
 use crate::suggest::did_you_mean;
 use crate::VeyError;
 
@@ -338,7 +339,14 @@ impl Checker<'_> {
             Expr::Ident(name, pos) => {
                 if self.resolve(name).is_none() && !is_builtin(name) {
                     let mut error = self.error(*pos, format!("unknown variable '{}'", name));
-                    if let Some(hint) = did_you_mean(name, self.known_names()) {
+                    if is_html_tag(name) {
+                        // A name of a tag of HTML is often a tag that was
+                        // meant to be written with its content.
+                        error = error.with_hint(format!(
+                            "'{}' is a tag of HTML; write it as '{} {{ }}' if you mean the tag",
+                            name, name
+                        ));
+                    } else if let Some(hint) = did_you_mean(name, self.known_names()) {
                         error = error.with_hint(hint);
                     }
                     return Err(error);

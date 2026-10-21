@@ -1,0 +1,111 @@
+// The samples of the code that the pages of the site show.
+//
+// The samples are written as they should be read, so they are kept in one
+// place and the pages only put them in their place.
+
+export const HELLO = text.dedent('let name = "Vey"
+
+fn greet(who) {
+  return "Hello, " + who
+}
+
+print(greet("world"))
+print("The version is {0.6}.")')
+
+export const VALUES = text.dedent('let items = [1, 2, 3]
+let user = { name: "Ada", age: 36 }
+let nothing = null
+let flag = true
+
+// The value of a name may be missing.
+let city = user?.address?.city ?? "unknown"
+
+// A list may be spread into another one.
+let combined = [0, ...items]')
+
+export const TYPES = text.dedent('type User = {
+  name: string
+  age?: number
+}
+
+fn greet(user: User) -> string {
+  return "Hello, " + user.name
+}
+
+let ada: User = { name: "Ada", age: 36 }
+print(greet(ada))')
+
+export const COMPONENTS = text.dedent('component Card(title: string, subtitle = "none") {
+  section.card {
+    h2 { title }
+    p { subtitle }
+  }
+}
+
+component App() {
+  main {
+    Card title="Counter" {
+      button click=fn() { print("clicked") } { "Click me" }
+    }
+  }
+}
+
+bind("#app", App())')
+
+export const MATCH = text.dedent('enum Size {
+  Small
+  Large(weight: number)
+}
+
+let size = Size.Large(30)
+
+let label = match size {
+  Size.Large(weight) if weight > 10 => "heavy"
+  Size.Large(weight) => "light"
+  Size.Small => "small"
+}
+
+print(label)')
+
+export const PIPES = text.dedent('let items = range(1, 6)
+
+let doubled = items |> map(n => n * 2)
+let odd = items |> filter(n => n % 2 == 1)
+let total = reduce(items, fn(a, b) { return a + b }, 0)
+
+print(doubled)
+print(odd)
+print(total)')
+
+export const MODULES = text.dedent('// math.vey
+export const PI = 3.14159
+
+export fn area(radius) {
+  return PI * radius ** 2
+}
+
+// app.vey
+use "./math.vey" as math
+
+print(math.area(2))')
+
+export const ERRORS = text.dedent('try {
+  json.parse(text)
+} catch err {
+  print("bad json: {err.message}")
+} finally {
+  print("done")
+}')
+
+export const SERVER = text.dedent('let app = server(3000)
+
+app.get("/users/{id}", fn(req) {
+  return { id: req.params.id, query: req.query }
+})
+
+app.post("/data", fn(req) {
+  return response({ received: req.body }, 201)
+})
+
+app.static("public")
+app.start()')

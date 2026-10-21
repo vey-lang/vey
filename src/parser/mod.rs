@@ -4,7 +4,7 @@
 //! `patterns` reads binding patterns and `markup` reads the tag syntax.
 
 mod exprs;
-mod html;
+pub(crate) mod html;
 mod markup;
 mod patterns;
 mod strings;

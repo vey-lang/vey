@@ -364,3 +364,33 @@ fn a_page_that_uses_a_package_of_npm_is_reported() {
     let error = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(error.contains("only available in Node"), "{error}");
 }
+
+#[test]
+fn the_site_of_the_language_builds() {
+    let dir = temp_dir("veylang");
+    let output = vey()
+        .arg("build")
+        .arg("examples/veylang")
+        .arg("-o")
+        .arg(dir.join("dist"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for page in ["index.html", "language.html", "install.html"] {
+        let path = dir.join("dist").join(page);
+        assert!(path.is_file(), "{} is missing", page);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("Vey"), "{}", page);
+    }
+
+    // The script that installs Vey is served with the site.
+    let script = dir.join("dist").join("install.sh");
+    assert!(script.is_file(), "the install script is missing");
+    let text = fs::read_to_string(&script).unwrap();
+    assert!(text.contains("install"), "{}", text);
+}
