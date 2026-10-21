@@ -23,6 +23,9 @@ The language grew a few things:
   value and in a pattern.
 - A match may have a condition (`n if n > 10 => ...`) and a name may take the
   value of the match (`n => ...`).
+- The value of an attribute may be written in braces: `class={name}`.
+- The examples of the readme are checked by the tests, so the documentation
+  cannot drift away from the language.
 - A generic function may have a constraint (`fn first<T: number>(...)`) and a
   call may name its type arguments.
 - A type alias may refer to itself.
@@ -34,6 +37,8 @@ The checker learned to:
 - Report a walk through something that is not a list, in the markup as well.
 - Report a return type that has no arrow, and a component that has one.
 - Point to the helper of the runtime when a field is missing.
+- Report a tag that is not a tag of HTML.
+- Report an argument that a component does not have.
 
 ## 0.6.0
 
