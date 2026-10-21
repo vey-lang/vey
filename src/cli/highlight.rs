@@ -1,36 +1,6 @@
 //! The colouring of Vey code, used by the error page.
 
-/// The words of the language.
-const KEYWORDS: &[&str] = &[
-    "let",
-    "const",
-    "fn",
-    "return",
-    "if",
-    "else",
-    "while",
-    "for",
-    "in",
-    "repeat",
-    "break",
-    "continue",
-    "try",
-    "catch",
-    "use",
-    "as",
-    "export",
-    "component",
-    "await",
-    "true",
-    "false",
-    "null",
-    "and",
-    "or",
-    "not",
-    "match",
-    "enum",
-    "type",
-];
+use vey::lexer::is_keyword;
 
 /// The code of a line as HTML, with the parts of the language coloured.
 pub(crate) fn highlight(line: &str) -> String {
@@ -88,7 +58,7 @@ pub(crate) fn highlight(line: &str) -> String {
                         break;
                     }
                 }
-                if KEYWORDS.contains(&word.as_str()) {
+                if is_keyword(&word) {
                     out.push_str(&format!("<span class=\"kw\">{}</span>", escape(&word)));
                 } else if chars.peek() == Some(&'(') {
                     out.push_str(&format!("<span class=\"fn\">{}</span>", escape(&word)));

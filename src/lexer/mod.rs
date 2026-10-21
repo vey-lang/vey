@@ -77,7 +77,7 @@ const OPS: &[&str] = &[
     "/=", "%=", "|", "+", "-", "*", "/", "%", "=", "<", ">", "?",
 ];
 
-fn is_keyword(word: &str) -> bool {
+pub fn is_keyword(word: &str) -> bool {
     matches!(
         word,
         "let"
