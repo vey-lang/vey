@@ -120,7 +120,8 @@ vey dev
 `vey run` serves the built site the way a host does. `vey dev` is the same
 server for the work: it rebuilds the site when the entry, any imported `.vey`
 or `.css` file (including modules in other folders) or a `public/` file
-changes, and reloads the browser. Other files in the project are left alone, so
+changes, and reloads the browser. A page that is added or taken away is noticed
+as well. Other files in the project are left alone, so
 a note or a log file does not cause a reload. A change of the content is
 noticed even when the time and the size of the file stay the same. Unknown
 paths serve `404.html` with a `404` status.
@@ -130,8 +131,9 @@ the failing column, and a hint when Vey can guess the fix (for example
 disappears after the next successful save, so the browser can stay open while
 iterating. The same diagnostic is printed by `vey build` in the terminal.
 
-Any `.vey` file of the project can be previewed by visiting its path, for
-example `http://localhost:4000/about.vey`.
+While the work is going on, any `.vey` file of the project can be previewed by
+visiting its path, for example `http://localhost:4000/about.vey`. The release
+server serves the site that was built and nothing else.
 
 ## Styles
 
