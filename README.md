@@ -781,58 +781,10 @@ src/cli/             the commands
   scaffold.rs        new projects
   entry.rs           finding the entry file
   error.rs           build errors with a source frame
+  highlight.rs       the colouring of the code in the error page
   output.rs          turning a bundle into runnable output
 src/builtins.rs      the names the runtime provides
 src/suggest.rs       suggestions for names that are close to a known one
-runtime.js           runtime shared by node and the browser
-tests/               integration tests
-  lang.rs            the language
-  types.rs           the type checker
-  regressions.rs     bugs that used to give wrong results
-  runtime.rs         the runtime
-  server.rs          the http server
-  cli.rs             the commands
-  dom.rs             rendering in a browser
-  dev.rs             the development server
-```
-src/lexer.rs         tokens
-src/parser.rs        AST
-  mod.rs             the parser and the statements
-  exprs.rs           the expressions
-  patterns.rs        the binding patterns and the match patterns
-  types.rs           the type expressions
-  strings.rs         the string literals
-  markup.rs          the tag syntax
-  html.rs            the HTML tags
-src/check.rs         semantic checks
-src/builtins.rs      the names the runtime provides
-src/suggest.rs       suggestions for names that are close to a known one
-src/types/           gradual type checker
-  core.rs            the type representation and the rules between types
-  builtins.rs        the signatures of the runtime helpers
-  checker.rs         the checker that walks a program
-  stmts.rs           the statements
-  exprs.rs           the expressions
-  patterns.rs        the patterns and the narrowing
-src/codegen.rs       JavaScript output
-  mod.rs             the statements
-  exprs.rs           the expressions
-  markup.rs          the markup
-  js.rs              the JavaScript helpers
-  awaits.rs          finding out whether code uses `await`
-src/compiler.rs      module graph and bundling
-src/sourcemap.rs     inline source map encoding
-src/main.rs          CLI entry point
-src/cli/             the commands
-  args.rs            command line parsing
-  run.rs             run, test and check
-  build.rs           build and web
-  site.rs            static sites
-  dev.rs             development server
-  scaffold.rs        new projects
-  entry.rs           finding the entry file
-  error.rs           build errors with a source frame
-  output.rs          turning a bundle into runnable output
 runtime.js           runtime shared by node and the browser
 tests/               integration tests
   lang.rs            the language
