@@ -11,7 +11,8 @@ use crate::types::core::{
 };
 use crate::VeyError;
 
-use super::checker::{argument_label, set_object_field, type_argument_label, TypeChecker};
+use super::checker::TypeChecker;
+use super::helpers::{argument_label, set_object_field, type_argument_label};
 
 impl TypeChecker<'_> {
     pub(crate) fn infer_expr(&mut self, expr: &Expr) -> Result<Type, VeyError> {

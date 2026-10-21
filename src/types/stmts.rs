@@ -7,9 +7,10 @@ use crate::types::core::{
 };
 use crate::VeyError;
 
-use super::checker::{
+use super::checker::{ComponentParam, TypeChecker};
+use super::helpers::{
     block_always_exits, block_always_returns, block_assigns_name, inferred_const_type,
-    markup_assigns_name, name_alias, stmt_assigns_name, ComponentParam, TypeChecker,
+    markup_assigns_name, name_alias, stmt_assigns_name,
 };
 
 impl TypeChecker<'_> {

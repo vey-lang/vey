@@ -732,6 +732,8 @@ src/types/           the gradual type checker
   stmts.rs           the statements
   exprs.rs           the expressions
   patterns.rs        the patterns and the narrowing
+  resolve.rs         the resolution of the types
+  helpers.rs         the helpers of the checker
 src/codegen/         the JavaScript output
   mod.rs             the statements
   exprs.rs           the expressions

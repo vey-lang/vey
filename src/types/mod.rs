@@ -8,7 +8,9 @@ pub mod builtins;
 pub mod checker;
 pub mod core;
 mod exprs;
+mod helpers;
 mod patterns;
+mod resolve;
 mod stmts;
 
 pub use checker::{check, ModuleTypeEnv};
