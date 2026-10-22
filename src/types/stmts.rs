@@ -308,7 +308,13 @@ impl TypeChecker<'_> {
         self.set_binding(&decl.name, Type::Any);
         self.push_scope();
         self.declare_params(&decl.params)?;
-        self.check_markup(&decl.children)?;
+        // The markup of a component is written at once, so it may not wait
+        // for something: the page would be given a promise.
+        let before = self.in_markup;
+        self.in_markup = true;
+        let result = self.check_markup(&decl.children);
+        self.in_markup = before;
+        result?;
         self.pop_scope();
         Ok(())
     }

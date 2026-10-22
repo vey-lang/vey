@@ -121,3 +121,64 @@ setTimeout(fn() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("DOM_SIGNAL_TEST_OK"));
 }
+
+#[test]
+fn a_node_may_say_goodbye_before_it_is_taken_away() {
+    let dir = temp_dir();
+    let app = dir.join("app.vey");
+    fs::write(
+        &app,
+        r##"
+let show = signal(true)
+
+component App() {
+  div {
+    if show.value {
+      span leave=fn(node) {
+        print("GOODBYE")
+        return sleep(10)
+      } { "here" }
+    }
+  }
+}
+
+mount("#app", App)
+
+setTimeout(fn() {
+  show.set(false)
+}, 50)
+"##,
+    )
+    .unwrap();
+
+    let bundle = dir.join("app.cjs");
+    let build = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("build")
+        .arg(&app)
+        .arg("-o")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let harness = dir.join("dom-leave-test.cjs");
+    fs::write(&harness, include_str!("fixtures/dom-leave-test.cjs")).unwrap();
+
+    let output = Command::new("node")
+        .arg(&harness)
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("DOM_LEAVE_TEST_OK"), "{text}");
+    assert!(text.contains("GOODBYE"), "{text}");
+}

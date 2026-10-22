@@ -1227,12 +1227,14 @@ code that writes a page, and by writing pages that wanted more.
 
 ### 15.2 The transitions and the animations
 
-- [ ] **Nothing knows that a node is going to leave.** A node that is taken
+- [x] **Nothing knows that a node is going to leave.** A node that is taken
       away has no chance to say goodbye, so a transition on the way out
-      cannot be written. (`src/runtime/mount.js`)
-- [ ] **Nothing knows that a node has come.** A node that is put in the page
-      has no chance to say hello either.
-      (`src/runtime/mount.js`)
+      cannot be written. A node may now say goodbye with `leave`, and it
+      waits when the work gives a promise. (`src/runtime/mount.js`,
+      `src/runtime/dom.js`)
+- [x] **Nothing knows that a node has come.** A node that is put in the page
+      has no chance to say hello either. A node may now say hello with
+      `enter`. (`src/runtime/mount.js`, `src/runtime/dom.js`)
 - [ ] **There is no helper for a transition.** The page has to write the
       class of the node and the time of the transition by hand.
       (`src/runtime/`)
@@ -1267,19 +1269,23 @@ code that writes a page, and by writing pages that wanted more.
 - [ ] **A component cannot hold a value of its own.** A `let` cannot be
       written inside a markup, so a value of a component has to live
       outside of it. (`src/parser/markup.rs`)
-- [ ] **A component never receives a prop whose name is the name of an
+- [x] **A component never receives a prop whose name is the name of an
       event.** The name `click` becomes `onclick` for every node, so a
-      component that takes a `click` reads nothing. (`src/codegen/markup.rs`)
-- [ ] **A component whose markup waits gives a promise to the page,** so
-      the page writes `[object Promise]`. (`src/codegen/mod.rs`,
-      `src/runtime/dom.js`)
+      component that takes a `click` reads nothing. The name of a prop of a
+      component is the name of the prop now.
+      (`src/codegen/markup.rs`)
+- [x] **A component whose markup waits gives a promise to the page,** so
+      the page writes `[object Promise]`. The checker says that the markup
+      of a component may not wait now. (`src/codegen/mod.rs`,
+      `src/runtime/dom.js`, `src/types/stmts.rs`)
 - [ ] **Children that are given to a component that takes none are
       dropped without a word.** (`src/types/stmts.rs`)
 - [ ] **The type of the children of a component is never checked,** and
       there is no type in the language for a node, so the children of a
       component can only be `any`. (`src/types/stmts.rs`)
-- [ ] **A positional argument is thrown away when the parameter of the
-      component is a pattern.** (`src/codegen/mod.rs`)
+- [x] **A positional argument is thrown away when the parameter of the
+      component is a pattern.** The value that is given in order is taken
+      apart now. (`src/codegen/mod.rs`)
 - [ ] **A slot whose name the component does not declare is dropped, and
       a slot whose name it does declare is asked for as an argument.**
       There is no way to say what is put in a slot when the caller gives
@@ -1292,9 +1298,9 @@ code that writes a page, and by writing pages that wanted more.
       (`src/parser/markup.rs`)
 - [ ] **The name of an attribute cannot hold a colon,** so `xlink:href`
       and `xml:lang` cannot be written. (`src/parser/markup.rs`)
-- [ ] **A tag that is not a tag of HTML is accepted when it has
-      attributes,** although the README says that it is reported.
-      (`src/parser/markup.rs`)
+- [x] **A tag that is not a tag of HTML is accepted when it has
+      attributes,** although the README says that it is reported. The tag
+      is named now. (`src/parser/markup.rs`)
 - [ ] **A tag of SVG is not a tag of HTML,** so there is no way to write
       a drawing. (`src/parser/html.rs`)
 - [ ] **A void tag cannot be written on its own,** so `br` has to be
@@ -1305,11 +1311,12 @@ code that writes a page, and by writing pages that wanted more.
 
 ### 15.5 The page of the browser
 
-- [ ] **The classes of a list are joined with a comma,** so the style of the
-      page does not find them. (`src/runtime/dom.js`)
-- [ ] **The focus is lost when a node is replaced,** so a visitor who is
-      writing in a field loses their place when the page changes.
-      (`src/runtime/mount.js`)
+- [x] **The classes of a list are joined with a comma,** so the style of the
+      page does not find them. The classes of a list are joined with a
+      space now. (`src/runtime/dom.js`)
+- [x] **The focus is lost when a node is replaced,** so a visitor who is
+      writing in a field loses their place when the page changes. The focus
+      follows the new node now. (`src/runtime/mount.js`)
 - [ ] **The work of a node that is taken away is never done.** The work that
       waits for the page to be taken away only runs when the whole page is
       taken away. (`src/runtime/mount.js`, `src/runtime/events.js`)
@@ -1321,9 +1328,9 @@ code that writes a page, and by writing pages that wanted more.
 - [ ] **The children of a component are moved when they are written a
       second time,** so the browser and the server do not agree on the
       page. (`src/runtime/dom.js`)
-- [ ] **The `slot` attribute is taken from every node,** so it never
-      reaches the page, although it is an attribute of HTML.
-      (`src/parser/markup.rs`)
+- [x] **The `slot` attribute is taken from every node,** so it never
+      reaches the page, although it is an attribute of HTML. It is only
+      taken from a component now. (`src/parser/markup.rs`)
 - [ ] **The work of a node that is mounted runs again at every writing of
       the page, and the work of a node that is taken away is never done**
       when the page is written again. (`src/runtime/mount.js`,

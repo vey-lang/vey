@@ -113,7 +113,12 @@ function veyDom(ctx) {
       // The work that is done when a node comes and when it goes.
       if (key === "enter" || key === "leave") {
         if (typeof value === "function") {
-          Object.defineProperty(el, "__vey" + key, { value: value, writable: true, enumerable: false, configurable: true });
+          Object.defineProperty(el, "__vey" + key.charAt(0).toUpperCase() + key.slice(1), {
+            value: value,
+            writable: true,
+            enumerable: false,
+            configurable: true
+          });
         }
         continue;
       }

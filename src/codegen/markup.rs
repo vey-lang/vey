@@ -160,7 +160,14 @@ impl Codegen {
         let mut has_id = false;
 
         for (name, value) in &element.attrs {
-            let mapped = event_attr(name);
+            // The name of an event of a node is the name of the event of
+            // the browser. The name of a prop of a component is the name of
+            // the prop, even when it is the name of an event.
+            let mapped = if element.component {
+                name.as_str()
+            } else {
+                event_attr(name)
+            };
             if mapped == "class" {
                 class_index = Some(entries.len());
             }

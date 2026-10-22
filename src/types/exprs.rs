@@ -387,7 +387,13 @@ impl TypeChecker<'_> {
                     Ok(union(types))
                 }
             }
-            Expr::Await(inner, _) => {
+            Expr::Await(inner, pos) => {
+                if self.in_markup {
+                    return Err(self.error(
+                        *pos,
+                        "the markup of a component may not wait for something",
+                    ));
+                }
                 let ty = self.infer_expr(inner)?;
                 // The type of an `await` is the type of the value that will
                 // be there.

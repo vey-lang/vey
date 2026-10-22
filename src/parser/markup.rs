@@ -65,6 +65,10 @@ impl Parser {
         if next.kind == TokKind::Punct && next.value == "{" {
             return Ok(Some(name));
         }
+        // A name with attributes behind it is a tag as well.
+        if self.attr_ahead()? {
+            return Ok(Some(name));
+        }
         Ok(None)
     }
 
@@ -87,7 +91,8 @@ impl Parser {
             return Ok(is_html_tag(&self.tok.value));
         }
         if self.attr_ahead()? {
-            return Ok(true);
+            // A tag of HTML is a tag of HTML, with attributes or without.
+            return Ok(is_html_tag(&self.tok.value));
         }
         Ok(false)
     }
@@ -204,8 +209,9 @@ impl Parser {
                 let name = self.parse_attr_name()?;
                 self.expect_op("=")?;
                 let value = self.parse_attr_value()?;
-                // The name of the slot the element goes in.
-                if name == "slot" {
+                // The name of the slot the element goes in. It is a name of
+                // a component only; on a node it is an attribute of HTML.
+                if name == "slot" && element.component {
                     if let Expr::String(parts, _) = &value {
                         if let Some(part) = parts.first() {
                             if part.expr.is_none() {

@@ -1041,6 +1041,26 @@ route("/users/{id}", fn(params) {
 navigate("/users/7")
 ```
 
+A node may say hello when it comes and goodbye when it goes. The work of
+`enter` is done after the node is in the page, and the work of `leave` is
+done before the node is taken away. When the work of `leave` gives a
+promise, the node waits for it, so a transition may be seen.
+
+```vey
+component App() {
+  div {
+    if visible() {
+      section.card leave=fn(node) {
+        node.classList.add("leaving")
+        return sleep(300)
+      } {
+        "Goodbye"
+      }
+    }
+  }
+}
+```
+
 The events of one's own are attached with `on`, and a listener that watches
 the children of a node is attached with `delegate`. The work that is done
 when a node is there is written with `onMount`, the work that is done when

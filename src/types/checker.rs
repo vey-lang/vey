@@ -73,6 +73,7 @@ pub fn check(
         imports: imports.clone(),
         scopes: vec![HashMap::new()],
         member_narrowings: vec![HashMap::new()],
+        in_markup: false,
         type_param_scopes: Vec::new(),
         type_param_bindings: Vec::new(),
         type_param_constraints: Vec::new(),
@@ -482,6 +483,9 @@ pub(crate) struct TypeChecker<'a> {
     /// The members that a check has narrowed, such as `user.name`, kept
     /// apart from the names of the program.
     pub(crate) member_narrowings: Vec<HashMap<String, Type>>,
+    /// Whether the markup of a component is being checked, so that it may
+    /// not wait for something.
+    pub(crate) in_markup: bool,
     pub(crate) type_param_scopes: Vec<HashMap<String, Type>>,
     /// The types the type parameters of the current scope were bound to.
     pub(crate) type_param_bindings: Vec<HashMap<String, Type>>,
@@ -560,6 +564,7 @@ impl TypeChecker<'_> {
             imports: HashMap::new(),
             scopes: vec![HashMap::new()],
             member_narrowings: vec![HashMap::new()],
+        in_markup: false,
             type_param_scopes: Vec::new(),
             type_param_bindings: Vec::new(),
             type_param_constraints: Vec::new(),

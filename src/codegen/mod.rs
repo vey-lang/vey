@@ -870,7 +870,12 @@ impl Codegen {
                 let expression = self.with_default(&expression, default.as_ref())?;
                 Ok(vec![(name.clone(), expression)])
             }
-            BindingPattern::Object { .. } => self.pattern_bindings(pattern, "__veyProps"),
+            // A pattern that takes its value apart gets the value that is
+            // given in order, and the names when there is none.
+            BindingPattern::Object { .. } => self.pattern_bindings(
+                pattern,
+                "(__veyValues.length > 0 ? __veyValues[0] : __veyProps)",
+            ),
             BindingPattern::Array { .. } => self.pattern_bindings(pattern, "__veyValues"),
         }
     }
