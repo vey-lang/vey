@@ -11,6 +11,8 @@ function veyServer(ctx) {
   var sessions = ctx.sessions;
   var matchRoute = ctx.matchRoute;
   var hostSetTimeout = ctx.hostSetTimeout;
+  var hostSetInterval = ctx.hostSetInterval;
+  var hostClearInterval = ctx.hostClearInterval;
 
   // The cookies of a request are read by the reader that the pages use, so
   // that one head gives the same answer on both sides.
@@ -615,6 +617,7 @@ function veyServer(ctx) {
       var messageParts = [];
       var messageLength = 0;
       var open = true;
+      var pingTimer = null;
 
       function frame(opcode, data) {
         var header;
@@ -641,12 +644,27 @@ function veyServer(ctx) {
         frame(binary ? 0x82 : 0x81, binary ? text : Buffer.from(String(text), "utf8"));
       }
 
-      function close() {
+      function close(code, reason) {
         if (!open) return;
         open = false;
-        try { frame(0x88, Buffer.alloc(0)); } catch (err) { }
+        if (pingTimer !== null) hostClearInterval(pingTimer);
+        var closeData = Buffer.alloc(0);
+        if (code !== undefined) {
+          var message = Buffer.from(String(reason === undefined ? "" : reason), "utf8").slice(0, 123);
+          closeData = Buffer.alloc(2 + message.length);
+          closeData.writeUInt16BE(Number(code), 0);
+          message.copy(closeData, 2);
+        }
+        try { frame(0x88, closeData); } catch (err) { }
         try { socket.end(); } catch (err) { }
-        for (var i = 0; i < closeHandlers.length; i++) closeHandlers[i]();
+        for (var i = 0; i < closeHandlers.length; i++) closeHandlers[i](code, reason);
+      }
+
+      var pingInterval = Number(opts.websocketPingInterval || opts.pingInterval || 0);
+      if (pingInterval > 0 && hostSetInterval) {
+        pingTimer = hostSetInterval(function () {
+          if (open) frame(0x89, Buffer.alloc(0));
+        }, pingInterval);
       }
 
       function read(chunk) {
@@ -701,7 +719,9 @@ function veyServer(ctx) {
           }
           buffer = buffer.slice(offset + length);
           if (opcode === 0x8) {
-            close();
+            var closeCode = payload.length >= 2 ? payload.readUInt16BE(0) : undefined;
+            var closeReason = payload.length > 2 ? payload.slice(2).toString("utf8") : undefined;
+            close(closeCode, closeReason);
             return;
           }
           if (opcode === 0x9) {

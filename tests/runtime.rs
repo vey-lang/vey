@@ -1780,6 +1780,48 @@ app.start(() => {
 }
 
 #[test]
+fn websocket_close_carries_code_and_reason() {
+    let text = run_runtime(
+        "websocket-close",
+        r#"
+const net = require("node:net");
+const crypto = require("node:crypto");
+const app = runtime.server(0);
+app.ws("/close", socket => socket.onMessage(() => socket.close(1008, "policy")));
+function frame(text) {
+  const payload = Buffer.from(text);
+  const mask = Buffer.from([1, 2, 3, 4]);
+  const out = Buffer.alloc(6 + payload.length);
+  out[0] = 0x81; out[1] = 0x80 | payload.length; mask.copy(out, 2);
+  for (let i = 0; i < payload.length; i++) out[6 + i] = payload[i] ^ mask[i % 4];
+  return out;
+}
+app.start(() => {
+  const client = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0); let upgraded = false;
+  client.on("connect", () => {
+    const key = crypto.randomBytes(16).toString("base64");
+    client.write(["GET /close HTTP/1.1", "Host: 127.0.0.1:" + app.port(), "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: " + key, "Sec-WebSocket-Version: 13", "", ""].join("\r\n"));
+  });
+  client.on("data", chunk => {
+    data = Buffer.concat([data, chunk]);
+    if (!upgraded) {
+      const end = data.indexOf("\r\n\r\n"); if (end < 0) return;
+      upgraded = true; data = data.slice(end + 4); client.write(frame("x"));
+    }
+    if (data.length >= 10 && (data[0] & 0x0f) === 8) {
+      console.log(data.readUInt16BE(2) === 1008 && data.slice(4, 10).toString() === "policy");
+      client.end(); app.stop().then(() => process.exit(0));
+    }
+  });
+  setTimeout(() => process.exit(2), 1000);
+});
+"#,
+    );
+    assert!(text.contains("true"), "{text}");
+}
+
+#[test]
 fn websocket_fragmented_messages_obey_the_total_size_limit() {
     let text = run_runtime(
         "websocket-fragment-limit",

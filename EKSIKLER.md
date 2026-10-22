@@ -1077,7 +1077,7 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 `src/runtime/server.js:389-490` — elle yazılmış RFC6455 framing'i:
 - 64-bit uzunluk, text parçaları ve birleştirilmiş `maxFrame` sınırı uygulanıyor; maskesiz client frame'leri reddediliyor (P0-7).
 - ~~Binary frame payload'ı UTF-8 metne çevriliyor~~ ✅ binary frame'ler Buffer olarak teslim ve gönderim yapılıyor. Test: `tests/runtime.rs::websocket_binary_frames_stay_binary`.
-- Close kodu/reason yok, ping keepalive yok, `permessage-deflate` yok.
+- ~~Close kodu/reason yok, ping keepalive yok~~ ✅ `socket.close(code, reason)` destekleniyor; `pingInterval` veya `websocketPingInterval` ile keepalive ping gönderiliyor. `permessage-deflate` hâlâ yok. Test: `tests/runtime.rs::websocket_close_carries_code_and_reason`.
 - Origin doğrulaması yok, auth hook yok, backpressure yok.
 - ~~`sockets` dizisi hiç temizlenmiyor~~ ✅ bağlantı kapanınca listeden çıkarılıyor.
 
