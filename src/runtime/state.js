@@ -175,17 +175,22 @@ function veyState(ctx) {
         cleanup = null;
         done();
       }
-      // The values of the last time are let go, so that a value that is not
-      // read any more does not wake the effect up.
-      for (var i = 0; i < deps.length; i++) deps[i].off();
+      // The values of the last time are watched until the new work is done,
+      // so that a mistake does not leave the page dead.
+      var oldDeps = deps;
       deps = [];
       var previous = running;
       running = { deps: deps, run: run };
       try {
         cleanup = fn();
-      } finally {
+      } catch (err) {
+        deps = oldDeps;
         running = previous;
+        throw err;
       }
+      running = previous;
+      // The values that are not read any more do not wake the effect up.
+      for (var i = 0; i < oldDeps.length; i++) oldDeps[i].off();
     }
 
     run();

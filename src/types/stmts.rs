@@ -964,6 +964,38 @@ impl TypeChecker<'_> {
                                 ));
                             }
                         }
+                        // The children that go in a slot of their own are
+                        // given to the component as arguments of their own.
+                        let mut slots: Vec<(String, Pos)> = Vec::new();
+                        for child in &element.children {
+                            let MarkupNode::Element(child) = child else {
+                                continue;
+                            };
+                            let Some(slot) = &child.slot else {
+                                continue;
+                            };
+                            if slots.iter().any(|(name, _)| name == slot) {
+                                return Err(self.error(
+                                    child.pos,
+                                    format!(
+                                        "component '{}' has two children for the slot '{}'",
+                                        element.tag, slot
+                                    ),
+                                ));
+                            }
+                            slots.push((slot.clone(), child.pos));
+                        }
+                        for (slot, pos) in &slots {
+                            if !params.iter().any(|param| param.name == *slot) {
+                                return Err(self.error(
+                                    *pos,
+                                    format!(
+                                        "component '{}' has no slot named '{}'",
+                                        element.tag, slot
+                                    ),
+                                ));
+                            }
+                        }
                         // Every parameter without a default needs a value.
                         // `children` is filled by the markup itself.
                         for (index, param) in params.iter().enumerate() {
@@ -971,7 +1003,8 @@ impl TypeChecker<'_> {
                                 continue;
                             }
                             let given = element.args.len() > index
-                                || element.attrs.iter().any(|(attr, _)| *attr == param.name);
+                                || element.attrs.iter().any(|(attr, _)| *attr == param.name)
+                                || slots.iter().any(|(slot, _)| *slot == param.name);
                             if !given {
                                 return Err(self.error(
                                     element.pos,

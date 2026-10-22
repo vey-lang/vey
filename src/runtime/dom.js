@@ -50,6 +50,25 @@ function veyDom(ctx) {
       && typeof value.set === "function";
   }
 
+  // Tie the state of a box to a signal.
+  //
+  // The box is checked when the signal is true, and the signal takes the
+  // state of the box when it is clicked.
+  function bindChecked(el, signal) {
+    if (!isSignal(signal)) return false;
+    var shown = signal.value === true;
+    if (el.checked !== shown) el.checked = shown;
+    el.__veyUnbind = signal.subscribe(function (value) {
+      var next = value === true;
+      if (el.checked !== next) el.checked = next;
+    });
+    function take() {
+      signal.set(el.checked);
+    }
+    el.addEventListener("change", take);
+    return true;
+  }
+
   // Tie the value of a field to a signal.
   //
   // The field shows the value of the signal, and the signal takes the
@@ -58,7 +77,10 @@ function veyDom(ctx) {
     if (!isSignal(signal)) return false;
     var shown = signal.value === undefined || signal.value === null ? "" : String(signal.value);
     if (el.value !== shown) el.value = shown;
-    signal.subscribe(function (value) {
+    // The subscription of the last time is let go, so that the signal does
+    // not keep the field of a page that is gone.
+    if (typeof el.__veyUnbind === "function") el.__veyUnbind();
+    el.__veyUnbind = signal.subscribe(function (value) {
       var next = value === undefined || value === null ? "" : String(value);
       if (el.value !== next) el.value = next;
     });
@@ -138,10 +160,16 @@ function veyDom(ctx) {
         // The value of a field may follow a signal, and the signal may
         // follow the field.
         if (bindValue(el, value)) continue;
+        el.__veyHasValue = true;
+        el.__veyValue = value;
         el.value = value;
         continue;
       }
       if (key === "checked") {
+        // A box may follow a signal as well.
+        if (bindChecked(el, value)) continue;
+        el.__veyHasChecked = true;
+        el.__veyChecked = value;
         el.checked = value;
         continue;
       }
@@ -155,6 +183,12 @@ function veyDom(ctx) {
             configurable: true
           });
         }
+        continue;
+      }
+      // A mark of the accessibility that is true or false is written as it
+      // is, so that a screen reader hears it.
+      if (value === true || value === false) {
+        el.setAttribute(key, value ? "true" : "false");
         continue;
       }
       el.setAttribute(key, value === true ? "" : String(value));

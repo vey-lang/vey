@@ -156,7 +156,7 @@ mount("#app", App)
 
 setTimeout(fn() {
   show.set(false)
-}, 50)
+}, 200)
 "##,
     )
     .unwrap();

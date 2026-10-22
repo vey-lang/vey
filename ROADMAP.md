@@ -1338,6 +1338,45 @@ code that writes a page, and by writing pages that wanted more.
       the page, and the work of a node that is taken away is never done**
       when the page is written again. (`src/runtime/mount.js`,
       `src/runtime/events.js`)
+- [x] **The page falls over when the tag of a node changes,** because the
+      node before which the new one is put is not a node of the page any
+      more. (`src/runtime/mount.js`)
+- [x] **What the visitor has written in a field is wiped every time the
+      page is written again.** The value of the program is known now, so
+      the text of the visitor is kept. (`src/runtime/mount.js`,
+      `src/runtime/dom.js`)
+- [x] **One mistake in a component leaves the page dead for ever,** because
+      the effect lets go of the values it was watching before it runs the
+      work. The values are watched until the work is done now.
+      (`src/runtime/state.js`)
+- [x] **Another address is shown without the route that is shown now
+      following its state,** and the route it leaves keeps writing the page.
+      (`src/runtime/router.js`)
+- [x] **A box that follows a signal is always checked,** and the click of
+      the visitor is never written back. (`src/runtime/dom.js`)
+- [x] **The binding of a field adds a listener to the signal at every
+      writing of the page,** so the signal keeps the fields of the pages
+      that are gone. (`src/runtime/dom.js`)
+- [x] **A mark of the accessibility that is true or false is written as
+      nothing,** so the state of a control is never told to a screen
+      reader. (`src/runtime/dom.js`)
+- [x] **The `enter` of a node is not called for the first writing of the
+      page,** so the entrance of a page never happens.
+      (`src/runtime/mount.js`)
+- [ ] **A route that is written before the page is put out is never
+      shown.** (`src/runtime/router.js`, `src/runtime/mount.js`)
+- [ ] **The `head`, the `title`, the `meta` and the `link` of the markup
+      land in the body,** so the page has no head and the title of the tab
+      does not follow the state. (`src/runtime/dom.js`)
+- [ ] **Every change builds the whole page again** before anything is
+      compared, so a long list cannot be made usable.
+      (`src/runtime/dom.js`, `src/runtime/mount.js`)
+- [ ] **A node that is put in another place loses the focus,** so the
+      caret of a field is thrown away when a list is put in another order.
+      (`src/runtime/mount.js`)
+- [ ] **The value of a field is only a property and never an
+      attribute,** so the form of the server loses the text of its fields
+      when the browser takes the page over. (`src/runtime/dom.js`)
 
 ---
 

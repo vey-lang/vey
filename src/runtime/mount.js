@@ -55,10 +55,11 @@ function veyMount(ctx) {
       if (!neu.hasAttribute(oldName)) old.removeAttribute(oldName);
     }
     // The value of a field is a mark of the node, but the visitor may have
-    // written something else in it.
+    // written something else in it. The value of the program is known, so
+    // that the text of the visitor is not wiped.
     if (doc && doc.activeElement !== old) {
-      if (typeof neu.value === "string" && old.value !== neu.value) old.value = neu.value;
-      if (typeof neu.checked === "boolean" && old.checked !== neu.checked) old.checked = neu.checked;
+      if (neu.__veyHasValue && old.value !== neu.__veyValue) old.value = neu.__veyValue;
+      if (neu.__veyHasChecked && old.checked !== neu.__veyChecked) old.checked = neu.__veyChecked;
     }
   }
 
@@ -185,6 +186,10 @@ function veyMount(ctx) {
     for (var k = 0; k < old.length; k++) {
       if (used[k] || old[k].parentNode !== parent) continue;
       var leaving = old[k];
+      // A node that is taken away lets go of what it holds.
+      if (typeof leaving.__veyUnbind === "function") {
+        leaving.__veyUnbind();
+      }
       var goodbye = leaving.__veyLeave;
       if (typeof goodbye === "function") {
         var waiting = null;
@@ -226,10 +231,23 @@ function veyMount(ctx) {
       } else {
         target = patchNode(target, pairs[m].neu);
         if (target !== cursor && target.parentNode === parent) {
-          parent.insertBefore(target, cursor);
+          // The node before which the new one is put must be a node of the
+          // parent, or the browser refuses it.
+          var before = cursor && cursor.parentNode === parent ? cursor : null;
+          parent.insertBefore(target, before);
         }
       }
       cursor = target.nextSibling;
+    }
+  }
+
+  // A node that says hello is called after it is in the page.
+  function sayHello(node) {
+    if (!node || typeof node.__veyEnter !== "function") return;
+    try {
+      node.__veyEnter(node);
+    } catch (err) {
+      log.error(err);
     }
   }
 
@@ -286,6 +304,10 @@ function veyMount(ctx) {
       patchChildren(el, nodes);
     } else {
       el.replaceChildren.apply(el, nodes);
+      // The nodes of the first writing of the page say hello as well.
+      for (var i = 0; i < nodes.length; i++) {
+        sayHello(nodes[i]);
+      }
     }
     el.__veyMount = { nodes: nodes };
     mounted = { element: el, nodes: nodes };

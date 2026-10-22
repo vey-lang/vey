@@ -8,15 +8,29 @@ use crate::VeyError;
 
 impl Parser {
     pub(crate) fn parse_markup_nodes(&mut self) -> Result<Vec<MarkupNode>, VeyError> {
+        self.parse_markup_nodes_in(false)
+    }
+
+    /// The nodes of a markup.
+    ///
+    /// The children of a component may go in a slot of their own, so the
+    /// name of the slot is read from them.
+    pub(crate) fn parse_markup_nodes_in(
+        &mut self,
+        in_component: bool,
+    ) -> Result<Vec<MarkupNode>, VeyError> {
         // A markup that is nested too deep takes the compiler down, so the
         // depth of it is watched.
         self.enter()?;
-        let result = self.parse_markup_nodes_inner();
+        let result = self.parse_markup_nodes_inner(in_component);
         self.leave();
         result
     }
 
-    fn parse_markup_nodes_inner(&mut self) -> Result<Vec<MarkupNode>, VeyError> {
+    fn parse_markup_nodes_inner(
+        &mut self,
+        in_component: bool,
+    ) -> Result<Vec<MarkupNode>, VeyError> {
         let mut nodes = Vec::new();
         while !self.is_punct("}") && self.tok.kind != TokKind::Eof {
             if self.is_kw("if") {
@@ -32,7 +46,7 @@ impl Parser {
                 continue;
             }
             if self.is_element_start()? {
-                nodes.push(MarkupNode::Element(self.parse_element()?));
+                nodes.push(MarkupNode::Element(self.parse_element(in_component)?));
                 continue;
             }
             // A name with a block behind it is meant to be a tag, so the tag
@@ -167,7 +181,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn parse_element(&mut self) -> Result<Element, VeyError> {
+    pub(crate) fn parse_element(&mut self, in_component: bool) -> Result<Element, VeyError> {
         let tag_token = self.advance()?;
         let component = tag_token
             .value
@@ -210,8 +224,9 @@ impl Parser {
                 self.expect_op("=")?;
                 let value = self.parse_attr_value()?;
                 // The name of the slot the element goes in. It is a name of
-                // a component only; on a node it is an attribute of HTML.
-                if name == "slot" && element.component {
+                // a child of a component only; on a node of its own it is
+                // an attribute of HTML.
+                if name == "slot" && in_component {
                     if let Expr::String(parts, _) = &value {
                         if let Some(part) = parts.first() {
                             if part.expr.is_none() {
@@ -244,7 +259,7 @@ impl Parser {
 
         if self.is_punct("{") {
             self.advance()?;
-            element.children = self.parse_markup_nodes()?;
+            element.children = self.parse_markup_nodes_in(element.component)?;
             self.expect_punct("}")?;
         }
 

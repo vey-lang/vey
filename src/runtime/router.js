@@ -128,11 +128,8 @@ function veyRouter(ctx) {
       view: found ? found.route.view : null
     };
     history.push({ vey: true }, "", parsed.pathname + parsed.search + parsed.hash);
-    if (!found) return null;
-    var view = found.route.view;
-    var tree = typeof view === "function" ? view(found.params, query) : view;
-    renderMounted(tree);
-    return tree;
+    // The route is shown the way it is shown when the address is opened.
+    return show(parsed.pathname, parsed.search);
   }
 
   // The route that is shown now, with its parameters.
