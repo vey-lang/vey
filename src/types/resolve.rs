@@ -99,7 +99,15 @@ impl TypeChecker<'_> {
                             return Ok(Type::EnumUnion(name.clone()));
                         }
                         if self.interfaces.contains_key(name) {
-                            return self.interface_type(name);
+                            // A type that holds itself stays a reference to
+                            // it, so that the shape does not grow forever.
+                            if stack.iter().any(|item| item == name) {
+                                return Ok(Type::Interface(name.clone(), Vec::new()));
+                            }
+                            stack.push(name.clone());
+                            let ty = self.interface_type_with(name, &HashMap::new(), stack);
+                            stack.pop();
+                            return ty;
                         }
                         let mut error = self.error(*pos, format!("unknown type '{}'", name));
                         if let Some(hint) = did_you_mean(name, self.known_types()) {
@@ -149,6 +157,40 @@ impl TypeChecker<'_> {
                         subst.insert(param.clone(), ty);
                     }
                     return Ok(substitute(&alias.body, &subst));
+                }
+                // An interface that takes type arguments.
+                if let Some(info) = self.interfaces.get(name) {
+                    if info.params.is_empty() {
+                        return self.interface_type(name);
+                    }
+                    if info.params.len() != args.len() {
+                        return Err(self.error(
+                            *pos,
+                            format!(
+                                "type '{}' expects {} type {}, got {}",
+                                name,
+                                info.params.len(),
+                                type_argument_label(info.params.len()),
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let mut resolved_args = Vec::new();
+                    for arg in args {
+                        resolved_args.push(self.resolve_type_with(arg, stack, vars)?);
+                    }
+                    let mut subst = HashMap::new();
+                    for (param, ty) in info.params.iter().zip(resolved_args) {
+                        subst.insert(param.name.clone(), ty);
+                    }
+                    // A type that holds itself stays a reference to it.
+                    if stack.iter().any(|item| item == name) {
+                        return Ok(Type::Interface(name.clone(), Vec::new()));
+                    }
+                    stack.push(name.clone());
+                    let ty = self.interface_type_with(name, &subst, stack);
+                    stack.pop();
+                    return ty;
                 }
                 let alias = self
                     .aliases
@@ -268,6 +310,16 @@ impl TypeChecker<'_> {
 
     /// The shape of an interface, with the methods as functions.
     pub(crate) fn interface_type(&self, name: &str) -> Result<Type, VeyError> {
+        self.interface_type_with(name, &HashMap::new(), &mut Vec::new())
+    }
+
+    /// The shape of an interface where its type parameters have a type.
+    pub(crate) fn interface_type_with(
+        &self,
+        name: &str,
+        vars: &HashMap<String, Type>,
+        stack: &mut Vec<String>,
+    ) -> Result<Type, VeyError> {
         let Some(info) = self.interfaces.get(name) else {
             return Err(self.error(
                 crate::lexer::Pos::new(1, 1),
@@ -278,7 +330,7 @@ impl TypeChecker<'_> {
         for member in &info.members {
             match member {
                 InterfaceMember::Field(field) => {
-                    let mut ty = self.resolve_type(&field.ty)?;
+                    let mut ty = self.resolve_type_with(&field.ty, stack, vars)?;
                     if field.optional {
                         ty = union(vec![ty, Type::Null]);
                     }
@@ -294,7 +346,7 @@ impl TypeChecker<'_> {
                     let mut rest = false;
                     for param in &method.params {
                         let ty = match &param.ty {
-                            Some(ty) => self.resolve_type(ty)?,
+                            Some(ty) => self.resolve_type_with(ty, stack, vars)?,
                             None => Type::Any,
                         };
                         if param.rest {
@@ -307,7 +359,7 @@ impl TypeChecker<'_> {
                             required += 1;
                         }
                     }
-                    let ret = self.resolve_type(&method.ret)?;
+                    let ret = self.resolve_type_with(&method.ret, stack, vars)?;
                     fields.push(ObjectField {
                         name: method.name.clone(),
                         ty: Type::Function(FunctionType {

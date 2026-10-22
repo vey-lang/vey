@@ -897,7 +897,7 @@ gap that is closed.
       (`src/types/checker.rs`)
 - [x] **The name of an import wins over a local name of its own.**
       (`src/types/exprs.rs`)
-- [ ] **A narrowing inside a closure changes the type of the variable of
+- [x] **A narrowing inside a closure changes the type of the variable of
       the function around it.** (`src/types/checker.rs`)
 - [x] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
 - [x] **A generator without a return type has the type `() -> [void]`.**

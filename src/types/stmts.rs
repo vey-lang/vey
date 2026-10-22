@@ -678,6 +678,23 @@ impl TypeChecker<'_> {
         ret_ann: Option<&TypeExpr>,
         pos: Pos,
     ) -> Result<(Type, Vec<Type>), VeyError> {
+        // The names that are narrowed inside a function stay narrowed for
+        // the code inside it, and not for the code around it: the function
+        // may run later, and what it does says nothing about the value that
+        // is there by then.
+        let outer = self.scopes.clone();
+        let result = self.check_function_inner(params, body, ret_ann, pos);
+        self.scopes = outer;
+        result
+    }
+
+    fn check_function_inner(
+        &mut self,
+        params: &[Param],
+        body: &Block,
+        ret_ann: Option<&TypeExpr>,
+        pos: Pos,
+    ) -> Result<(Type, Vec<Type>), VeyError> {
         self.push_scope();
         self.declare_params(params)?;
         let expected = match ret_ann {

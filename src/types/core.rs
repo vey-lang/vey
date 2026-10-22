@@ -69,6 +69,9 @@ pub type ResolvedCalls = std::collections::HashMap<(usize, usize), Vec<crate::as
 #[derive(Clone)]
 pub struct InterfaceInfo {
     pub members: Vec<crate::ast::InterfaceMember>,
+    /// The type parameters of the interface, such as the `T` of
+    /// `interface Box<T>`.
+    pub params: Vec<crate::ast::TypeParam>,
 }
 
 /// The functions of a type.

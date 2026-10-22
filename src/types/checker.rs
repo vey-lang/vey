@@ -347,6 +347,7 @@ fn collect_interfaces(
             }
             let info = InterfaceInfo {
                 members: decl.members.clone(),
+                params: decl.type_params.clone(),
             };
             if interfaces.insert(decl.name.clone(), info).is_some() {
                 return Err(VeyError::new(
