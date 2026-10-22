@@ -1,5 +1,6 @@
 //! The module graph of a program and the bundle it becomes.
 
+mod cache;
 mod loader;
 
 use std::collections::HashMap;
@@ -25,11 +26,13 @@ pub struct Module {
     pub exports: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct SourceFile {
     pub path: String,
     pub content: String,
 }
 
+#[derive(Clone)]
 pub struct StyleFile {
     pub path: PathBuf,
     pub content: String,
@@ -80,26 +83,50 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
 
     let entry_id = load_module(&entry, &mut modules, &mut ids, &mut stack, &mut styles)?;
 
+    // The files of the project are known, so the result of the last build may
+    // be taken from the cache when nothing has changed.
+    let sources: Vec<SourceFile> = modules
+        .iter()
+        .map(|module| SourceFile {
+            path: module.path.display().to_string(),
+            content: module.source.clone(),
+        })
+        .collect();
+    let root = project_root(&entry);
+    let key = cache::key(&sources, env!("CARGO_PKG_VERSION"));
+    if let Some(cached) = cache::read(&root, key) {
+        return Ok(Bundle {
+            code: cached.code,
+            modules,
+            entry: entry_id,
+            entry_path: entry,
+            sources: cached.sources,
+            mappings: cached.mappings,
+            styles: cached.styles,
+            warnings: cached.warnings,
+        });
+    }
+
     // type environments for each module, built in dependency order
     let mut type_envs: Vec<types::ModuleTypeEnv> = Vec::with_capacity(modules.len());
 
-    let mut chunks = Vec::new();
-    let mut sources = Vec::new();
     let mut warnings: Vec<Warning> = Vec::new();
-
-    for module in &modules {
+    // The options of every module, so that the code may be written in
+    // parallel.
+    let mut options: Vec<Options> = Vec::with_capacity(modules.len());
+    for (index, module) in modules.iter().enumerate() {
         let deps = module
             .deps
             .iter()
             .map(|(alias, id)| (alias.clone(), format!("__m{}", id)))
             .collect();
-        let options = Options {
+        let module_options = Options {
             file: module.path.display().to_string(),
             module: true,
             deps,
             packages: module.packages.clone(),
             exports: module.exports.clone(),
-            source: sources.len(),
+            source: index,
             enums: std::collections::HashMap::new(),
         };
         let found = check::check(&module.ast, &module.path.display().to_string())?;
@@ -128,13 +155,34 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         }
         // The enums of the module are described by the checker, and the code
         // generator uses the same description.
-        let options = Options { enums: env.enums, ..options };
-        let generated = generate(&module.ast, &options)?;
-        sources.push(SourceFile {
-            path: module.path.display().to_string(),
-            content: module.source.clone(),
+        options.push(Options {
+            enums: env.enums,
+            ..module_options
+        });
+    }
+
+    // The code of the modules is written in parallel, because every module
+    // is a piece of its own.
+    let generated: Vec<Result<crate::codegen::Generated, VeyError>> =
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = modules
+                .iter()
+                .zip(options.iter())
+                .map(|(module, options)| scope.spawn(move || generate(&module.ast, options)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        Err(VeyError::new("the compiler stopped", "the project", 1, 1))
+                    })
+                })
+                .collect()
         });
 
+    let mut chunks = Vec::new();
+    for (module, result) in modules.iter().zip(generated.into_iter()) {
+        let generated = result?;
         let (wrapped, _) = wrap_module(module.id, &generated.code);
         chunks.push(wrapped);
     }
@@ -143,7 +191,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
     // out here, so that the bundle has no trace of them.
     let (code, mappings) = sourcemap::extract(&chunks.join("\n"));
 
-    Ok(Bundle {
+    let bundle = Bundle {
         code,
         modules,
         entry: entry_id,
@@ -152,8 +200,29 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         mappings,
         styles,
         warnings,
-    })
+    };
+    cache::store(&root, &bundle);
+    Ok(bundle)
 }
+
+/// The folder the cache of a project is written in.
+///
+/// A folder that is called `src` belongs to the project above it.
+fn project_root(entry: &Path) -> PathBuf {
+    let parent = entry
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if parent.file_name().is_some_and(|name| name == "src") {
+        return parent
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+    }
+    parent.to_path_buf()
+}
+
 fn wrap_module(id: usize, code: &str) -> (String, usize) {
     let body = code
         .lines()

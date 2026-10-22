@@ -35,13 +35,45 @@ impl Lexer {
             if c == '\\' {
                 self.bump();
                 if let Some(e) = self.bump() {
-                    text.push(match e {
-                        'n' => '\n',
-                        't' => '\t',
-                        'r' => '\r',
-                        '0' => '\0',
-                        other => other,
-                    });
+                    match e {
+                        'n' => text.push('\n'),
+                        't' => text.push('\t'),
+                        'r' => text.push('\r'),
+                        '0' => text.push('\0'),
+                        'b' => text.push('\u{8}'),
+                        'f' => text.push('\u{c}'),
+                        'v' => text.push('\u{b}'),
+                        // A quote may be written as itself, so that a text
+                        // with a quote of the other kind is easy to write.
+                        '\'' => text.push('\''),
+                        '"' => text.push('"'),
+                        '\\' => text.push('\\'),
+                        'u' => {
+                            let value = self.read_hex(4)?;
+                            match char::from_u32(value) {
+                                Some(c) => text.push(c),
+                                None => {
+                                    return Err(self.err(format!(
+                                        "\\u{:04x} is not a character",
+                                        value
+                                    )))
+                                }
+                            }
+                        }
+                        'x' => {
+                            let value = self.read_hex(2)?;
+                            match char::from_u32(value) {
+                                Some(c) => text.push(c),
+                                None => {
+                                    return Err(self.err(format!(
+                                        "\\x{:02x} is not a character",
+                                        value
+                                    )))
+                                }
+                            }
+                        }
+                        other => text.push(other),
+                    }
                 }
                 continue;
             }
@@ -85,13 +117,31 @@ impl Lexer {
         ))
     }
 
+    /// Read a number of hexadecimal digits.
+    ///
+    /// The digits are the ones of a number that starts with `\\u` or `\\x`.
+    fn read_hex(&mut self, count: usize) -> Result<u32, VeyError> {
+        let mut value = 0u32;
+        for _ in 0..count {
+            let Some(c) = self.at(0) else {
+                return Err(self.err("the escape is not complete"));
+            };
+            let Some(digit) = c.to_digit(16) else {
+                return Err(self.err(format!("'{}' is not a hexadecimal digit", c)));
+            };
+            self.bump();
+            value = value * 16 + digit;
+        }
+        Ok(value)
+    }
+
     /// Consume a raw `{ ... }` section and return its inner text.
     ///
     /// The lexer must be positioned right after the token that introduces the
     /// block (for example `style`). Braces inside strings and `/* */` comments
     /// are ignored so CSS values survive intact.
     pub(crate) fn raw_brace_block(&mut self) -> Result<(String, Pos), VeyError> {
-        self.skip_space();
+        self.skip_space()?;
         if self.at(0) != Some('{') {
             return Err(self.err("expected '{' to start a style block"));
         }

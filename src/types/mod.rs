@@ -7,6 +7,7 @@
 pub mod builtins;
 pub mod checker;
 pub mod core;
+mod explain;
 mod exprs;
 pub mod helpers;
 mod patterns;
@@ -16,3 +17,4 @@ mod stmts;
 
 pub use checker::{check, ModuleTypeEnv};
 pub use core::{FunctionType, ObjectField, Type};
+pub use explain::explain;

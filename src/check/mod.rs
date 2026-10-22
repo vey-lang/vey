@@ -22,6 +22,7 @@ pub fn check(program: &Program, file: &str) -> Result<Vec<Warning>, VeyError> {
         declared_at: HashMap::new(),
         statement: 0,
         exported: HashSet::new(),
+        loop_labels: Vec::new(),
         warnings: Vec::new(),
     };
     checker.check_program(program)?;
@@ -40,6 +41,8 @@ struct Checker<'a> {
     statement: usize,
     /// The names the program gives to the outside world.
     exported: HashSet<String>,
+    /// The names of the loops that are around.
+    loop_labels: Vec<Vec<String>>,
     warnings: Vec<Warning>,
 }
 
@@ -240,7 +243,9 @@ impl Checker<'_> {
             Stmt::While(decl) => {
                 self.check_expr(&decl.test)?;
                 self.loop_depth += 1;
+                self.loop_labels.push(decl.label.iter().cloned().collect());
                 self.check_block(&decl.body)?;
+                self.loop_labels.pop();
                 self.loop_depth -= 1;
             }
             Stmt::WhileLet(decl) => {
@@ -272,21 +277,28 @@ impl Checker<'_> {
             Stmt::Defer(decl) => {
                 self.check_expr(&decl.value)?;
             }
+            Stmt::Throw(decl) => {
+                self.check_expr(&decl.value)?;
+            }
             Stmt::For(decl) => {
                 self.check_expr(&decl.iter)?;
                 self.scopes.push();
                 self.declare_pattern(&decl.pattern, BindingKind::Let)?;
                 self.loop_depth += 1;
+                self.loop_labels.push(decl.label.iter().cloned().collect());
                 for inner in &decl.body.body {
                     self.check_stmt(inner)?;
                 }
+                self.loop_labels.pop();
                 self.loop_depth -= 1;
                 self.pop_scope();
             }
             Stmt::Repeat(decl) => {
                 self.check_expr(&decl.count)?;
                 self.loop_depth += 1;
+                self.loop_labels.push(decl.label.iter().cloned().collect());
                 self.check_block(&decl.body)?;
+                self.loop_labels.pop();
                 self.loop_depth -= 1;
             }
             Stmt::Return(decl) => {
@@ -297,14 +309,20 @@ impl Checker<'_> {
                     self.check_expr(value)?;
                 }
             }
-            Stmt::Break(pos) => {
+            Stmt::Break(label, pos) => {
                 if self.loop_depth == 0 {
                     return Err(self.error(*pos, "break outside a loop"));
                 }
+                if let Some(label) = label {
+                    self.check_label(label, *pos, "break")?;
+                }
             }
-            Stmt::Continue(pos) => {
+            Stmt::Continue(label, pos) => {
                 if self.loop_depth == 0 {
                     return Err(self.error(*pos, "continue outside a loop"));
+                }
+                if let Some(label) = label {
+                    self.check_label(label, *pos, "continue")?;
                 }
             }
             Stmt::Try(decl) => {
@@ -343,6 +361,18 @@ impl Checker<'_> {
             Stmt::Block(block, _) => self.check_block(block)?,
         }
         Ok(())
+    }
+
+    /// The names of the loops that are around, so that a `break` may name
+    /// one of them.
+    fn check_label(&self, label: &str, pos: Pos, what: &str) -> Result<(), VeyError> {
+        if self.loop_labels.iter().any(|labels| labels.contains(&label.to_string())) {
+            return Ok(());
+        }
+        Err(self.error(
+            pos,
+            format!("no loop named '{}' is around this '{}'", label, what),
+        ))
     }
 
     fn check_block(&mut self, block: &Block) -> Result<(), VeyError> {

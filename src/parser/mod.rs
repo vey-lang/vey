@@ -289,6 +289,18 @@ impl Parser {
             return self.parse_style_block();
         }
 
+        // A loop may have a name in front of it.
+        if self.tok.kind == TokKind::Ident {
+            if let Some(label) = self.parse_loop_label()? {
+                return match self.tok.value.as_str() {
+                    "while" => self.parse_while(Some(label)),
+                    "for" => self.parse_for(Some(label)),
+                    "repeat" => self.parse_repeat(Some(label)),
+                    _ => Err(self.error("a name in front of a loop names a loop")),
+                };
+            }
+        }
+
         if self.tok.kind == TokKind::Keyword {
             match self.tok.value.as_str() {
                 "let" | "const" => return self.parse_var(false),
@@ -301,9 +313,9 @@ impl Parser {
                 "component" => return self.parse_component(false),
                 "enum" => return self.parse_enum(false),
                 "if" => return self.parse_if(),
-                "while" => return self.parse_while(),
-                "for" => return self.parse_for(),
-                "repeat" => return self.parse_repeat(),
+                "while" => return self.parse_while(None),
+                "for" => return self.parse_for(None),
+                "repeat" => return self.parse_repeat(None),
                 "defer" => {
                     let pos = self.advance()?.pos;
                     let value = self.parse_expression()?;
@@ -312,11 +324,18 @@ impl Parser {
                 "return" => return self.parse_return(),
                 "break" => {
                     let pos = self.advance()?.pos;
-                    return Ok(Stmt::Break(pos));
+                    let label = self.parse_label()?;
+                    return Ok(Stmt::Break(label, pos));
                 }
                 "continue" => {
                     let pos = self.advance()?.pos;
-                    return Ok(Stmt::Continue(pos));
+                    let label = self.parse_label()?;
+                    return Ok(Stmt::Continue(label, pos));
+                }
+                "throw" => {
+                    let pos = self.advance()?.pos;
+                    let value = self.parse_expression()?;
+                    return Ok(Stmt::Throw(ThrowStmt { value, pos }));
                 }
                 "try" => return self.parse_try(),
                 "use" => return self.parse_use(),
@@ -621,6 +640,34 @@ impl Parser {
         Ok(Block { body })
     }
 
+    /// The name of a loop, when a `break` or a `continue` names it.
+    fn parse_label(&mut self) -> Result<Option<String>, VeyError> {
+        if self.tok.kind == TokKind::Ident {
+            return Ok(Some(self.advance()?.value));
+        }
+        Ok(None)
+    }
+
+    /// The name of a loop that is written with a name in front of it.
+    fn parse_loop_label(&mut self) -> Result<Option<String>, VeyError> {
+        if self.tok.kind != TokKind::Ident {
+            return Ok(None);
+        }
+        let next = self.peek()?;
+        if next.kind != TokKind::Punct || next.value != ":" {
+            return Ok(None);
+        }
+        let after = self.peek_n(2)?;
+        let is_loop = matches!(after.value.as_str(), "for" | "while" | "repeat")
+            && after.kind == TokKind::Keyword;
+        if !is_loop {
+            return Ok(None);
+        }
+        let name = self.advance()?.value;
+        self.advance()?;
+        Ok(Some(name))
+    }
+
     fn parse_if(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("if")?;
         // A value that is taken apart, as in `if let Some(x) = value { }`.
@@ -662,7 +709,7 @@ impl Parser {
         Ok(Some(Box::new(Stmt::Block(self.parse_block()?, pos))))
     }
 
-    fn parse_while(&mut self) -> Result<Stmt, VeyError> {
+    fn parse_while(&mut self, label: Option<String>) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("while")?;
         // A value that is taken apart, as in `while let Some(x) = value { }`.
         if self.is_kw("let") {
@@ -683,11 +730,12 @@ impl Parser {
         Ok(Stmt::While(WhileStmt {
             test,
             body,
+            label,
             pos: start.pos,
         }))
     }
 
-    fn parse_for(&mut self) -> Result<Stmt, VeyError> {
+    fn parse_for(&mut self, label: Option<String>) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("for")?;
         let pattern = self.parse_binding_pattern()?;
         let ty = if self.is_punct(":") {
@@ -704,16 +752,18 @@ impl Parser {
             ty,
             iter,
             body,
+            label,
             pos: start.pos,
         }))
     }
-    fn parse_repeat(&mut self) -> Result<Stmt, VeyError> {
+    fn parse_repeat(&mut self, label: Option<String>) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("repeat")?;
         let count = self.parse_expression()?;
         let body = self.parse_block()?;
         Ok(Stmt::Repeat(RepeatStmt {
             count,
             body,
+            label,
             pos: start.pos,
         }))
     }

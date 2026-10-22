@@ -8,18 +8,42 @@ pub(crate) struct ParsedArgs {
     pub(crate) title: Option<String>,
     pub(crate) node: bool,
     pub(crate) force: bool,
+    /// The user asked for the help of the command.
+    pub(crate) help: bool,
+    /// The name of the tests that are run.
+    pub(crate) filter: Option<String>,
+    /// The command runs again when a file changes.
+    pub(crate) watch: bool,
+    /// The shape of the new project.
+    pub(crate) template: Option<String>,
+    /// Where the site is put.
+    pub(crate) target: Option<String>,
+    /// The files are written even when they are there.
+    pub(crate) write: bool,
+}
+
+impl ParsedArgs {
+    pub(crate) fn new() -> Self {
+        Self {
+            files: Vec::new(),
+            output: None,
+            port: None,
+            host: None,
+            title: None,
+            node: false,
+            force: false,
+            help: false,
+            filter: None,
+            watch: false,
+            template: None,
+            target: None,
+            write: false,
+        }
+    }
 }
 
 pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
-    let mut parsed = ParsedArgs {
-        files: Vec::new(),
-        output: None,
-        port: None,
-        host: None,
-        title: None,
-        node: false,
-        force: false,
-    };
+    let mut parsed = ParsedArgs::new();
 
     let mut index = 0;
     while index < args.len() {
@@ -38,6 +62,12 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             "--title" => parsed.title = Some(value_of(args, &mut index, arg)?),
             "--node" => parsed.node = true,
             "--force" => parsed.force = true,
+            "-h" | "--help" => parsed.help = true,
+            "--filter" => parsed.filter = Some(value_of(args, &mut index, arg)?),
+            "--watch" => parsed.watch = true,
+            "--template" => parsed.template = Some(value_of(args, &mut index, arg)?),
+            "--target" => parsed.target = Some(value_of(args, &mut index, arg)?),
+            "--write" => parsed.write = true,
             _ => {
                 if let Some(value) = arg.strip_prefix("--out=") {
                     parsed.output = Some(value.to_string());
@@ -51,6 +81,12 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                     parsed.host = Some(value.to_string());
                 } else if let Some(value) = arg.strip_prefix("--title=") {
                     parsed.title = Some(value.to_string());
+                } else if let Some(value) = arg.strip_prefix("--filter=") {
+                    parsed.filter = Some(value.to_string());
+                } else if let Some(value) = arg.strip_prefix("--template=") {
+                    parsed.template = Some(value.to_string());
+                } else if let Some(value) = arg.strip_prefix("--target=") {
+                    parsed.target = Some(value.to_string());
                 } else if arg.starts_with('-') && arg.len() > 1 {
                     return Err(format!("unknown option '{}'", arg));
                 } else {

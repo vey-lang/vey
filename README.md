@@ -8,7 +8,9 @@ Vey is a small web language with its own syntax, compiler and runtime. The compi
 
 Browsers only execute JavaScript. That is why the output is JavaScript while the toolchain itself is not.
 
-The changes of every release are in the [changelog](CHANGELOG.md).
+The changes of every release are in the [changelog](CHANGELOG.md). What the
+language is still missing, and the order in which the gaps are closed, is in
+the [roadmap](ROADMAP.md).
 
 ## Build
 
@@ -191,6 +193,18 @@ test("adds numbers", fn() {
 <!-- check -->
 
 `test(name, fn)` runs immediately. A test that contains `await` returns a promise, and the runner keeps the process alive until it settles. `assert(condition, message)` throws when the condition is false. A failed test marks the process as failed.
+
+The tests may be chosen with a filter, so that only the ones whose name holds
+the text are run:
+
+```sh
+vey test --filter "adds"
+```
+
+There are matchers for the things a test says most of the time:
+`assertEquals`, `assertNotEquals`, `assertDeepEquals`, `assertContains`,
+`assertNotContains`, `assertThrows` and `assertMatch`. Each of them takes
+the values and a message that says what the test was about.
 
 ## Checks
 
@@ -755,6 +769,64 @@ bind("#app", App())
 
 `bind(selector, node)` renders a component into the page.
 
+### A page that lives
+
+A value that tells when it changes is a `signal`. A state that is shared
+between the parts of a page is a `store`, and the work that follows a change
+is an `effect`.
+
+```vey
+let count = signal(0)
+
+effect(fn() {
+  print("the count is {count.value}")
+})
+
+count.set(1)
+```
+
+`mount(selector, node)` writes a page and changes it in place, so that a list
+may grow, shrink and be put in another order. An item of a list may carry a
+`key`, which is how the page knows that it is the same item.
+
+```vey
+let page = mount("#app", App())
+page.update(App())
+```
+
+When the server has already written the page, the browser takes it over
+instead of putting it out again, so that the visitor does not see the page
+twice.
+
+The routes of the browser are written with `route`, and another address is
+shown with `navigate`. The parameters of the route that is shown now are in
+`routeParams()`.
+
+```vey
+route("/users/{id}", fn(params) {
+  h1 { "User {params.id}" }
+})
+
+navigate("/users/7")
+```
+
+The events of one's own are attached with `on`, and a listener that watches
+the children of a node is attached with `delegate`. The work that is done
+when a node is there is written with `onMount`, the work that is done when
+it is taken away with `onDestroy`, and a node may be held with `ref()`.
+
+```vey
+let input = ref()
+
+on("#app", "click", fn(event) {
+  print("clicked")
+})
+
+delegate("#app", "click", ".item", fn(event, node) {
+  print(node.textContent)
+})
+```
+
 ### Server side rendering
 
 The same component can be rendered to HTML on the server:
@@ -811,6 +883,17 @@ app.get('/files/*', fn(req) {
 
 Route patterns use single quotes, so `{id}` is treated as a path parameter instead of string interpolation.
 
+A parameter may be left out with `{id?}`, and it may hold a constraint with
+`{id:int}`, which is one of `int`, `number`, `uuid`, `slug` and `word`, or a
+pattern of its own. The routes are looked at in the order they were written,
+so the first one that fits is the one that answers.
+
+```vey
+app.get('/users/{id?}', fn(req) {
+  return { id: req.params.id }
+})
+```
+
 Handler results:
 
 - string: HTML
@@ -818,10 +901,68 @@ Handler results:
 - `response(body, status, headers)`: explicit response
 - `redirect(url, status)`: redirect
 
-The request object contains `path`, `method`, `params`, `query`, `headers`, `body`, `text` and `cookies`.
+The request object contains `path`, `method`, `params`, `query`, `headers`, `body`, `text` and `cookies`. It also holds `get(header)`, which is the value of a mark of the request, `ip`, `host` and `protocol`.
 
 The body of a request is read as JSON or as the fields of a form, so
-`req.body.name` holds the name of a field of a form.
+`req.body.name` holds the name of a field of a form. A form of the kind
+`multipart/form-data` is read as well: the file of a field is in
+`req.files`, with its `filename`, its `contentType`, its `size` and its
+`bytes`.
+
+### The middle pieces of the server
+
+A piece of the server is a function of the request, of the answer and of the
+next one. It is put in the server with `use`, and it runs before the routes.
+
+```vey
+app.use(fn(req, res, next) {
+  print("{req.method} {req.path}")
+  next()
+})
+
+app.use("/admin", fn(req, res, next) {
+  res.set("X-Admin", "yes")
+  next()
+})
+```
+
+The pieces that are ready are `logger()`, `cors()`, `compress()`,
+`errorHandler(fn)` and `bodyLimit(bytes)`. A route may have a piece of its
+own, which is written after the handler of the route.
+
+The answer of the server may set a cookie with `res.cookie(name, value)`, and
+the sessions live from one request to the next.
+
+```vey
+app.get("/login", fn(req, res) {
+  session.start()
+  session.set("user", "Ada")
+  res.cookie("seen", "yes")
+  return { ok: true }
+})
+```
+
+The files that are served carry an `ETag`, a `Last-Modified` and a
+`Cache-Control`, and they are not sent again when the visitor has them.
+
+A socket of a visitor is answered with `ws`, and the events of the server
+are sent with `sse`.
+
+```vey
+app.ws("/chat", fn(socket) {
+  socket.onMessage(fn(text) {
+    socket.send("echo: {text}")
+  })
+})
+
+app.sse("/events", fn(req, stream) {
+  stream.send("hello")
+})
+```
+
+A `HEAD` is answered like a `GET` without the body of the answer, and an
+`OPTIONS` is answered with the methods of the address. The body of a request
+has a limit, and `stop()` waits for the requests that are running.
 
 ## Runtime
 
@@ -855,9 +996,20 @@ The body of a request is read as JSON or as the fields of a form, so
 | `html(node)` | render a component tree to HTML |
 | `raw(html)` | mark trusted HTML so `html()` does not escape it |
 | `bind(selector, node)` | mount into the DOM |
+| `title(text)` | the title of the page, in the tab of the browser |
+| `clipboard.write(text)` | put a text on the clipboard of the browser |
 | `cls(...names)` | the class names of an element |
 | `server(port)` | a server of the program |
 | `assert(condition, message)` | throw when a condition is false |
+| `assertEquals(actual, expected)` / `assertNotEquals(actual, expected)` / `assertDeepEquals(actual, expected)` | the matchers of the tests |
+| `assertContains(text, part)` / `assertNotContains(text, part)` / `assertMatch(text, pattern)` / `assertThrows(fn)` | the matchers of the tests |
+| `assertEquals(actual, expected, message)` | throw when the two values are not the same |
+| `assertNotEquals(actual, expected, message)` | throw when the two values are the same |
+| `assertDeepEquals(actual, expected, message)` | throw when the two values are not the same, deeply |
+| `assertContains(text, part, message)` | throw when the text does not hold the part |
+| `assertNotContains(text, part, message)` | throw when the text holds the part |
+| `assertThrows(fn, message)` | throw when the code does not throw |
+| `assertMatch(text, pattern, message)` | throw when the text does not match the pattern |
 | `test(name, fn)` | run a test block |
 | `error(message)` | throw an error |
 | `all(list)` / `race(list)` | promise combinators |
@@ -872,8 +1024,35 @@ The body of a request is read as JSON or as the fields of a form, so
 | `omit(object, keys)` | the object without the keys |
 | `base64.encode(value)` / `base64.decode(value)` | base64 |
 | `url.encode(value)` / `url.decode(value)` / `url.parse(value)` | URL helpers |
+| `regex(pattern, flags?)` | a pattern that searches a text, with `test`, `match`, `matchAll`, `replace`, `replaceAll` and `split` |
+| `intl.formatNumber(value, locale?)` / `intl.formatDate(value, options?)` / `intl.formatTime(value, options?)` | the way a number, a date and a time are written |
+| `intl.dayName(index, locale?)` / `intl.monthName(index, locale?)` / `intl.relativeTime(value, unit, locale?)` | the names of the days and of the months |
+| `bytes.from(text, encoding?)` / `bytes.toBase64(bytes)` / `bytes.fromBase64(text)` / `bytes.concat(list)` / `bytes.length(bytes)` / `bytes.hex(bytes)` | the bytes of a text, as a list of numbers |
+| `text.encode(value)` / `text.decode(bytes)` | the bytes of a text |
+| `deepCopy(value)` | a copy of a value that holds nothing of the value it came from |
+| `signal(value)` / `store(name, initial)` / `effect(fn)` | the state of a page, and the work that follows it |
+| `mount(target, node)` | write a page in the browser and change it in place |
+| `route(path, view)` / `navigate(url)` / `currentRoute()` / `routeParams()` | the routes of the browser |
+| `on(target, event, fn)` / `delegate(target, event, selector, fn)` | the events of one's own |
+| `onMount(fn)` / `onDestroy(fn)` / `ref()` | the life of a node, and a way to hold it |
+| `setTimeout(fn, ms)` / `clearTimeout(id)` / `setInterval(fn, ms)` / `clearInterval(id)` | the timers of the browser |
+| `requestAnimationFrame(fn)` / `cancelAnimationFrame(id)` | the frames of the browser |
+| `http.fetch(url, options?)` / `http.Request` / `http.Response` / `http.Headers` / `http.AbortController` | a request of the browser, with a time and a retry |
+| `storage.get(key)` / `storage.set(key, value)` / `storage.remove(key)` / `storage.clear()` | the notes that stay after the browser is closed |
+| `sessionStorage.get(key)` / `sessionStorage.set(key, value)` | the notes that stay until the tab is closed |
+| `history.push(state, title, url)` / `history.replace(state, title, url)` / `history.back()` / `history.forward()` / `history.go(n)` / `history.state()` | the address of the page |
+| `Blob(parts)` / `File(parts, name)` / `FileReader()` / `FormData()` | the files of a visitor |
+| `WebSocket(url)` / `EventSource(url)` | the sockets of the browser |
+| `matchMedia(query)` / `IntersectionObserver(fn)` / `ResizeObserver(fn)` | the screen of the browser |
 | `fs.read`, `fs.write`, `fs.append`, `fs.exists`, `fs.list`, `fs.remove`, `fs.mkdir` | file system, Node only |
+| `fs.readStream(path)` / `fs.writeStream(path, value)` | the files as they come, Node only |
 | `path.join`, `path.dirname`, `path.basename`, `path.extname`, `path.resolve` | paths, Node only |
+| `process.spawn(command, args?)` / `process.run(command, args?)` | another program, Node only |
+| `crypto.randomBytes(count)` / `crypto.sign(value, key)` / `crypto.verify(value, signature, key)` / `crypto.keyPair()` | the bytes and the signatures, Node only |
+| `zlib.gzip(value)` / `zlib.gunzip(bytes)` / `zlib.deflate(value)` / `zlib.inflate(bytes)` | the files that are smaller, Node only |
+| `app.use(fn)` / `app.use(path, fn)` | the middle pieces of the server |
+| `logger()` / `cors()` / `compress()` / `errorHandler(fn)` / `bodyLimit(bytes)` | the middle pieces that are ready |
+| `session.start()` / `session.get(key)` / `session.set(key, value)` / `session.end()` | the sessions of the server |
 
 A few details worth knowing:
 
@@ -921,6 +1100,7 @@ src/types/           the gradual type checker
   exprs.rs           the expressions
   patterns.rs        the patterns and the narrowing
   resolve.rs         the resolution of the types
+  explain.rs         the type of an expression at a place
   helpers.rs         the helpers of the checker
 src/codegen/         the JavaScript output
   mod.rs             the statements
@@ -931,6 +1111,7 @@ src/codegen/         the JavaScript output
 src/compiler/        the module graph
   mod.rs             the bundle
   loader.rs          the loading of the modules
+  cache.rs           the cache of the build
 src/runtime.rs       joins the parts of the runtime
 src/runtime/         the runtime shared by node and the browser
   index.js           the frame that creates the runtime
@@ -943,8 +1124,24 @@ src/runtime/         the runtime shared by node and the browser
   data.js            JSON, math, time, base64 and URLs
   date.js            the date and the time
   web.js             the query of an address and the cookies
+  regex.js           the pattern that searches a text
+  intl.js            the languages and the zones
+  bytes.js           the bytes of a text
+  state.js           the state of a page
   dom.js             the markup and the browser
+  mount.js           the difference between two trees
+  events.js          the events of one's own
+  history.js         the address of the page
+  router.js          the routes of the browser
+  timers.js          the timers of the browser
+  storage.js         the notes of the browser
+  files.js           the files of a visitor
+  socket.js          the sockets of the browser
+  observe.js         the screen of the browser
   http.js            the HTTP client
+  highlight.js       the colouring of the code
+  session.js         the sessions of the server
+  middleware.js      the middle pieces of the server
   server.js          the server of a program
 src/sourcemap/       the source map
   mod.rs             the map
@@ -960,8 +1157,16 @@ src/cli/             the commands
   error.rs           build errors with a source frame
   highlight.rs       the colouring of the code in the error page
   output.rs          turning a bundle into runnable output
+  fmt.rs             the shape of the files
+  lint.rs            the smells of a program
+  repl.rs            the prompt
+  explain.rs         the type of an expression
+  docs.rs            the documentation of a program
+  migrate.rs         bringing a program to this version
+  deploy.rs          building the site for a host
 src/builtins.rs      the names the runtime provides
 src/suggest.rs       suggestions for names that are close to a known one
+src/warn.rs          the warnings of the compiler
 tests/               integration tests
   lang.rs            the language
   types.rs           the type checker

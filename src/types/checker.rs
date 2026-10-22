@@ -405,6 +405,44 @@ pub(crate) struct TypeChecker<'a> {
 }
 
 impl TypeChecker<'_> {
+    /// A checker that knows the types of a program but does not check it.
+    ///
+    /// It is used to say the type of an expression, where the mistakes of
+    /// the program do not matter.
+    pub(crate) fn for_explain<'a>(
+        program: &Program,
+        file: &'a str,
+    ) -> Result<TypeChecker<'a>, VeyError> {
+        let enums = collect_enums(program, file)?;
+        let aliases = collect_aliases(program, file, &enums)?;
+        let interfaces = collect_interfaces(program, file, &enums, &aliases)?;
+        let impls = collect_impls(program, file, &aliases)?;
+        let mut checker = TypeChecker {
+            file,
+            aliases,
+            alias_types: HashMap::new(),
+            enums,
+            interfaces,
+            impls,
+            imports: HashMap::new(),
+            scopes: vec![HashMap::new()],
+            type_param_scopes: Vec::new(),
+            type_param_bindings: Vec::new(),
+            type_param_constraints: Vec::new(),
+            components: HashMap::new(),
+            param_scopes: Vec::new(),
+            expected_returns: Vec::new(),
+            collected_returns: Vec::new(),
+        };
+        checker.predeclare_top_level(program)?;
+        Ok(checker)
+    }
+
+    /// The type of an expression.
+    pub(crate) fn infer_public(&mut self, expr: &Expr) -> Result<Type, VeyError> {
+        self.infer_expr(expr)
+    }
+
     pub(crate) fn error(&self, pos: Pos, message: impl Into<String>) -> VeyError {
         VeyError::new(message, self.file, pos.line, pos.col)
     }

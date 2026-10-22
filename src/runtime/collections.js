@@ -106,6 +106,36 @@ function veyCollections(ctx) {
     return toList(list).slice().reverse();
   }
 
+  // A copy of a value that holds nothing of the value it came from.
+  //
+  // The values that cannot be written down, such as a class of the host,
+  // are left as they are.
+  function deepCopy(value, seen) {
+    if (value === null || typeof value !== "object") return value;
+    // The values of an enum never change, so they are shared.
+    if (value.__veyEnum) return value;
+    var done = seen || [];
+    for (var i = 0; i < done.length; i++) {
+      if (done[i][0] === value) return done[i][1];
+    }
+    if (value instanceof Date) return new Date(value.getTime());
+    if (Array.isArray(value)) {
+      var list = [];
+      done.push([value, list]);
+      for (var j = 0; j < value.length; j++) list.push(deepCopy(value[j], done));
+      return list;
+    }
+    if (Object.prototype.toString.call(value) !== "[object Object]") return value;
+    var out = {};
+    done.push([value, out]);
+    for (var key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        out[key] = deepCopy(value[key], done);
+      }
+    }
+    return out;
+  }
+
   ctx.append = append;
   ctx.slice = slice;
   ctx.find = find;
@@ -122,6 +152,7 @@ function veyCollections(ctx) {
   ctx.sum = sum;
   ctx.unique = unique;
   ctx.reverse = reverse;
+  ctx.deepCopy = deepCopy;
 
   return {
     append: append,
@@ -140,5 +171,6 @@ function veyCollections(ctx) {
     sum: sum,
     unique: unique,
     reverse: reverse,
+    deepCopy: deepCopy,
   };
 }

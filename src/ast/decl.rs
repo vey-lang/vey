@@ -122,6 +122,8 @@ pub struct IfLetStmt {
 pub struct WhileStmt {
     pub test: Expr,
     pub body: Block,
+    /// The name of the loop, so that a `break` may name it.
+    pub label: Option<String>,
     pub pos: Pos,
 }
 
@@ -157,6 +159,8 @@ pub struct ForStmt {
     pub ty: Option<TypeExpr>,
     pub iter: Expr,
     pub body: Block,
+    /// The name of the loop, so that a `break` may name it.
+    pub label: Option<String>,
     pub pos: Pos,
 }
 
@@ -164,6 +168,15 @@ pub struct ForStmt {
 pub struct RepeatStmt {
     pub count: Expr,
     pub body: Block,
+    /// The name of the loop, so that a `break` may name it.
+    pub label: Option<String>,
+    pub pos: Pos,
+}
+
+/// A value that is thrown.
+#[derive(Debug, Clone)]
+pub struct ThrowStmt {
+    pub value: Expr,
     pub pos: Pos,
 }
 

@@ -35,9 +35,24 @@ function createVeyRuntime(scope, req) {
   V = Object.assign(V, veyData(ctx));
   V = Object.assign(V, veyDate(ctx));
   V = Object.assign(V, veyWeb(ctx));
+  V = Object.assign(V, veyRegex(ctx));
+  V = Object.assign(V, veyIntl(ctx));
+  V = Object.assign(V, veyBytes(ctx));
+  V = Object.assign(V, veyState(ctx));
   V = Object.assign(V, veyDom(ctx));
+  V = Object.assign(V, veyMount(ctx));
+  V = Object.assign(V, veyEvents(ctx));
+  V = Object.assign(V, veyHistory(ctx));
+  V = Object.assign(V, veyRouter(ctx));
+  V = Object.assign(V, veyTimers(ctx));
+  V = Object.assign(V, veyStorage(ctx));
+  V = Object.assign(V, veyFiles(ctx));
+  V = Object.assign(V, veySocket(ctx));
+  V = Object.assign(V, veyObserve(ctx));
   V = Object.assign(V, veyHttp(ctx));
   V = Object.assign(V, veyHighlight(ctx));
+  V = Object.assign(V, veySession(ctx));
+  V = Object.assign(V, veyMiddleware(ctx));
   V = Object.assign(V, veyServer(ctx));
 
   return V;

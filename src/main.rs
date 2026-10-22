@@ -3,7 +3,10 @@ use std::process::ExitCode;
 
 mod cli;
 
-use cli::{cmd_build, cmd_check, cmd_dev, cmd_new, cmd_run, cmd_test, print_help};
+use cli::{
+    cmd_build, cmd_check, cmd_deploy, cmd_dev, cmd_docs, cmd_explain, cmd_fmt, cmd_lint, cmd_migrate,
+    cmd_new, cmd_repl, cmd_run, cmd_test, print_help,
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -24,6 +27,13 @@ fn run(args: &[String]) -> i32 {
         "dev" => cmd_dev(rest),
         "new" => cmd_new(rest),
         "check" => cmd_check(rest),
+        "fmt" => cmd_fmt(rest),
+        "lint" => cmd_lint(rest),
+        "repl" => cmd_repl(rest),
+        "explain" => cmd_explain(rest),
+        "docs" => cmd_docs(rest),
+        "migrate" => cmd_migrate(rest),
+        "deploy" => cmd_deploy(rest),
         "curate" => {
             eprintln!("'vey curate' was removed. Use 'vey new <directory>' instead.");
             1

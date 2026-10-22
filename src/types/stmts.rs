@@ -333,6 +333,10 @@ impl TypeChecker<'_> {
                 self.infer_expr(&decl.value)?;
                 Ok(())
             }
+            Stmt::Throw(decl) => {
+                self.infer_expr(&decl.value)?;
+                Ok(())
+            }
             Stmt::For(decl) => {
                 let iter_ty = self.infer_expr(&decl.iter)?;
                 // Only a list can be walked through.
@@ -380,7 +384,7 @@ impl TypeChecker<'_> {
                 }
                 Ok(())
             }
-            Stmt::Break(_) | Stmt::Continue(_) => Ok(()),
+            Stmt::Break(_, _) | Stmt::Continue(_, _) => Ok(()),
             Stmt::Try(decl) => {
                 self.check_block(&decl.body)?;
                 if let Some(catch) = &decl.catch {

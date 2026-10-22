@@ -85,6 +85,91 @@ function veyCore(ctx) {
     }
   }
 
+  // The matchers of the tests. They say what is wrong when they fail, so
+  // that a failure may be read without running the test again.
+  function show(value) {
+    if (typeof value === "string") return JSON.stringify(value);
+    try {
+      return JSON.stringify(value);
+    } catch (err) {
+      return String(value);
+    }
+  }
+
+  function assertEquals(actual, expected, message) {
+    if (actual !== expected) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        "expected " + show(expected) + ", found " + show(actual)
+      );
+    }
+  }
+
+  function assertNotEquals(actual, expected, message) {
+    if (actual === expected) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        "did not expect " + show(expected)
+      );
+    }
+  }
+
+  function assertDeepEquals(actual, expected, message) {
+    var a = JSON.stringify(actual);
+    var b = JSON.stringify(expected);
+    if (a !== b) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        "expected " + b + ", found " + a
+      );
+    }
+  }
+
+  function assertContains(haystack, needle, message) {
+    var text = String(haystack);
+    if (text.indexOf(String(needle)) === -1) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        show(text) + " does not hold " + show(needle)
+      );
+    }
+  }
+
+  function assertNotContains(haystack, needle, message) {
+    var text = String(haystack);
+    if (text.indexOf(String(needle)) !== -1) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        show(text) + " holds " + show(needle)
+      );
+    }
+  }
+
+  function assertThrows(fn, message) {
+    var threw = false;
+    try {
+      fn();
+    } catch (err) {
+      threw = true;
+    }
+    if (!threw) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        "the code was expected to throw"
+      );
+    }
+  }
+
+  function assertMatch(text, pattern, message) {
+    var regex = pattern instanceof RegExp ? pattern : new RegExp(String(pattern));
+    if (!regex.test(String(text))) {
+      throw new Error(
+        (message === undefined ? "" : String(message) + ": ") +
+        show(text) + " does not match " + show(pattern)
+      );
+    }
+  }
+
   var pendingTests = 0;
 
   var testKeepAlive = null;
@@ -102,7 +187,18 @@ function veyCore(ctx) {
     }
   }
 
+  // The name of the tests that are run. When it is empty, every test runs.
+  function testFilter() {
+    if (!isNode) return "";
+    var env = nodeModule("node:process").env;
+    return env.VEY_TEST_FILTER || "";
+  }
+
   function test(name, fn) {
+    var filter = testFilter();
+    if (filter && String(name).indexOf(filter) === -1) {
+      return;
+    }
     try {
       var result = fn();
       if (result && typeof result.then === "function") {
@@ -179,6 +275,53 @@ function veyCore(ctx) {
     return Math.min(Math.max(value, min), max);
   }
 
+  // The answer of a function that may fail.
+  //
+  // The value says whether it worked, and what it was: the answer or the
+  // reason it did not work.
+  function ok(value) {
+    return { __veyResult: true, ok: true, value: value, error: null };
+  }
+
+  function err(error) {
+    return { __veyResult: true, ok: false, value: null, error: error };
+  }
+
+  // Hand the failure of a value on.
+  //
+  // The failure is thrown, and the function that is around catches it and
+  // hands it on in turn.
+  function propagate(value) {
+    if (value === null || value === undefined) {
+      var nothing = new Error("there is nothing here");
+      nothing.__veyNothing = true;
+      throw nothing;
+    }
+    if (value && value.__veyResult === true) {
+      if (!value.ok) {
+        var failed = new Error("the call failed");
+        failed.__veyFailure = value.error;
+        throw failed;
+      }
+      return value.value;
+    }
+    return value;
+  }
+
+  // A piece of work that is not finished.
+  function todo(message) {
+    throw new Error(
+      "not finished yet" + (message === undefined ? "" : ": " + String(message))
+    );
+  }
+
+  // A piece of work that is not written.
+  function unimplemented(message) {
+    throw new Error(
+      "not written yet" + (message === undefined ? "" : ": " + String(message))
+    );
+  }
+
   ctx.print = print;
   ctx.input = input;
   ctx.sleep = sleep;
@@ -190,12 +333,25 @@ function veyCore(ctx) {
   ctx.len = len;
   ctx.error = error;
   ctx.assert = assert;
+  ctx.assertEquals = assertEquals;
+  ctx.assertNotEquals = assertNotEquals;
+  ctx.assertDeepEquals = assertDeepEquals;
+  ctx.assertContains = assertContains;
+  ctx.assertNotContains = assertNotContains;
+  ctx.assertThrows = assertThrows;
+  ctx.assertMatch = assertMatch;
   ctx.test = test;
   ctx.all = all;
   ctx.race = race;
   ctx.uuid = uuid;
   ctx.random = random;
   ctx.clamp = clamp;
+  ctx.ok = ok;
+  ctx.err = err;
+  ctx.propagate = propagate;
+  ctx.failure = err;
+  ctx.todo = todo;
+  ctx.unimplemented = unimplemented;
 
   return {
     print: print,
@@ -209,11 +365,24 @@ function veyCore(ctx) {
     len: len,
     error: error,
     assert: assert,
+    assertEquals: assertEquals,
+    assertNotEquals: assertNotEquals,
+    assertDeepEquals: assertDeepEquals,
+    assertContains: assertContains,
+    assertNotContains: assertNotContains,
+    assertThrows: assertThrows,
+    assertMatch: assertMatch,
     test: test,
     all: all,
     race: race,
     uuid: uuid,
     random: random,
     clamp: clamp,
+    ok: ok,
+    err: err,
+    propagate: propagate,
+    failure: err,
+    todo: todo,
+    unimplemented: unimplemented,
   };
 }

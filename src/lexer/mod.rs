@@ -19,6 +19,11 @@ impl Pos {
     pub fn new(line: usize, col: usize) -> Self {
         Self { line, col }
     }
+
+    /// Whether the place comes after the other one.
+    pub fn after(&self, other: &Pos) -> bool {
+        self.line > other.line || (self.line == other.line && self.col >= other.col)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +128,7 @@ pub fn is_keyword(word: &str) -> bool {
             | "enum"
             | "pub"
             | "priv"
+            | "throw"
     )
 }
 
@@ -183,7 +189,7 @@ impl Lexer {
         true
     }
 
-    fn skip_space(&mut self) {
+    fn skip_space(&mut self) -> Result<(), VeyError> {
         self.newline = false;
         loop {
             match self.at(0) {
@@ -207,9 +213,30 @@ impl Lexer {
                     }
                     self.read_comment(&text, pos);
                 }
+                Some('/') if self.at(1) == Some('*') => {
+                    // A comment that may go over several lines.
+                    self.bump();
+                    self.bump();
+                    loop {
+                        match self.at(0) {
+                            None => {
+                                return Err(self.err("the comment is not closed"));
+                            }
+                            Some('*') if self.at(1) == Some('/') => {
+                                self.bump();
+                                self.bump();
+                                break;
+                            }
+                            Some(_) => {
+                                self.bump();
+                            }
+                        }
+                    }
+                }
                 _ => break,
             }
         }
+        Ok(())
     }
 
     /// Read a comment.
@@ -240,7 +267,7 @@ impl Lexer {
     }
 
     pub fn next_token(&mut self) -> Result<Token, VeyError> {
-        self.skip_space();
+        self.skip_space()?;
 
         let start = self.pos;
         let pos = Pos::new(self.line, self.col);
@@ -250,7 +277,7 @@ impl Lexer {
             return Ok(Token::eof(pos, start));
         };
 
-        if c.is_ascii_digit() {
+        if c.is_ascii_digit() || (c == '.' && self.at(1).is_some_and(|c| c.is_ascii_digit())) {
             return Ok(self.read_number(start, pos));
         }
 
@@ -323,12 +350,84 @@ impl Lexer {
     fn read_number(&mut self, start: usize, pos: Pos) -> Token {
         let newline_before = self.newline;
         let mut raw = String::new();
+
+        // A number may be written in another base, as in `0xff`.
+        if self.at(0) == Some('0') {
+            if let Some(mark) = self.at(1) {
+                let radix = match mark {
+                    'x' | 'X' => Some(16),
+                    'b' | 'B' => Some(2),
+                    'o' | 'O' => Some(8),
+                    _ => None,
+                };
+                if let Some(radix) = radix {
+                    self.bump();
+                    self.bump();
+                    let mut digits = String::new();
+                    while let Some(c) = self.at(0) {
+                        if c == '_' {
+                            self.bump();
+                            continue;
+                        }
+                        if !c.is_digit(radix) {
+                            break;
+                        }
+                        digits.push(c);
+                        self.bump();
+                    }
+                    if digits.is_empty() {
+                        return Token {
+                            kind: TokKind::Number,
+                            value: "0".to_string(),
+                            number: 0.0,
+                            parts: Vec::new(),
+                            pos,
+                            start,
+                            end: self.pos,
+                            newline_before,
+                        };
+                    }
+                    let number = u64::from_str_radix(&digits, radix)
+                        .map(|value| value as f64)
+                        .unwrap_or(0.0);
+                    return Token {
+                        kind: TokKind::Number,
+                        value: digits,
+                        number,
+                        parts: Vec::new(),
+                        pos,
+                        start,
+                        end: self.pos,
+                        newline_before,
+                    };
+                }
+            }
+        }
+
         while let Some(c) = self.at(0) {
             if c.is_ascii_digit() {
                 raw.push(c);
                 self.bump();
+            } else if c == '_' {
+                // The digits of a number may be separated by a mark.
+                self.bump();
             } else {
                 break;
+            }
+        }
+        if raw.is_empty() && self.at(0) == Some('.') {
+            // A number may begin with a point, as in `.5`.
+            raw.push('.');
+            self.bump();
+            while let Some(c) = self.at(0) {
+                if c.is_ascii_digit() {
+                    raw.push(c);
+                    self.bump();
+                } else if c == '_' {
+                    self.bump();
+                } else {
+                    break;
+                }
             }
         }
         if self.at(0) == Some('.') && self.at(1).is_some_and(|c| c.is_ascii_digit()) {
@@ -337,6 +436,8 @@ impl Lexer {
             while let Some(c) = self.at(0) {
                 if c.is_ascii_digit() {
                     raw.push(c);
+                    self.bump();
+                } else if c == '_' {
                     self.bump();
                 } else {
                     break;
@@ -361,16 +462,19 @@ impl Lexer {
                     if c.is_ascii_digit() {
                         raw.push(c);
                         self.bump();
+                    } else if c == '_' {
+                        self.bump();
                     } else {
                         break;
                     }
                 }
             }
         }
+        let number = raw.parse().unwrap_or(0.0);
         Token {
             kind: TokKind::Number,
             value: raw.clone(),
-            number: raw.parse().unwrap_or(0.0),
+            number,
             parts: Vec::new(),
             pos,
             start,

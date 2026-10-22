@@ -52,8 +52,9 @@ pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
         Stmt::For(decl) => expr_has_await(&decl.iter) || block_has_await(&decl.body),
         Stmt::Repeat(decl) => expr_has_await(&decl.count) || block_has_await(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_await).unwrap_or(false),
-        Stmt::Break(_)
-        | Stmt::Continue(_)
+        Stmt::Break(_, _)
+        | Stmt::Continue(_, _)
+        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -100,8 +101,9 @@ pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
         Stmt::For(decl) => expr_has_yield(&decl.iter) || block_has_yield(&decl.body),
         Stmt::Repeat(decl) => expr_has_yield(&decl.count) || block_has_yield(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_yield).unwrap_or(false),
-        Stmt::Break(_)
-        | Stmt::Continue(_)
+        Stmt::Break(_, _)
+        | Stmt::Continue(_, _)
+        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -148,8 +150,9 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
         Stmt::For(decl) => expr_has_defer(&decl.iter) || block_has_defer(&decl.body),
         Stmt::Repeat(decl) => expr_has_defer(&decl.count) || block_has_defer(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_defer).unwrap_or(false),
-        Stmt::Break(_)
-        | Stmt::Continue(_)
+        Stmt::Break(_, _)
+        | Stmt::Continue(_, _)
+        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -196,8 +199,9 @@ pub(crate) fn stmt_has_try(stmt: &Stmt) -> bool {
         Stmt::For(decl) => expr_has_try(&decl.iter) || block_has_try(&decl.body),
         Stmt::Repeat(decl) => expr_has_try(&decl.count) || block_has_try(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_try).unwrap_or(false),
-        Stmt::Break(_)
-        | Stmt::Continue(_)
+        Stmt::Break(_, _)
+        | Stmt::Continue(_, _)
+        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)

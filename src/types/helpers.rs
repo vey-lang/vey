@@ -5,7 +5,7 @@ use crate::types::core::{ObjectField, Type};
 
 pub(crate) fn block_always_exits(block: &Block) -> bool {
     match block.body.last() {
-        Some(Stmt::Return(_)) | Some(Stmt::Break(_)) | Some(Stmt::Continue(_)) => true,
+        Some(Stmt::Return(_)) | Some(Stmt::Break(_, _)) | Some(Stmt::Continue(_, _)) => true,
         Some(Stmt::If(decl)) => {
             let then_exits = block_always_exits(&decl.then_block);
             let else_exits = decl
@@ -21,7 +21,7 @@ pub(crate) fn block_always_exits(block: &Block) -> bool {
 /// Whether the statement always leaves the function or the loop.
 pub(crate) fn stmt_always_exits(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
+        Stmt::Return(_) | Stmt::Break(_, _) | Stmt::Continue(_, _) => true,
         Stmt::If(decl) => {
             let then_exits = block_always_exits(&decl.then_block);
             let else_exits = decl

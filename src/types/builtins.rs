@@ -160,6 +160,33 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         )),
         "error" => Some(builtin_function(vec![any()], Type::Never)),
         "assert" => Some(builtin_optional(vec![any(), string()], 1, Type::Void)),
+        "assertEquals" => Some(builtin_optional(
+            vec![any(), any(), string()],
+            2,
+            Type::Void,
+        )),
+        "assertNotEquals" => Some(builtin_optional(
+            vec![any(), any(), string()],
+            2,
+            Type::Void,
+        )),
+        "assertDeepEquals" => Some(builtin_optional(
+            vec![any(), any(), string()],
+            2,
+            Type::Void,
+        )),
+        "assertContains" => Some(builtin_optional(
+            vec![any(), any(), string()],
+            2,
+            Type::Void,
+        )),
+        "assertNotContains" => Some(builtin_optional(
+            vec![any(), any(), string()],
+            2,
+            Type::Void,
+        )),
+        "assertThrows" => Some(builtin_optional(vec![any(), string()], 1, Type::Void)),
+        "assertMatch" => Some(builtin_optional(vec![any(), any(), string()], 2, Type::Void)),
         "test" => Some(builtin_function(vec![string(), any()], Type::Void)),
         "all" | "race" => Some(builtin_function(vec![list(any())], promise())),
         "env" => Some(builtin_optional(
@@ -173,6 +200,9 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             vec![number(), number(), number()],
             number(),
         )),
+        "ok" => Some(builtin_function(vec![any()], any())),
+        "err" => Some(builtin_function(vec![any()], any())),
+        "todo" | "unimplemented" => Some(builtin_optional(vec![string()], 0, Type::Never)),
         "sum" => Some(builtin_function(vec![list(number())], number())),
         "unique" | "reverse" => Some(builtin_function(vec![list_or_text()], list(any()))),
         "html" => Some(builtin_function(vec![any()], string())),

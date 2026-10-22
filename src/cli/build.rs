@@ -6,7 +6,7 @@ use vey::compiler::compile_project;
 
 use crate::cli::args::{parse_args, ParsedArgs};
 use crate::cli::entry::{entry_from, project_root};
-use crate::cli::output::{node_script, replace_extension, report, report_warnings};
+use crate::cli::output::{node_script, print_command_help, replace_extension, report, report_warnings};
 use crate::cli::site::write_site;
 
 /// The folder the site is written to.
@@ -20,6 +20,10 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if parsed.help {
+        print_command_help("build");
+        return 0;
+    }
 
     let node_output = parsed
         .output
@@ -71,6 +75,33 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
                 return 1;
             }
             println!("deploy the {} folder directly.", output.display());
+            0
+        }
+        Err(err) => {
+            eprintln!("{}", err);
+            1
+        }
+    }
+}
+
+/// Build the site of a project into a folder.
+///
+/// The command returns 1 when a page could not be built.
+pub(crate) fn build_site(entry: &std::path::Path, output: &std::path::Path, title: Option<&str>) -> i32 {
+    match write_site(entry, output, title) {
+        Ok(report) => {
+            for page in &report.pages {
+                println!("  {}", output.join(page).display());
+            }
+            if report.assets > 0 {
+                println!("copied {} asset(s) from public/", report.assets);
+            }
+            for (page, err) in &report.failed {
+                eprintln!("cannot build {}: {}", page, err);
+            }
+            if !report.failed.is_empty() {
+                return 1;
+            }
             0
         }
         Err(err) => {

@@ -13,7 +13,7 @@ use vey::compiler::compile_project;
 use crate::cli::args::parse_args;
 use crate::cli::entry::{collect_files, default_title, entry_from, project_root};
 use crate::cli::error::BuildError;
-use crate::cli::output::html_document;
+use crate::cli::output::{html_document, print_command_help};
 use crate::cli::site::{default_404_page, site_files};
 
 /// The folder the pages of a project live in.
@@ -66,6 +66,10 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if parsed.help {
+        print_command_help("dev");
+        return 0;
+    }
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
         Err(err) => {

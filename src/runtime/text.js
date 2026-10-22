@@ -1,6 +1,9 @@
 // The helpers for text.
 function veyText(ctx) {
   var toList = ctx.toList;
+  var utf8Encode = ctx.utf8Encode;
+  var utf8Decode = ctx.utf8Decode;
+  var toBytes = ctx.toBytes;
 
   function join(list, separator) {
     return toList(list).join(separator === undefined ? "" : separator);
@@ -107,6 +110,14 @@ function veyText(ctx) {
           return line.slice(indent);
         })
         .join("\n");
+    },
+    // The bytes of a text, so that the binary of a program is a list.
+    encode: function (value) {
+      return utf8Encode(value);
+    },
+    // The text of the bytes.
+    decode: function (value) {
+      return utf8Decode(toBytes(value));
     }
   };
 

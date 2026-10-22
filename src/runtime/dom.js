@@ -48,7 +48,34 @@ function veyDom(ctx) {
       var value = props[key];
       if (value === null || value === undefined || value === false) continue;
       if (key.indexOf("on") === 0 && typeof value === "function") {
-        el.addEventListener(key.slice(2).toLowerCase(), value);
+        var name = key.slice(2).toLowerCase();
+        el.addEventListener(name, value);
+        // The listener is kept, so that a page that is changed in place can
+        // move the listener of the new node to the node that stays.
+        if (!el.__veyListeners) el.__veyListeners = {};
+        el.__veyListeners[name] = value;
+        continue;
+      }
+      if (key === "key") {
+        // The name of an item of a list, so that the list may be changed and
+        // put in another order without trouble.
+        Object.defineProperty(el, "__veyKey", {
+          value: String(value),
+          writable: true,
+          enumerable: false,
+          configurable: true
+        });
+        continue;
+      }
+      if (key === "ref") {
+        // A reference to the node, so that the program may hold it.
+        Object.defineProperty(el, "__veyRef", {
+          value: value,
+          writable: true,
+          enumerable: false,
+          configurable: true
+        });
+        if (value && typeof value.set === "function") value.set(el);
         continue;
       }
       if (key === "class") {
@@ -118,6 +145,9 @@ function veyDom(ctx) {
       var value = props[key];
       if (value === null || value === undefined || value === false) continue;
       if (key.indexOf("on") === 0 || typeof value === "function") continue;
+      // The key of an item and the reference to a node are of the program,
+      // not of the page.
+      if (key === "key" || key === "ref") continue;
       if (key === "style" && typeof value === "object") {
         var styles = ownProps(value);
         var css = "";
@@ -216,6 +246,7 @@ function veyDom(ctx) {
   ctx.cls = cls;
   ctx.clipboard = clipboard;
   ctx.title = title;
+  ctx.toDom = toDom;
 
   return {
     h: h,

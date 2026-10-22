@@ -377,7 +377,8 @@ impl Codegen {
             }
             Stmt::While(decl) => {
                 let test = self.gen_expr(&decl.test)?;
-                self.emit(&format!("while ({}) {{", test));
+                let label = decl.label.as_ref().map(|name| format!("{}: ", name)).unwrap_or_default();
+                self.emit(&format!("{}while ({}) {{", label, test));
                 self.indent += 1;
                 self.gen_block(&decl.body)?;
                 self.indent -= 1;
@@ -435,7 +436,12 @@ impl Codegen {
             Stmt::For(decl) => {
                 let iter = self.gen_expr(&decl.iter)?;
                 let pattern = self.gen_binding_pattern(&decl.pattern)?;
-                self.emit(&format!("for (let {} of {}) {{", pattern, iter));
+                let label = decl
+                    .label
+                    .as_ref()
+                    .map(|name| format!("{}: ", name))
+                    .unwrap_or_default();
+                self.emit(&format!("{}for (let {} of {}) {{", label, pattern, iter));
                 self.indent += 1;
                 self.push_scope();
                 for (name, _) in decl.pattern.bindings() {
@@ -454,10 +460,15 @@ impl Codegen {
                 let index = format!("__i{}", slot);
                 let limit = format!("__n{}", slot);
                 let count = self.gen_expr(&decl.count)?;
+                let label = decl
+                    .label
+                    .as_ref()
+                    .map(|name| format!("{}: ", name))
+                    .unwrap_or_default();
                 self.emit(&format!("const {} = ({});", limit, count));
                 self.emit(&format!(
-                    "for (let {} = 0; {} < {}; {}++) {{",
-                    index, index, limit, index
+                    "{}for (let {} = 0; {} < {}; {}++) {{",
+                    label, index, index, limit, index
                 ));
                 self.indent += 1;
                 self.gen_block(&decl.body)?;
@@ -471,8 +482,18 @@ impl Codegen {
                 }
                 None => self.emit("return;"),
             },
-            Stmt::Break(_) => self.emit("break;"),
-            Stmt::Continue(_) => self.emit("continue;"),
+            Stmt::Break(label, _) => match label {
+                Some(label) => self.emit(&format!("break {};", label)),
+                None => self.emit("break;"),
+            },
+            Stmt::Continue(label, _) => match label {
+                Some(label) => self.emit(&format!("continue {};", label)),
+                None => self.emit("continue;"),
+            },
+            Stmt::Throw(decl) => {
+                let value = self.gen_expr(&decl.value)?;
+                self.emit(&format!("throw {};", value));
+            }
             Stmt::Try(decl) => {
                 self.emit("try {");
                 self.indent += 1;

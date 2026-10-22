@@ -8,7 +8,7 @@ use vey::compiler::compile_project;
 use crate::cli::args::parse_args;
 use crate::cli::dev::{serve, DEFAULT_PORT};
 use crate::cli::entry::{collect_vey_files, default_title, entry_from};
-use crate::cli::output::{node_script, report, report_warnings, temp_file};
+use crate::cli::output::{node_script, print_command_help, report, report_warnings, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
     let parsed = match parse_args(args) {
@@ -18,6 +18,10 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if parsed.help {
+        print_command_help("run");
+        return 0;
+    }
     // The page that is served is found the same way as everywhere else.
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
@@ -51,6 +55,10 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if parsed.help {
+        print_command_help("test");
+        return 0;
+    }
     let inputs: Vec<PathBuf> = if parsed.files.is_empty() {
         let tests = PathBuf::from("tests");
         if tests.is_dir() {
@@ -109,6 +117,7 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             .arg(&temp)
             .env("VEY_TEST", "1")
             .envs(node_path(file))
+            .envs(test_filter(&parsed))
             .status();
         let _ = fs::remove_file(&temp);
 
@@ -140,6 +149,10 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if parsed.help {
+        print_command_help("check");
+        return 0;
+    }
     let entry = match entry_from(&parsed.files) {
         Ok(entry) => entry,
         Err(err) => {
@@ -182,6 +195,14 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
     } else {
         eprintln!("{} of {} page(s) could not be checked", failed.len(), pages);
         1
+    }
+}
+
+/// The name of the tests that are run, as the runtime wants it.
+fn test_filter(parsed: &crate::cli::args::ParsedArgs) -> Vec<(String, String)> {
+    match &parsed.filter {
+        Some(filter) => vec![("VEY_TEST_FILTER".to_string(), filter.clone())],
+        None => Vec::new(),
     }
 }
 
