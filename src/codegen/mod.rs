@@ -7,10 +7,13 @@ mod markup;
 
 use crate::ast::*;
 use crate::builtins::BUILTINS;
+use crate::lexer::Pos;
+use crate::sourcemap::marker;
+use crate::types::core::EnumInfo;
 use crate::VeyError;
 
 pub(crate) use awaits::block_has_await;
-pub(crate) use js::{build_enum_map, js_key, js_string};
+pub(crate) use js::{js_key, js_string};
 
 pub struct Options {
     pub file: String,
@@ -19,6 +22,13 @@ pub struct Options {
     /// The packages of npm that the program uses, by their alias.
     pub packages: Vec<(String, String)>,
     pub exports: Vec<String>,
+    /// The file of the program among the files of the bundle.
+    ///
+    /// The mark of every piece of code says which file it came from, so that
+    /// a runtime error points at the right one.
+    pub source: usize,
+    /// The enums of the program, described by the checker.
+    pub enums: std::collections::HashMap<String, EnumInfo>,
 }
 
 impl Options {
@@ -29,21 +39,22 @@ impl Options {
             deps: Vec::new(),
             packages: Vec::new(),
             exports: Vec::new(),
+            source: 0,
+            enums: std::collections::HashMap::new(),
         }
     }
 }
 
 pub struct Generated {
     pub code: String,
-    pub lines: Vec<Option<usize>>,
 }
 
 pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError> {
     let mut codegen = Codegen {
         file: opts.file.clone(),
         out: String::new(),
-        lines: Vec::new(),
-        current_line: 1,
+        source: opts.source,
+        pending: None,
         indent: 0,
         scopes: vec![HashSet::new()],
         temp: 0,
@@ -51,20 +62,21 @@ pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError
         packages: opts.packages.clone(),
         module: opts.module,
         exports: opts.exports.clone(),
-        enums: build_enum_map(program),
+        enums: opts.enums.clone(),
     };
     codegen.run(program)?;
     Ok(Generated {
         code: codegen.out,
-        lines: codegen.lines,
     })
 }
 
 struct Codegen {
     file: String,
     out: String,
-    lines: Vec<Option<usize>>,
-    current_line: usize,
+    /// The file of the program among the files of the bundle.
+    source: usize,
+    /// The mark of the statement that is being written.
+    pending: Option<Pos>,
     indent: usize,
     scopes: Vec<HashSet<String>>,
     temp: usize,
@@ -72,7 +84,7 @@ struct Codegen {
     packages: Vec<(String, String)>,
     module: bool,
     exports: Vec<String>,
-    enums: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
+    enums: std::collections::HashMap<String, EnumInfo>,
 }
 
 impl Codegen {
@@ -80,7 +92,18 @@ impl Codegen {
         VeyError::new(message, self.file.clone(), 1, 1)
     }
 
+    /// The mark that says where a piece of the code came from.
+    fn mark(&self, pos: Pos) -> String {
+        marker(self.source, pos)
+    }
+
     fn emit(&mut self, text: &str) {
+        let pos = self.pending.take();
+        self.emit_marked(pos, text);
+    }
+
+    /// Write a line of code, with a mark that says where it came from.
+    fn emit_marked(&mut self, pos: Option<Pos>, text: &str) {
         let pad = "  ".repeat(self.indent);
         for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
@@ -88,12 +111,15 @@ impl Codegen {
             } else {
                 self.out.push_str(&pad);
             }
+            if i == 0 {
+                if let Some(pos) = pos {
+                    self.out.push_str(&self.mark(pos));
+                }
+            }
             self.out.push_str(line);
-            self.lines.push(Some(self.current_line));
         }
         self.out.push('\n');
     }
-
     fn push_scope(&mut self) {
         self.scopes.push(HashSet::new());
     }
@@ -155,19 +181,24 @@ impl Codegen {
         F: FnOnce(&mut Self) -> Result<(), VeyError>,
     {
         let outer = std::mem::take(&mut self.out);
-        let outer_lines = std::mem::take(&mut self.lines);
         let outer_indent = self.indent;
         self.indent += 1;
         let result = body(self);
         let captured = std::mem::replace(&mut self.out, outer);
-        self.lines = outer_lines;
         self.indent = outer_indent;
         result?;
         Ok(captured)
     }
 
     fn gen_stmt(&mut self, stmt: &Stmt) -> Result<(), VeyError> {
-        self.current_line = stmt.pos().line;
+        // The mark of the statement is written with the first line of it.
+        self.pending = Some(stmt.pos());
+        let result = self.gen_stmt_inner(stmt);
+        self.pending = None;
+        result
+    }
+
+    fn gen_stmt_inner(&mut self, stmt: &Stmt) -> Result<(), VeyError> {
         match stmt {
             Stmt::Var(decl) => {
                 let init = match &decl.init {

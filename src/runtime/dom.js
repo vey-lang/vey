@@ -39,13 +39,7 @@ function veyDom(ctx) {
       return el;
     }
 
-    ctx.h = h;
-  ctx.html = html;
-  ctx.raw = raw;
-  ctx.bind = bind;
-  ctx.cls = cls;
-
-  return { __vey: true, tag: tag, props: attrs, children: kids };
+    return { __vey: true, tag: tag, props: attrs, children: kids };
   }
 
   function applyProps(el, attrs) {
@@ -165,6 +159,47 @@ function veyDom(ctx) {
     return el;
   }
 
+  // The title of the page, which the tab of the browser shows.
+  function title(text) {
+    if (!doc) return;
+    doc.title = String(text);
+  }
+
+  // The clipboard of the browser, so that a command may be copied.
+  var clipboard = {
+    write: function (text) {
+      var view = doc && doc.defaultView;
+      var board = view && view.navigator && view.navigator.clipboard;
+      if (board && board.writeText) {
+        return board.writeText(String(text));
+      }
+      // A browser that has no clipboard of its own still copies with the old
+      // command of the page, as long as the text is in a field of its own.
+      if (!doc || !doc.body) {
+        return Promise.reject(veyError("the clipboard is not available"));
+      }
+      var area = doc.createElement("textarea");
+      area.value = String(text);
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.top = "0";
+      area.style.opacity = "0";
+      doc.body.appendChild(area);
+      area.select();
+      var copied = false;
+      try {
+        copied = !!doc.execCommand("copy");
+      } catch (err) {
+        copied = false;
+      }
+      doc.body.removeChild(area);
+      if (!copied) {
+        return Promise.reject(veyError("the clipboard is not available"));
+      }
+      return Promise.resolve();
+    }
+  };
+
   function cls() {
     var parts = [];
     for (var i = 0; i < arguments.length; i++) {
@@ -174,11 +209,21 @@ function veyDom(ctx) {
     return parts.join(" ");
   }
 
+  ctx.h = h;
+  ctx.html = html;
+  ctx.raw = raw;
+  ctx.bind = bind;
+  ctx.cls = cls;
+  ctx.clipboard = clipboard;
+  ctx.title = title;
+
   return {
     h: h,
     html: html,
     raw: raw,
     bind: bind,
     cls: cls,
+    clipboard: clipboard,
+    title: title,
   };
 }

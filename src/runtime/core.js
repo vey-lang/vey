@@ -15,7 +15,7 @@ function veyCore(ctx) {
 
   function input(prompt) {
     if (!isNode) throw veyError("input() is only available in Node.");
-    if (prompt) process.stdout.write(String(prompt));
+    if (prompt) nodeModule("node:process").stdout.write(String(prompt));
     var fs = nodeModule("node:fs");
     // Read one byte at a time so that only the current line is consumed and
     // the rest of stdin stays available for the next call.
@@ -134,7 +134,7 @@ function veyCore(ctx) {
   function failTest(name, err) {
     log.error("fail " + name);
     log.error(testFailure(err));
-    if (isNode && typeof process !== "undefined") process.exitCode = 1;
+    if (isNode) nodeModule("node:process").exitCode = 1;
   }
 
   function testFailure(err) {

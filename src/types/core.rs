@@ -35,20 +35,34 @@ pub(crate) struct Alias {
 }
 
 #[derive(Clone)]
-pub(crate) struct EnumInfo {
-    pub(crate) variants: Vec<EnumVariantInfo>,
+pub struct EnumInfo {
+    pub variants: Vec<EnumVariantInfo>,
 }
 
 #[derive(Clone)]
-pub(crate) struct EnumVariantInfo {
-    pub(crate) name: String,
-    pub(crate) fields: Vec<EnumFieldInfo>,
+pub struct EnumVariantInfo {
+    pub name: String,
+    pub fields: Vec<EnumFieldInfo>,
 }
 
 #[derive(Clone)]
-pub(crate) struct EnumFieldInfo {
-    pub(crate) name: String,
-    pub(crate) ty: Option<TypeExpr>,
+pub struct EnumFieldInfo {
+    pub name: String,
+    pub ty: Option<TypeExpr>,
+}
+
+impl EnumInfo {
+    /// The variant of the enum with this name.
+    pub fn variant(&self, name: &str) -> Option<&EnumVariantInfo> {
+        self.variants.iter().find(|variant| variant.name == name)
+    }
+
+    /// The names of the fields of a variant, in the order they were written.
+    pub fn field_names(&self, variant: &str) -> Vec<String> {
+        self.variant(variant)
+            .map(|variant| variant.fields.iter().map(|field| field.name.clone()).collect())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

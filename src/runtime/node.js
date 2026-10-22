@@ -7,9 +7,9 @@ function veyNode(ctx) {
   var veyError = ctx.veyError;
 
   function env(name, fallback) {
-    var value = isNode && typeof process !== "undefined" && process.env
-      ? process.env[name]
-      : undefined;
+    // The module of Node is asked for the environment, not the ambient
+    // `process`, which a bundler or a test runner may have replaced.
+    var value = isNode ? nodeModule("node:process").env[name] : undefined;
     if (value === undefined) {
       return fallback === undefined ? null : fallback;
     }

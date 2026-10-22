@@ -36,13 +36,7 @@ function veyData(ctx) {
       }
       var query = {};
       parsed.searchParams.forEach(function (item, key) { query[key] = item; });
-      ctx.json = json;
-  ctx.math = math;
-  ctx.time = time;
-  ctx.base64 = base64;
-  ctx.url = url;
-
-  return {
+      return {
         href: parsed.href,
         protocol: parsed.protocol,
         host: parsed.host,
@@ -81,6 +75,12 @@ function veyData(ctx) {
     now: function () { return Date.now(); },
     iso: function () { return new Date().toISOString(); }
   };
+
+  ctx.json = json;
+  ctx.math = math;
+  ctx.time = time;
+  ctx.base64 = base64;
+  ctx.url = url;
 
   return {
     json: json,

@@ -32,6 +32,9 @@ pub struct ModuleTypeEnv {
     /// The parameters of the exported components, so that a component of
     /// another module is checked as well.
     pub components: HashMap<String, Vec<ComponentParam>>,
+    /// The enums of the module, so that the code generator does not have to
+    /// describe them a second time.
+    pub enums: HashMap<String, EnumInfo>,
 }
 
 pub fn check(
@@ -58,6 +61,9 @@ pub fn check(
     checker.check_program(program)?;
     // build the module's exported type environment
     let mut env = ModuleTypeEnv::default();
+    // The enums of the module are described once, here. The code generator
+    // uses the same description.
+    env.enums = checker.enums.clone();
     for stmt in &program.body {
         match stmt {
             Stmt::Type(decl) if decl.exported => {

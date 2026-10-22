@@ -14,7 +14,9 @@ use crate::ast::*;
 use crate::lexer::{Lexer, Pos, TokKind, Token};
 use crate::VeyError;
 
-const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
+const ASSIGN_OPS: &[&str] = &[
+    "=", "+=", "-=", "*=", "/=", "%=", "**=", "??=", "&=", "|=", "^=", "<<=", ">>=",
+];
 
 #[derive(Clone)]
 pub struct Parser {
@@ -123,6 +125,35 @@ impl Parser {
         self.advance()
     }
 
+    /// Take one `>` of the marks that close a type.
+    ///
+    /// The lexer reads `>>` as one mark, because it is the shift of the
+    /// language. Two types that close one after the other, such as
+    /// `Box<Maybe<number>>`, need both of them, so one is kept for the next
+    /// time.
+    pub(crate) fn eat_angle(&mut self) -> Result<bool, VeyError> {
+        if self.is_op(">") {
+            self.advance()?;
+            return Ok(true);
+        }
+        if self.is_op(">>") {
+            let mut token = self.tok.clone();
+            token.value = ">".to_string();
+            token.start += 1;
+            self.tok = token;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Take the mark that closes a type.
+    pub(crate) fn expect_angle(&mut self) -> Result<(), VeyError> {
+        if self.eat_angle()? {
+            return Ok(());
+        }
+        Err(self.error("expected '>'"))
+    }
+
     fn expect_punct(&mut self, p: &str) -> Result<Token, VeyError> {
         if !self.is_punct(p) {
             return Err(self.error(format!("expected '{}'", p)));
@@ -173,6 +204,12 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<Stmt, VeyError> {
         self.enter()?;
+        // A semicolon is a separator between statements, and it may be left
+        // out. The ones that stand alone are read here, so that a line of
+        // semicolons is not a mistake.
+        while self.is_punct(";") {
+            self.advance()?;
+        }
         let result = self.parse_statement_inner();
         self.leave();
         result
@@ -440,7 +477,7 @@ impl Parser {
         if params.is_empty() {
             return Err(self.error("expected a type parameter"));
         }
-        self.expect_op(">")?;
+        self.expect_angle()?;
         Ok(params)
     }
 
@@ -572,7 +609,7 @@ impl Parser {
 
     fn parse_return(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("return")?;
-        let value = if self.is_punct("}") || self.tok.kind == TokKind::Eof {
+        let value = if self.is_punct("}") || self.is_punct(";") || self.tok.kind == TokKind::Eof {
             None
         } else {
             Some(self.parse_expression()?)

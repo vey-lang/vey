@@ -56,7 +56,6 @@ const EVENT_ATTRS: &[(&str, &str)] = &[
     ("mouseout", "onmouseout"),
 ];
 
-use crate::ast::*;
 use crate::parser::is_ident;
 
 pub(crate) fn event_attr(name: &str) -> &str {
@@ -99,23 +98,4 @@ pub(crate) fn js_key(key: &str) -> String {
     } else {
         js_string(key)
     }
-}
-
-pub(crate) fn build_enum_map(
-    program: &Program,
-) -> std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> {
-    let mut out = std::collections::HashMap::new();
-    for stmt in &program.body {
-        if let Stmt::Enum(decl) = stmt {
-            let mut variants = std::collections::HashMap::new();
-            for v in &decl.variants {
-                variants.insert(
-                    v.name.clone(),
-                    v.fields.iter().map(|f| f.name.clone()).collect(),
-                );
-            }
-            out.insert(decl.name.clone(), variants);
-        }
-    }
-    out
 }

@@ -1,7 +1,7 @@
 //! The parsing of expressions.
 
 use crate::ast::*;
-use crate::lexer::{Pos, TokKind};
+use crate::lexer::{Lexer, Pos, TokKind, Token};
 use crate::VeyError;
 
 use super::Parser;
@@ -87,8 +87,52 @@ impl Parser {
     }
 
     pub(crate) fn parse_comparison(&mut self) -> Result<Expr, VeyError> {
-        let mut left = self.parse_range()?;
+        let mut left = self.parse_bitwise_or()?;
         while self.is_op("<") || self.is_op("<=") || self.is_op(">") || self.is_op(">=") {
+            let op_tok = self.advance()?;
+            let right = self.parse_bitwise_or()?;
+            left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
+        }
+        Ok(left)
+    }
+
+    /// The bitwise family, from the loosest to the tightest.
+    ///
+    /// A comparison binds tighter than a bitwise mark, the way it does in
+    /// JavaScript, so `a < b & c` is `(a < b) & c`.
+    pub(crate) fn parse_bitwise_or(&mut self) -> Result<Expr, VeyError> {
+        let mut left = self.parse_bitwise_xor()?;
+        while self.is_op("|") {
+            let op_tok = self.advance()?;
+            let right = self.parse_bitwise_xor()?;
+            left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
+        }
+        Ok(left)
+    }
+
+    pub(crate) fn parse_bitwise_xor(&mut self) -> Result<Expr, VeyError> {
+        let mut left = self.parse_bitwise_and()?;
+        while self.is_op("^") {
+            let op_tok = self.advance()?;
+            let right = self.parse_bitwise_and()?;
+            left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
+        }
+        Ok(left)
+    }
+
+    pub(crate) fn parse_bitwise_and(&mut self) -> Result<Expr, VeyError> {
+        let mut left = self.parse_shift()?;
+        while self.is_op("&") {
+            let op_tok = self.advance()?;
+            let right = self.parse_shift()?;
+            left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
+        }
+        Ok(left)
+    }
+
+    pub(crate) fn parse_shift(&mut self) -> Result<Expr, VeyError> {
+        let mut left = self.parse_range()?;
+        while self.is_op("<<") || self.is_op(">>") {
             let op_tok = self.advance()?;
             let right = self.parse_range()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -146,6 +190,10 @@ impl Parser {
             let pos = self.advance()?.pos;
             return Ok(Expr::Unary("-".into(), Box::new(self.parse_unary()?), pos));
         }
+        if self.is_op("!") {
+            let pos = self.advance()?.pos;
+            return Ok(Expr::Unary("!".into(), Box::new(self.parse_unary()?), pos));
+        }
         if self.is_kw("not") {
             let pos = self.advance()?.pos;
             return Ok(Expr::Unary("!".into(), Box::new(self.parse_unary()?), pos));
@@ -197,22 +245,13 @@ impl Parser {
                 let pos = self.tok.pos;
                 let args = self.parse_args()?;
                 expr = Expr::Call(Box::new(expr), args, false, pos);
-            } else if self.is_op("<") {
-                // The call may name its type arguments, as in
-                // `parse<number>(text)`. When the text after the `<` is not a
-                // list of types it is a comparison instead.
-                let saved = self.clone();
-                match self.try_parse_type_arguments() {
-                    Ok(Some(type_args)) if self.is_punct("(") => {
-                        let pos = self.tok.pos;
-                        let args = self.parse_args()?;
-                        expr = Expr::CallGeneric(Box::new(expr), type_args, args, false, pos);
-                    }
-                    _ => {
-                        *self = saved;
-                        break;
-                    }
-                }
+            } else if self.is_op("<") && self.type_arguments_ahead() {
+                // The call names its type arguments, as in
+                // `parse<number>(text)`.
+                let type_args = self.parse_type_arguments()?;
+                let pos = self.tok.pos;
+                let args = self.parse_args()?;
+                expr = Expr::CallGeneric(Box::new(expr), type_args, args, false, pos);
             } else {
                 break;
             }
@@ -220,32 +259,101 @@ impl Parser {
         Ok(expr)
     }
 
-    /// Read the type arguments of a call, if the text is a list of types.
-    pub(crate) fn try_parse_type_arguments(&mut self) -> Result<Option<Vec<TypeExpr>>, VeyError> {
-        if !self.is_op("<") {
-            return Ok(None);
+    /// Whether the `<` that follows names the type arguments of a call.
+    ///
+    /// The tokens are read with a copy of the lexer, so that the parser
+    /// itself is never copied. A comparison such as `a < b > (c)` is not a
+    /// call with type arguments, because the name between the marks is not
+    /// the name of a type.
+    pub(crate) fn type_arguments_ahead(&self) -> bool {
+        let mut lexer = self.lexer.clone();
+        // The token that follows the "<".
+        let mut token = match lexer.next_token() {
+            Ok(token) => token,
+            Err(_) => return false,
+        };
+        // How many marks are open inside the outermost one.
+        let mut depth = 0usize;
+        // Whether the token starts a type argument.
+        let mut starts = true;
+
+        loop {
+            if token.kind == TokKind::Eof {
+                return false;
+            }
+            // Whether the token is a part of the shape of a type and not the
+            // name of one.
+            let mut shape = false;
+            match token.value.as_str() {
+                "<" => {
+                    depth += 1;
+                    shape = true;
+                    starts = true;
+                }
+                ">" => {
+                    if depth == 0 {
+                        return self.call_follows(&mut lexer);
+                    }
+                    depth -= 1;
+                    shape = true;
+                }
+                // Two marks at once: the first closes the innermost one and
+                // the second the one around it.
+                ">>" => {
+                    if depth == 0 {
+                        return self.call_follows(&mut lexer);
+                    }
+                    depth = depth.saturating_sub(2);
+                    if depth == 0 {
+                        return self.call_follows(&mut lexer);
+                    }
+                    shape = true;
+                }
+                "," if depth == 0 => {
+                    starts = true;
+                    shape = true;
+                }
+                _ => {}
+            }
+            if !shape {
+                if starts {
+                    if !starts_a_type(&token) {
+                        return false;
+                    }
+                    starts = false;
+                } else if !is_type_token(&token) {
+                    return false;
+                }
+            }
+            token = match lexer.next_token() {
+                Ok(token) => token,
+                Err(_) => return false,
+            };
         }
+    }
+
+    /// Whether a call follows the type arguments.
+    fn call_follows(&self, lexer: &mut Lexer) -> bool {
+        match lexer.next_token() {
+            Ok(token) => token.kind == TokKind::Punct && token.value == "(",
+            Err(_) => false,
+        }
+    }
+
+    /// Read the type arguments of a call.
+    pub(crate) fn parse_type_arguments(&mut self) -> Result<Vec<TypeExpr>, VeyError> {
         self.advance()?;
         let mut args = Vec::new();
-        while !self.is_op(">") {
-            if self.tok.kind == TokKind::Eof {
-                return Ok(None);
-            }
-            match self.parse_type() {
-                Ok(ty) => args.push(ty),
-                Err(_) => return Ok(None),
-            }
+        while !self.is_op(">") && !self.is_op(">>") {
+            args.push(self.parse_type()?);
             if self.is_punct(",") {
                 self.advance()?;
             } else {
                 break;
             }
         }
-        if !self.is_op(">") {
-            return Ok(None);
-        }
-        self.advance()?;
-        Ok(Some(args))
+        self.expect_angle()?;
+        Ok(args)
     }
 
     pub(crate) fn parse_args(&mut self) -> Result<Vec<Expr>, VeyError> {
@@ -625,5 +733,50 @@ fn pattern_pos(pattern: &BindingPattern) -> Pos {
         BindingPattern::Name { pos, .. }
         | BindingPattern::Array { pos, .. }
         | BindingPattern::Object { pos, .. } => *pos,
+    }
+}
+
+/// The names of the types that the language knows.
+const BUILTIN_TYPE_NAMES: &[&str] = &[
+    "any",
+    "number",
+    "string",
+    "bool",
+    "null",
+    "void",
+    "never",
+    "unknown",
+    "object",
+];
+
+/// Whether a token may be part of a type.
+fn is_type_token(token: &Token) -> bool {
+    match token.kind {
+        TokKind::Ident | TokKind::Keyword => true,
+        TokKind::Punct => matches!(
+            token.value.as_str(),
+            "[" | "]" | "{" | "}" | "," | ":" | "."
+        ),
+        TokKind::Op => matches!(token.value.as_str(), "<" | ">" | ">>" | "|" | "?"),
+        _ => false,
+    }
+}
+
+/// Whether a token may start a type.
+///
+/// The name of a type of the program starts with a capital letter, the way
+/// the names of the types are written. A name that is neither that nor one
+/// of the types of the language is a value, and a value between the marks of
+/// a call is a comparison.
+fn starts_a_type(token: &Token) -> bool {
+    match token.kind {
+        TokKind::Ident => {
+            let name = token.value.as_str();
+            BUILTIN_TYPE_NAMES.contains(&name)
+                || name.chars().next().is_some_and(|c| c.is_uppercase())
+        }
+        TokKind::Keyword => BUILTIN_TYPE_NAMES.contains(&token.value.as_str()),
+        TokKind::Punct => matches!(token.value.as_str(), "[" | "{" | "("),
+        _ => false,
     }
 }

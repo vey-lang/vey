@@ -83,7 +83,7 @@ impl Parser {
                 if self.is_op("<") {
                     self.advance()?;
                     let mut args = Vec::new();
-                    while !self.is_op(">") {
+                    while !self.is_op(">") && !self.is_op(">>") {
                         args.push(self.parse_type()?);
                         if self.is_punct(",") {
                             self.advance()?;
@@ -94,7 +94,7 @@ impl Parser {
                     if args.is_empty() {
                         return Err(self.error("expected a type argument"));
                     }
-                    self.expect_op(">")?;
+                    self.expect_angle()?;
                     return Ok(TypeExpr::Generic(
                         format!("{}.{}", token.value, second),
                         args,
@@ -106,7 +106,7 @@ impl Parser {
             if self.is_op("<") {
                 self.advance()?;
                 let mut args = Vec::new();
-                while !self.is_op(">") {
+                while !self.is_op(">") && !self.is_op(">>") {
                     args.push(self.parse_type()?);
                     if self.is_punct(",") {
                         self.advance()?;
@@ -117,7 +117,7 @@ impl Parser {
                 if args.is_empty() {
                     return Err(self.error("expected a type argument"));
                 }
-                self.expect_op(">")?;
+                self.expect_angle()?;
                 return Ok(TypeExpr::Generic(token.value, args, token.pos));
             }
             return Ok(TypeExpr::Name(token.value, token.pos));

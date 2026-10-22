@@ -8,7 +8,17 @@ use super::js::{format_number, js_key, js_string};
 use super::Codegen;
 
 impl Codegen {
+    /// The code of an expression, with a mark that says where it came from.
+    ///
+    /// The mark of the expression that is inside another one comes first in
+    /// the line, so that a debugger that looks for the last mark before a
+    /// column finds the inner one.
     pub(crate) fn gen_expr(&mut self, expr: &Expr) -> Result<String, VeyError> {
+        let text = self.gen_expr_inner(expr)?;
+        Ok(format!("{}{}", self.mark(expr.pos()), text))
+    }
+
+    pub(crate) fn gen_expr_inner(&mut self, expr: &Expr) -> Result<String, VeyError> {
         match expr {
             Expr::Number(value, _) => Ok(format_number(*value)),
             Expr::String(parts, _) => Ok(self.gen_string(parts)?),
@@ -73,7 +83,7 @@ impl Codegen {
                 }
             }
             // The type arguments are only used by the checker and are erased.
-            Expr::CallGeneric(callee, _, args, optional, _) => self.gen_expr(&Expr::Call(
+            Expr::CallGeneric(callee, _, args, optional, _) => self.gen_expr_inner(&Expr::Call(
                 callee.clone(),
                 args.clone(),
                 *optional,
@@ -320,8 +330,7 @@ impl Codegen {
                     let variant_fields = codegen
                         .enums
                         .get(enum_name)
-                        .and_then(|variants| variants.get(variant))
-                        .cloned()
+                        .map(|info| info.field_names(variant))
                         .unwrap_or_default();
                     let mut positional = 0usize;
                     let mut taken: Vec<(String, String)> = Vec::new();

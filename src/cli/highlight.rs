@@ -19,7 +19,6 @@ pub(crate) fn highlight(line: &str) -> String {
                 // A text, with the interpolations inside it.
                 let quote = c;
                 let mut text = String::from(quote);
-                let mut done = false;
                 while let Some(next) = chars.next() {
                     text.push(next);
                     if next == '\\' {
@@ -29,11 +28,9 @@ pub(crate) fn highlight(line: &str) -> String {
                         continue;
                     }
                     if next == quote {
-                        done = true;
                         break;
                     }
                 }
-                let _ = done;
                 out.push_str(&format!("<span class=\"str\">{}</span>", escape(&text)));
             }
             c if c.is_ascii_digit() => {

@@ -58,9 +58,17 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
                 println!("copied {} asset(s) from public/", report.assets);
             }
             // A page that cannot be built is reported, but the others are
-            // still written.
+            // still written. The command fails, so that a pipeline that
+            // builds a site notices the broken page.
             for (page, err) in &report.failed {
                 eprintln!("cannot build {}: {}", page, err);
+            }
+            if !report.failed.is_empty() {
+                eprintln!(
+                    "{} page(s) could not be built.",
+                    report.failed.len()
+                );
+                return 1;
             }
             println!("deploy the {} folder directly.", output.display());
             0

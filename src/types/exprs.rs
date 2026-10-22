@@ -293,7 +293,12 @@ impl TypeChecker<'_> {
                                     };
                                     self.declare(&b.name, ty);
                                 }
-                                covered.insert(format!("{}.{}", enum_name, variant));
+                                // An arm with a condition does not cover its
+                                // variant on its own: the value may fall
+                                // through to the next arm.
+                                if arm.guard.is_none() {
+                                    covered.insert(format!("{}.{}", enum_name, variant));
+                                }
                             }
                             Pattern::Wildcard => {
                                 if arm.guard.is_none() {
@@ -647,7 +652,15 @@ impl TypeChecker<'_> {
                 } else if assignable(left, &Type::Number) && assignable(right, &Type::Number) {
                     Ok(Type::Number)
                 } else {
-                    Ok(Type::Any)
+                    Err(self.error(
+                        pos,
+                        format!(
+                            "operator '{}' requires numbers, found {} and {}",
+                            op,
+                            left.display(),
+                            right.display()
+                        ),
+                    ))
                 }
             }
             _ => Ok(Type::Any),

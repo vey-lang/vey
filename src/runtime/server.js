@@ -156,11 +156,7 @@ function veyServer(ctx) {
     function makeRequest(request, url, params) {
       var query = {};
       url.searchParams.forEach(function (value, key) { query[key] = value; });
-      ctx.server = server;
-  ctx.response = response;
-  ctx.redirect = redirect;
-
-  return {
+      return {
         path: url.pathname,
         method: request.method,
         params: params,
@@ -285,6 +281,10 @@ function veyServer(ctx) {
       headers: { Location: location }
     };
   }
+
+  ctx.server = server;
+  ctx.response = response;
+  ctx.redirect = redirect;
 
   return {
     server: server,

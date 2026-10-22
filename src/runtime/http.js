@@ -14,9 +14,7 @@ function veyHttp(ctx) {
         }
         var headers = {};
         response.headers.forEach(function (value, key) { headers[key] = value; });
-        ctx.http = http;
-
-  return {
+        return {
           status: response.status,
           ok: response.ok,
           body: body,
@@ -42,6 +40,8 @@ function veyHttp(ctx) {
       return request(url, opts);
     }
   };
+
+  ctx.http = http;
 
   return {
     http: http,

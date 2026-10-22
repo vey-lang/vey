@@ -95,17 +95,16 @@ pub(crate) fn find_entries(directory: &Path, depth: usize, found: &mut Vec<PathB
 }
 
 pub(crate) fn is_ignored_dir(name: &str) -> bool {
+    is_build_dir(name) || matches!(name, "tests" | "examples")
+}
+
+/// The folders that hold what the compiler writes, or the tools of Rust.
+///
+/// They never hold the sources of a page.
+pub(crate) fn is_build_dir(name: &str) -> bool {
     matches!(
         name,
-        "node_modules"
-            | "target"
-            | ".git"
-            | "dist"
-            | ".dist"
-            | "build"
-            | ".vey"
-            | "tests"
-            | "examples"
+        "node_modules" | "target" | ".git" | "dist" | ".dist" | "build" | ".vey"
     )
 }
 
@@ -186,10 +185,10 @@ pub(crate) fn collect_vey_files(directory: &Path, files: &mut Vec<PathBuf>) {
         if kind.is_dir() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(
-                name.as_ref(),
-                "node_modules" | "target" | ".git" | "dist" | ".dist" | "build" | ".vey"
-            ) {
+            // The same folders are left out as when the entry of the project
+            // is looked for, so that a folder of tests is not a folder of
+            // pages.
+            if name.starts_with('.') || is_ignored_dir(&name) {
                 continue;
             }
             collect_vey_files(&path, files);
@@ -211,10 +210,7 @@ pub(crate) fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
         if kind.is_dir() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(
-                name.as_ref(),
-                "node_modules" | "target" | ".git" | "dist" | ".dist" | "build" | ".vey"
-            ) {
+            if name.starts_with('.') || is_build_dir(&name) {
                 continue;
             }
             collect_files(&path, files);

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::ast::Program;
 use crate::check;
 use crate::codegen::{generate, Options};
+use crate::sourcemap;
 use crate::types;
 use crate::VeyError;
 
@@ -39,7 +40,8 @@ pub struct Bundle {
     pub entry: usize,
     pub entry_path: PathBuf,
     pub sources: Vec<SourceFile>,
-    pub mappings: Vec<Option<(usize, usize)>>,
+    /// The places of the generated code that came from a source file.
+    pub mappings: Vec<sourcemap::Segment>,
     /// CSS collected from `style { ... }` blocks and `.css` imports, in
     /// dependency order.
     pub styles: Vec<StyleFile>,
@@ -80,8 +82,6 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
 
     let mut chunks = Vec::new();
     let mut sources = Vec::new();
-    let mut mappings: Vec<Option<(usize, usize)>> = Vec::new();
-    let mut bundle_line = 0usize;
 
     for module in &modules {
         let deps = module
@@ -95,6 +95,8 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             deps,
             packages: module.packages.clone(),
             exports: module.exports.clone(),
+            source: sources.len(),
+            enums: std::collections::HashMap::new(),
         };
         check::check(&module.ast, &module.path.display().to_string())?;
         // build imports map for this module from its deps
@@ -113,36 +115,29 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             type_envs.push(types::ModuleTypeEnv::default());
         }
         if type_envs.len() == module.id {
-            type_envs.push(env);
+            type_envs.push(env.clone());
         } else {
-            type_envs[module.id] = env;
+            type_envs[module.id] = env.clone();
         }
+        // The enums of the module are described by the checker, and the code
+        // generator uses the same description.
+        let options = Options { enums: env.enums, ..options };
         let generated = generate(&module.ast, &options)?;
-        let source_index = sources.len();
         sources.push(SourceFile {
             path: module.path.display().to_string(),
             content: module.source.clone(),
         });
 
-        for (index, source_line) in generated.lines.iter().enumerate() {
-            let generated_line = bundle_line + 1 + index;
-            if generated_line >= mappings.len() {
-                mappings.resize(generated_line + 1, None);
-            }
-            if let Some(source_line) = source_line {
-                mappings[generated_line] = Some((source_index, source_line.saturating_sub(1)));
-            }
-        }
-
-        let (wrapped, line_count) = wrap_module(module.id, &generated.code);
+        let (wrapped, _) = wrap_module(module.id, &generated.code);
         chunks.push(wrapped);
-        bundle_line += line_count;
     }
 
-    mappings.resize(bundle_line, None);
+    // The marks of the code say where every piece came from. They are taken
+    // out here, so that the bundle has no trace of them.
+    let (code, mappings) = sourcemap::extract(&chunks.join("\n"));
 
     Ok(Bundle {
-        code: chunks.join("\n"),
+        code,
         modules,
         entry: entry_id,
         entry_path: entry,
