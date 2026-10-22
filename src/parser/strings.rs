@@ -51,6 +51,18 @@ fn parse_interpolation(source: &str, file: &str, pos: Pos) -> Result<Option<Expr
     };
     let expr = sub.parse_expression()?;
     if sub.tok.kind != TokKind::Eof {
+        // A JSON object is a key and then a colon, and the braces hold text
+        // rather than an expression. Anything else is an interpolation that
+        // was meant to be one, so the mistake is said out loud.
+        let text = sub.tok.kind == TokKind::Punct && (sub.tok.value == ":" || sub.tok.value == ",");
+        if !text {
+            return Err(VeyError::new(
+                "the braces of an interpolation hold one expression",
+                file,
+                pos.line,
+                pos.col,
+            ));
+        }
         return Ok(None);
     }
     Ok(Some(expr))

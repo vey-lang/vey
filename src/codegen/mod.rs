@@ -101,12 +101,7 @@ struct Codegen {
 }
 
 impl Codegen {
-    fn err(&self, message: impl Into<String>) -> VeyError {
-        VeyError::new(message, self.file.clone(), 1, 1)
-    }
-
     /// An error that points at a place of the program.
-    #[allow(dead_code)]
     fn err_at(&self, pos: Pos, message: impl Into<String>) -> VeyError {
         VeyError::new(message, self.file.clone(), pos.line, pos.col)
     }
@@ -449,10 +444,14 @@ impl Codegen {
                 self.pop_scope();
             }
             Stmt::Defer(decl) => {
-                // The piece of code runs when the function is left.
+                // The piece of code runs when the block is left. The top
+                // level of a file is a block of its own, so a `defer` there
+                // runs at the end of the program.
                 let value = self.gen_expr(&decl.value)?;
                 let Some(name) = self.current_defer.clone() else {
-                    return Err(self.err("defer is only allowed inside a function"));
+                    // Every block that holds a `defer` keeps a list of them,
+                    // so this is only a guard.
+                    return Err(self.err_at(decl.pos, "this defer has no block to run in"));
                 };
                 self.emit(&format!("{}.push(() => ({}));", name, value));
             }
@@ -468,7 +467,10 @@ impl Codegen {
                     Some(_) => match &decl.iter {
                         Expr::Range(start, end, _) => Some((start, end)),
                         _ => {
-                            return Err(self.err("a loop with a step must walk a range"))
+                            return Err(self.err_at(
+                                decl.pos,
+                                "a loop with a step must walk a range",
+                            ))
                         }
                     },
                     None => None,
@@ -657,7 +659,10 @@ impl Codegen {
                         .find(|(alias, _)| alias == &decl.alias)
                         .map(|(_, package)| package.clone())
                         .ok_or_else(|| {
-                            self.err(format!("package '{}' was not resolved", decl.path))
+                            self.err_at(
+                                decl.pos,
+                                format!("package '{}' was not resolved", decl.path),
+                            )
                         })?;
                     self.emit(&format!(
                         "const _{} = V.require({});",
@@ -672,7 +677,12 @@ impl Codegen {
                     .iter()
                     .find(|(alias, _)| alias == &decl.alias)
                     .map(|(_, module)| module.clone())
-                    .ok_or_else(|| self.err(format!("module '{}' was not resolved", decl.path)))?;
+                    .ok_or_else(|| {
+                        self.err_at(
+                            decl.pos,
+                            format!("module '{}' was not resolved", decl.path),
+                        )
+                    })?;
                 self.emit(&format!("const _{} = {};", decl.alias, target));
                 self.declare(&decl.alias);
             }

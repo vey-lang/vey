@@ -459,6 +459,35 @@ impl TypeChecker<'_> {
     ///
     /// It is used to say the type of an expression, where the mistakes of
     /// the program do not matter.
+    /// Check the body of a function and leave its names in the scope, so
+    /// that the type of an expression inside it may be asked about.
+    pub(crate) fn open_function(
+        &mut self,
+        params: &[Param],
+        body: &Block,
+        ret: &Option<TypeExpr>,
+    ) -> Result<(), VeyError> {
+        self.push_scope();
+        for param in params {
+            let ty = match &param.ty {
+                Some(ty) => self.resolve_type(ty)?,
+                None => Type::Any,
+            };
+            for (name, _) in param.pattern.bindings() {
+                self.declare(&name, ty.clone());
+            }
+        }
+        self.expected_returns.push(match ret {
+            Some(ty) => Some(self.resolve_type(ty)?),
+            None => None,
+        });
+        for stmt in &body.body {
+            self.check_stmt(stmt)?;
+        }
+        self.expected_returns.pop();
+        Ok(())
+    }
+
     pub(crate) fn for_explain<'a>(
         program: &Program,
         file: &'a str,

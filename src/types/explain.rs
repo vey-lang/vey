@@ -14,6 +14,8 @@ pub fn explain(program: &Program, file: &str, line: usize, col: usize) -> Result
     let mut walker = Walker {
         point,
         best: None,
+        function: None,
+        best_function: None,
     };
     walker.program(program);
     let Some(expr) = walker.best else {
@@ -26,6 +28,11 @@ pub fn explain(program: &Program, file: &str, line: usize, col: usize) -> Result
     };
 
     let mut checker = TypeChecker::for_explain(program, file)?;
+    // A name inside a function is known to that function, so the function
+    // that holds it is checked first.
+    if let Some((params, body, ret)) = &walker.best_function {
+        checker.open_function(params, body, ret)?;
+    }
     let ty = checker.infer_public(&expr)?;
     Ok(ty.display())
 }
@@ -38,6 +45,11 @@ pub fn explain(program: &Program, file: &str, line: usize, col: usize) -> Result
 struct Walker {
     point: Pos,
     best: Option<Expr>,
+    /// The parts of the function that holds the place, if the place is
+    /// inside one: its parameters, its body and the type it returns.
+    function: Option<(Vec<Param>, Block, Option<TypeExpr>)>,
+    /// The function that holds the expression that was found.
+    best_function: Option<(Vec<Param>, Block, Option<TypeExpr>)>,
 }
 
 impl Walker {
@@ -58,10 +70,22 @@ impl Walker {
                     self.expr(init);
                 }
             }
-            Stmt::Fn(decl) => self.body(&decl.body.body),
+            Stmt::Fn(decl) => {
+                let outer = self.function.clone();
+                self.function = Some((decl.params.clone(), decl.body.clone(), decl.ret.clone()));
+                self.body(&decl.body.body);
+                self.function = outer;
+            }
             Stmt::Impl(decl) => {
                 for method in &decl.methods {
+                    let outer = self.function.clone();
+                    self.function = Some((
+                        method.params.clone(),
+                        method.body.clone(),
+                        method.ret.clone(),
+                    ));
                     self.body(&method.body.body);
+                    self.function = outer;
                 }
             }
             Stmt::If(decl) => {
@@ -120,7 +144,60 @@ impl Walker {
                 self.expr(&decl.value);
             }
             Stmt::Block(block, _) => self.body(&block.body),
+            // The markup of a component holds expressions as well.
+            Stmt::Component(decl) => {
+                for child in &decl.children {
+                    self.markup(child);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The expressions of a piece of markup.
+    fn markup(&mut self, node: &MarkupNode) {
+        match node {
+            MarkupNode::Element(element) => {
+                for (_, value) in &element.attrs {
+                    self.expr(value);
+                }
+                for arg in &element.args {
+                    self.expr(arg);
+                }
+                for child in &element.children {
+                    self.markup(child);
+                }
+            }
+            MarkupNode::Expr(expr) => self.expr(expr),
+            MarkupNode::If(decl) => {
+                self.expr(&decl.test);
+                for node in &decl.then_nodes {
+                    self.markup(node);
+                }
+                for node in &decl.else_nodes {
+                    self.markup(node);
+                }
+            }
+            MarkupNode::For(decl) => {
+                self.expr(&decl.iter);
+                if let Some(key) = &decl.key {
+                    self.expr(key);
+                }
+                for node in &decl.body {
+                    self.markup(node);
+                }
+            }
+            MarkupNode::Match(decl) => {
+                self.expr(&decl.subject);
+                for arm in &decl.arms {
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    for node in &arm.body {
+                        self.markup(node);
+                    }
+                }
+            }
         }
     }
 
@@ -137,6 +214,7 @@ impl Walker {
             };
             if closer {
                 self.best = Some(expr.clone());
+                self.best_function = self.function.clone();
             }
         }
         match expr {
@@ -191,10 +269,19 @@ impl Walker {
                     self.expr(&arm.body);
                 }
             }
-            Expr::Await(inner, _) | Expr::Try(inner, _) | Expr::Yield(inner, _) => {
-                self.expr(inner)
-            }
-            Expr::Spread(inner, _) => self.expr(inner),
+            Expr::Await(inner, _)
+            | Expr::Try(inner, _)
+            | Expr::Yield(inner, _)
+            | Expr::As(inner, _, _)
+            | Expr::Is(inner, _, _)
+            | Expr::Spread(inner, _) => self.expr(inner),
+            // The body of a function is walked as well, so that the type of
+            // a name inside it is found.
+            Expr::Fn(_, body, _, _) => self.body(&body.body),
+            Expr::Arrow(_, _, body, _, _) => match body {
+                ArrowBody::Expr(expr) => self.expr(expr),
+                ArrowBody::Block(block) => self.body(&block.body),
+            },
             _ => {}
         }
     }

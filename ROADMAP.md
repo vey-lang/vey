@@ -778,7 +778,7 @@ gap that is closed.
 - [x] **The names of a list or an object pattern of a `match` are not in the
       scope of the code generator,** so a name that hides a helper of the
       runtime is not the one that is bound. (`src/codegen/exprs.rs`)
-- [ ] **The arguments that are given by name are not handled in the path of
+- [x] **The arguments that are given by name are not handled in the path of
       a call with type arguments,** so the marker of the named arguments is
       counted as an argument. (`src/types/exprs.rs`, `src/codegen/exprs.rs`)
 - [x] **A `match` on an enum of another module binds the wrong field,** so
@@ -786,16 +786,16 @@ gap that is closed.
 - [x] **A `for ... by` with a destructuring pattern writes JavaScript that
       cannot be parsed,** and a negative step never ends.
       (`src/codegen/mod.rs`)
-- [ ] **A broken interpolation becomes literal text** instead of an error.
+- [x] **A broken interpolation becomes literal text** instead of an error.
       (`src/parser/strings.rs`)
-- [ ] **Every error of the code generator points at line 1, column 1.**
+- [x] **Every error of the code generator points at line 1, column 1.**
       (`src/codegen/mod.rs`)
-- [ ] **The `vey explain` walker skips the casts, the functions and the
+- [x] **The `vey explain` walker skips the casts, the functions and the
       markup,** so it answers "there is no expression at that place".
       (`src/types/explain.rs`)
 - [ ] **The guard of a `match` in the markup is tried before the names it
       uses exist.** (`src/codegen/markup.rs`)
-- [ ] **A `defer` at the top level of a file is taken,** although the error
+- [x] **A `defer` at the top level of a file is taken,** although the error
       that says it is not allowed can never fire. (`src/codegen/mod.rs`)
 - [x] **The wildcard pattern has no place,** so an error in it is reported
       at the top of the file. (`src/ast/expr.rs`, `src/parser/patterns.rs`)
@@ -820,7 +820,7 @@ gap that is closed.
       handed on. (`src/codegen/mod.rs`, `src/runtime/core.js`)
 - [ ] **The line count of a wrapped module is computed and thrown away.**
       (`src/compiler/mod.rs`)
-- [ ] **`pub let { a } = x` exports nothing, without a word.**
+- [x] **`pub let { a } = x` exports nothing, without a word.**
       (`src/parser/mod.rs`)
 - [ ] **Nothing is shaken out of the bundle:** every export of every module
       is written, whether it is used or not. (`src/compiler/loader.rs`)
@@ -902,7 +902,7 @@ gap that is closed.
 - [x] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
 - [ ] **A generator without a return type has the type `() -> [void]`.**
       (`src/types/stmts.rs`)
-- [ ] **`vey explain` gives the type `any` for a name inside a function,**
+- [x] **`vey explain` gives the type `any` for a name inside a function,**
       because the checker of the explanation does not walk into the
       functions. (`src/types/explain.rs`)
 - [x] **`unknown` fits nothing but `any` and `object`,** so it cannot be

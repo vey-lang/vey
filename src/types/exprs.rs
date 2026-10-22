@@ -163,23 +163,14 @@ impl TypeChecker<'_> {
                 Ok(union(vec![then_ty, else_ty]))
             }
             Expr::Call(callee, args, optional, pos) => {
-                self.infer_call(callee, args, *optional, *pos, None)
+                self.infer_call(callee, args, *optional, *pos, None, None)
             }
-            Expr::CallGeneric(callee, type_args, args, _, pos) => {
-                let callee_ty = self.infer_expr(callee)?;
-                let (arg_types, has_spread) = self.call_argument_types(args)?;
+            Expr::CallGeneric(callee, type_args, args, optional, pos) => {
                 let mut explicit = Vec::new();
                 for arg in type_args {
                     explicit.push(self.resolve_type(arg)?);
                 }
-                self.check_call(
-                    &callee_ty,
-                    &arg_types,
-                    has_spread,
-                    *pos,
-                    Some(&explicit),
-                    None,
-                )
+                self.infer_call(callee, args, *optional, *pos, None, Some(&explicit))
             }
             Expr::Member(object, prop, optional, pos) => {
                 self.member_type(object, prop, *optional, *pos)
@@ -556,6 +547,7 @@ impl TypeChecker<'_> {
         optional: bool,
         pos: Pos,
         expected: Option<&Type>,
+        explicit: Option<&[Type]>,
     ) -> Result<Type, VeyError> {
         let callee_ty = self.infer_expr(callee)?;
         // The callee may be a value that may be nothing.
@@ -576,15 +568,14 @@ impl TypeChecker<'_> {
         if !named.is_empty() {
             self.resolved.insert((pos.line, pos.col), order);
         }
-        self.check_call(&callee_ty, &arg_types, has_spread, pos, None, expected)
-    }
-
-    /// The types of the arguments of a call.
-    pub(crate) fn call_argument_types(
-        &mut self,
-        args: &[Expr],
-    ) -> Result<(Vec<Type>, bool), VeyError> {
-        self.argument_types(args)
+        self.check_call(
+            &callee_ty,
+            &arg_types,
+            has_spread,
+            pos,
+            explicit,
+            expected,
+        )
     }
 
     /// The types of the arguments of a call, checked against the
@@ -619,21 +610,6 @@ impl TypeChecker<'_> {
     }
 
     /// The types of a list of arguments.
-    fn argument_types(&mut self, args: &[Expr]) -> Result<(Vec<Type>, bool), VeyError> {
-        let mut types = Vec::new();
-        let mut has_spread = false;
-        for arg in args {
-            match arg {
-                Expr::Spread(inner, _) => {
-                    has_spread = true;
-                    types.push(self.infer_expr(inner)?);
-                }
-                other => types.push(self.infer_expr(other)?),
-            }
-        }
-        Ok((types, has_spread))
-    }
-
     /// The arguments of a call, in the order they are given, and the ones
     /// that are given by name.
     fn split_named(&mut self, args: &[Expr]) -> Result<(Vec<Expr>, Vec<(String, Expr)>), VeyError> {
@@ -750,7 +726,7 @@ impl TypeChecker<'_> {
     ) -> Result<Type, VeyError> {
         match expr {
             Expr::Call(callee, args, optional, pos) => {
-                self.infer_call(callee, args, *optional, *pos, expected)
+                self.infer_call(callee, args, *optional, *pos, expected, None)
             }
             // A list of values may be a tuple, when that is what is expected.
             Expr::Array(items, pos) => {                if let Some(Type::Tuple(wanted)) = expected {

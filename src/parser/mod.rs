@@ -257,8 +257,17 @@ impl Parser {
         // A name may be public or private.
         if self.is_kw("pub") || self.is_kw("priv") {
             let private = self.tok.value == "priv";
+            let word = self.tok.value.clone();
             self.advance()?;
             let mut stmt = self.parse_declaration()?;
+            if let Stmt::Var(decl) = &stmt {
+                if !matches!(decl.pattern, BindingPattern::Name { .. }) {
+                    return Err(self.error_at(
+                        decl.pos,
+                        format!("{} requires a single name", word),
+                    ));
+                }
+            }
             if let Some((name, _)) = stmt.exported_name() {
                 if private {
                     self.private_names.push(name.to_string());
