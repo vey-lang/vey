@@ -375,6 +375,7 @@ function veyCore(ctx) {
   ctx.unimplemented = unimplemented;
 
   return {
+    undefined: undefined,
     print: print,
     input: input,
     sleep: sleep,

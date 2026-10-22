@@ -109,6 +109,8 @@ function veyCollections(ctx) {
     if (typeof value === "object") {
       // A generator is walked by the loop itself.
       if (typeof value.next === "function") return value;
+      // A map and a set know the way they are walked.
+      if (typeof value.toList === "function") return value.toList();
       return Object.keys(value);
     }
     return [];

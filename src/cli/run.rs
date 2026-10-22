@@ -9,7 +9,7 @@ use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
 use crate::cli::dev::{serve, DEFAULT_PORT};
-use crate::cli::entry::{collect_vey_files, default_title, entry_from};
+use crate::cli::entry::{collect_tool_files, collect_vey_files, default_title, entry_from, project_root};
 use crate::cli::output::{node_script, print_command_help, report, report_warnings, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
@@ -240,7 +240,23 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
     let mut failed = Vec::new();
     let mut pages = 0;
     let files = if whole_project {
-        project_pages(&entry, &mut watch)
+        let mut files = project_pages(&entry, &mut watch);
+        // The folder of the tests holds pages of the language as well, and
+        // they are checked before they are run.
+        let mut tests = Vec::new();
+        let folders = project_root(&entry).join("tests");
+        if folders.is_dir() {
+            collect_tool_files(&folders, &mut tests);
+        }
+        tests.sort();
+        for file in tests {
+            if files.contains(&file) {
+                continue;
+            }
+            watch.push(file.clone());
+            files.push(file);
+        }
+        files
     } else {
         vec![entry.clone()]
     };

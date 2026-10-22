@@ -546,6 +546,40 @@ impl TypeChecker<'_> {
     }
 
     /// The names that a pattern takes apart, with the type of the value.
+    /// The type of every name of an enum pattern, by the field it stands
+    /// for.
+    fn enum_binding_types(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        bindings: &[crate::ast::EnumBinding],
+    ) -> Vec<Type> {
+        let fields = self
+            .enum_info(enum_name)
+            .and_then(|info| info.variant(variant))
+            .map(|variant| variant.fields.clone())
+            .unwrap_or_default();
+        let mut positional = 0;
+        let mut out = Vec::new();
+        for binding in bindings {
+            let field_name = match &binding.field {
+                Some(name) => Some(name.clone()),
+                None => {
+                    let name = fields.get(positional).map(|field| field.name.clone());
+                    positional += 1;
+                    name
+                }
+            };
+            let ty = field_name
+                .and_then(|name| fields.iter().find(|field| field.name == name).cloned())
+                .and_then(|field| field.ty)
+                .and_then(|ty| self.resolve_type(&ty).ok())
+                .unwrap_or(Type::Any);
+            out.push(ty);
+        }
+        out
+    }
+
     /// The names that a pattern of a `match` takes apart.
     ///
     /// A list or an object pattern takes the values of its parts, so that a
@@ -555,9 +589,16 @@ impl TypeChecker<'_> {
             Pattern::Binding { name, .. } => {
                 self.declare(name, ty.clone());
             }
-            Pattern::Enum { bindings, .. } => {
-                for binding in bindings {
-                    self.declare(&binding.name, ty.clone());
+            Pattern::Enum {
+                enum_name,
+                variant,
+                bindings,
+                ..
+            } => {
+                // The names get the type of the field they stand for.
+                let types = self.enum_binding_types(enum_name, variant, bindings);
+                for (binding, field_ty) in bindings.iter().zip(types) {
+                    self.declare(&binding.name, field_ty);
                 }
             }
             Pattern::List(items, _) => {

@@ -11,17 +11,9 @@ function veyServer(ctx) {
   var matchRoute = ctx.matchRoute;
   var hostSetTimeout = ctx.hostSetTimeout;
 
-  function parseCookies(header) {
-    var out = {};
-    if (!header) return out;
-    var parts = header.split(";");
-    for (var i = 0; i < parts.length; i++) {
-      var index = parts[i].indexOf("=");
-      if (index === -1) continue;
-      out[parts[i].slice(0, index).trim()] = safeDecode(parts[i].slice(index + 1).trim());
-    }
-    return out;
-  }
+  // The cookies of a request are read by the reader that the pages use, so
+  // that one head gives the same answer on both sides.
+  var parseCookies = ctx.cookie.parse;
 
   var MIME = Object.assign(Object.create(null), {
     ".html": "text/html; charset=utf-8",

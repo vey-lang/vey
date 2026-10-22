@@ -198,6 +198,33 @@ pub(crate) fn collect_vey_files(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Every file of the language under a directory, the folder of the tests
+/// included.
+///
+/// The tools that read a program without building it look at the tests as
+/// well, so that a mistake in a test is said before it is run.
+pub(crate) fn collect_tool_files(directory: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || is_build_dir(&name) {
+                continue;
+            }
+            collect_tool_files(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "vey") {
+            files.push(path);
+        }
+    }
+}
+
 pub(crate) fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;

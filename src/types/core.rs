@@ -248,7 +248,8 @@ pub(crate) fn element_type(ty: &Type) -> Type {
     match ty {
         Type::Array(inner) => (**inner).clone(),
         Type::Tuple(items) => union(items.iter().cloned().collect()),
-        Type::Dict(_, value) => (**value).clone(),
+        // A loop over a dictionary gives its keys.
+        Type::Dict(key, _) => (**key).clone(),
         Type::String => Type::String,
         Type::Any => Type::Any,
         Type::Union(items) => union(items.iter().map(element_type).collect()),

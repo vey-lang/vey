@@ -844,24 +844,24 @@ gap that is closed.
 - [x] **`Promise<T>` and `Result<T, E>` are not in the rule that says
       whether a value fits,** and the helpers that hand a promise back are
       typed `any`. (`src/types/rules.rs`, `src/types/builtins.rs`)
-- [ ] **`object` does not take a list, a dictionary, an enum or a
+- [x] **`object` does not take a list, a dictionary, an enum or a
       function.** (`src/types/rules.rs`)
 - [ ] **The recursive part of a type is only opened up in one of the three
       places,** so an assignment and a call are not checked like a `let`.
       (`src/types/stmts.rs`, `src/types/exprs.rs`)
 - [ ] **The type of a parameter that is used inside another function is
       lost or given to the wrong parameter.** (`src/types/stmts.rs`)
-- [ ] **A type parameter is not assignable to anything,** so a value of a
+- [x] **A type parameter is not assignable to anything,** so a value of a
       known type cannot be given to a variable of the type parameter.
       (`src/types/rules.rs`)
 - [x] **`is` does not narrow,** so the type of the value is not known in
       the branch. (`src/types/exprs.rs`)
 - [x] **The exhaustiveness of a `match` on a `bool` is not checked.**
       (`src/types/exprs.rs`)
-- [ ] **The literal patterns of a `match` are not compared with the type
+- [x] **The literal patterns of a `match` are not compared with the type
       of the subject,** so a pattern of the wrong type is taken.
       (`src/types/exprs.rs`)
-- [ ] **The bindings of an enum pattern of an `if let` get the type of the
+- [x] **The bindings of an enum pattern of an `if let` get the type of the
       whole subject** and not the type of the field. (`src/types/stmts.rs`)
 - [ ] **A function written as an expression ignores the types that were
       guessed,** so the same code is checked in one form and not in the
@@ -890,7 +890,7 @@ gap that is closed.
       (`src/types/exprs.rs`)
 - [x] **A function of no arguments satisfies a type of one argument.**
       (`src/types/rules.rs`)
-- [ ] **A parameter that comes after a parameter with a value is taken as
+- [x] **A parameter that comes after a parameter with a value is taken as
       optional.** (`src/types/checker.rs`)
 - [ ] **The opening of a recursive type grows with the number of its
       fields,** so a type with six of them is opened six times over.
@@ -949,14 +949,14 @@ gap that is closed.
       without a word. (`src/runtime/node.js`)
 - [x] **`title()` does nothing outside the browser,** without a word.
       (`src/runtime/dom.js`)
-- [ ] **The helpers that are only in Node name the module and not the
+- [x] **The helpers that are only in Node name the module and not the
       helper,** so the reader sees "node:fs is only available in Node" for
       a call to `fs.read`. (`src/runtime/node.js`)
 - [x] **`--force` does nothing in `vey build`,** although the help says it
       does. (`src/cli/build.rs`)
 - [x] **A test file that is named and is not there is ignored,** and the
       command says that there is no test and succeeds. (`src/cli/run.rs`)
-- [ ] **The folder of the tests is invisible** to `vey lint`, `vey fmt`,
+- [x] **The folder of the tests is invisible** to `vey lint`, `vey fmt`,
       `vey docs`, `vey migrate` and `vey check`. (`src/cli/entry.rs`)
 - [x] **The help of the command has no arm for `vey lsp`,** so it falls
       back to the general help. (`src/cli/output.rs`)
@@ -979,12 +979,12 @@ gap that is closed.
 - [x] **There are two escapers of HTML,** and the one of the tools does
       not escape the apostrophe. (`src/runtime/shared.js`,
       `src/cli/output.rs`)
-- [ ] **There are two readers of cookies,** and they give different
+- [x] **There are two readers of cookies,** and they give different
       answers for the same head. (`src/runtime/server.js`,
       `src/runtime/web.js`)
 - [ ] **`http.get` and `fetch` give two shapes for the same thing,** and
       both are typed `any`, so nothing notices. (`src/runtime/http.js`)
-- [ ] **The list of the parts of the runtime in the README is missing
+- [x] **The list of the parts of the runtime in the README is missing
       `map.js`.** (`README.md`)
 - [ ] **The list of the helpers of the runtime lives in four places**
       that have to be written together, and it has already drifted.
@@ -993,7 +993,7 @@ gap that is closed.
 - [ ] **`bind()` and `mount()` are two ways to put a page on the screen,**
       and only one of them is known to the router. (`src/runtime/dom.js`,
       `src/runtime/mount.js`, `src/runtime/router.js`)
-- [ ] **`http.get` refuses with a plain error** where `fetch` refuses with
+- [x] **`http.get` refuses with a plain error** where `fetch` refuses with
       an error of the language, so the browser shows a stack.
       (`src/runtime/http.js`)
 - [x] **The server always says that it listens on `localhost`,** even when

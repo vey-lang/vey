@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use vey::parser::Parser;
 
 use crate::cli::args::parse_args;
-use crate::cli::entry::collect_vey_files;
+use crate::cli::entry::collect_tool_files;
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_docs(args: &[String]) -> i32 {
@@ -28,12 +28,12 @@ pub(crate) fn cmd_docs(args: &[String]) -> i32 {
 
     let mut files = Vec::new();
     if parsed.files.is_empty() {
-        collect_vey_files(Path::new("."), &mut files);
+        collect_tool_files(Path::new("."), &mut files);
     } else {
         for name in &parsed.files {
             let path = PathBuf::from(name);
             if path.is_dir() {
-                collect_vey_files(&path, &mut files);
+                collect_tool_files(&path, &mut files);
             } else if path.is_file() {
                 files.push(path);
             } else {

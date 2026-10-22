@@ -758,10 +758,15 @@ impl TypeChecker<'_> {
                 param_types.push(ty);
             }
         }
+        // A parameter that comes after one with a value is still needed:
+        // the caller has to give the ones in front of it as well.
         let required = params
             .iter()
-            .position(|param| param.default.is_some() || param.rest)
-            .unwrap_or(params.len());
+            .enumerate()
+            .filter(|(_, param)| param.default.is_none() && !param.rest)
+            .map(|(index, _)| index + 1)
+            .max()
+            .unwrap_or(0);
         // The names of the parameters, so that the arguments that are given
         // by name may be matched.
         let param_names: Vec<String> = params

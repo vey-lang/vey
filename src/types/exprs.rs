@@ -34,10 +34,14 @@ impl TypeChecker<'_> {
             }
             Expr::Bool(_, _) => Ok(Type::Bool),
             Expr::Null(_) => Ok(Type::Null),
-            Expr::Ident(name, _) => Ok(self
-                .lookup(name)
-                .or_else(|| builtin_type(name))
-                .unwrap_or(Type::Any)),
+            Expr::Ident(name, _) => Ok(match name.as_str() {
+                // The value that is there when nothing is.
+                "undefined" => Type::Undefined,
+                other => self
+                    .lookup(other)
+                    .or_else(|| builtin_type(other))
+                    .unwrap_or(Type::Any),
+            }),
             Expr::Array(items, _) => {
                 let mut types = Vec::new();
                 for item in items {
@@ -568,13 +572,14 @@ impl TypeChecker<'_> {
         if !named.is_empty() {
             self.resolved.insert((pos.line, pos.col), order);
         }
-        self.check_call(
+        self.check_call_named(
             &callee_ty,
             &arg_types,
             has_spread,
             pos,
             explicit,
             expected,
+            !named.is_empty(),
         )
     }
 
@@ -784,6 +789,24 @@ impl TypeChecker<'_> {
         type_args: Option<&[Type]>,
         expected: Option<&Type>,
     ) -> Result<Type, VeyError> {
+        self.check_call_named(callee, args, has_spread, pos, type_args, expected, false)
+    }
+
+    /// The same, but the arguments may have been given by name.
+    ///
+    /// The names are matched before the call is checked, so the ones that
+    /// have a value by default are not counted as missing.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_call_named(
+        &self,
+        callee: &Type,
+        args: &[Type],
+        has_spread: bool,
+        pos: Pos,
+        type_args: Option<&[Type]>,
+        expected: Option<&Type>,
+        named: bool,
+    ) -> Result<Type, VeyError> {
         match callee {
             Type::Any => Ok(Type::Any),
             Type::Function(function) => {
@@ -791,7 +814,7 @@ impl TypeChecker<'_> {
                 // checked, even when the types are not written.
                 if !has_spread {
                     if function.rest {
-                        if args.len() < function.required {
+                        if args.len() < function.required && !named {
                             return Err(self.error(
                                 pos,
                                 format!(
@@ -803,7 +826,7 @@ impl TypeChecker<'_> {
                             ));
                         }
                     } else {
-                        if args.len() < function.required {
+                        if args.len() < function.required && !named {
                             return Err(self.error(
                                 pos,
                                 format!(

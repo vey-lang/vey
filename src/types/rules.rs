@@ -127,10 +127,20 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
         (Type::Interface(_, source), Type::Named(_, target)) => object_assignable(source, target),
         (Type::Interface(_, source), Type::Interface(_, target)) => object_assignable(source, target),
         // A value of an unknown shape may be anything that is an object.
+        // A list, a dictionary, an enum, a promise and a function are
+        // objects as well: they are not a number, a text, a bool or nothing.
         (Type::Unknown, Type::AnyObject) => true,
         (Type::Object(_), Type::AnyObject) => true,
         (Type::Named(_, _), Type::AnyObject) => true,
         (Type::Interface(_, _), Type::AnyObject) => true,
+        (Type::Array(_), Type::AnyObject) => true,
+        (Type::Tuple(_), Type::AnyObject) => true,
+        (Type::Dict(_, _), Type::AnyObject) => true,
+        (Type::Enum(_, _), Type::AnyObject) => true,
+        (Type::EnumUnion(_), Type::AnyObject) => true,
+        (Type::Function(_), Type::AnyObject) => true,
+        (Type::Promise(_), Type::AnyObject) => true,
+        (Type::Result(_, _), Type::AnyObject) => true,
         (Type::Function(source), Type::Function(target)) => function_assignable(source, target),
         (Type::Promise(source), Type::Promise(target)) => assignable(source, target),
         (Type::Result(source_ok, source_err), Type::Result(target_ok, target_err)) => {

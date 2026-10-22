@@ -19,7 +19,7 @@ function veyHttp(ctx) {
 
   function request(url, options) {
     var fetchFn = scope.fetch || (typeof fetch !== "undefined" ? fetch : null);
-    if (!fetchFn) return Promise.reject(new Error("fetch is not available"));
+    if (!fetchFn) return Promise.reject(veyError("fetch is not available"));
     var opts = Object.assign({}, options || {});
     if (opts.headers) opts.headers = plainHeaders(opts.headers);
     return fetchFn(url, opts).then(function (response) {

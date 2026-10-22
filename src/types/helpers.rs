@@ -319,9 +319,11 @@ fn expr_has_yield(expr: &Expr) -> bool {
         Expr::Match(subject, arms, _) => {
             expr_has_yield(subject) || arms.iter().any(|arm| expr_has_yield(&arm.body))
         }
-        Expr::Await(inner, _) | Expr::Try(inner, _) | Expr::Spread(inner, _) => {
-            expr_has_yield(inner)
-        }
+        Expr::Await(inner, _)
+        | Expr::Try(inner, _)
+        | Expr::As(inner, _, _)
+        | Expr::Is(inner, _, _)
+        | Expr::Spread(inner, _) => expr_has_yield(inner),
         _ => false,
     }
 }

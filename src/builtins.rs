@@ -132,6 +132,7 @@ pub const BUILTINS: &[&str] = &[
     "errorHandler",
     "bodyLimit",
     "session",
+    "undefined",
 ];
 
 /// Whether the runtime provides a helper with this name.
