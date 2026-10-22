@@ -1,14 +1,16 @@
 //! The part of the checker that walks the statements of a program.
 
+use std::collections::HashMap;
+
 use crate::ast::*;
 use crate::lexer::Pos;
-use crate::types::core::{element_type, union, Type};
+use crate::types::core::{element_type, rest_element_type, union, FunctionType, Type};
 use crate::types::rules::{assignable, has_type_var, substitute_bound, unify_types};
 use crate::VeyError;
 
 use super::checker::{ComponentParam, TypeChecker};
 use super::helpers::{
-    block_always_exits, block_always_returns, block_assigns_name, inferred_const_type,
+    argument_label, block_always_exits, block_always_returns, block_assigns_name, extra_field,
     markup_assigns_name, name_alias, stmt_assigns_name,
 };
 
@@ -17,7 +19,7 @@ impl TypeChecker<'_> {
         self.predeclare_top_level(program)?;
         for stmt in &program.body {
             match stmt {
-                Stmt::Type(_) | Stmt::Enum(_) | Stmt::Use(_) | Stmt::Style(_) => {}
+                Stmt::Type(_) | Stmt::Enum(_) | Stmt::Interface(_) | Stmt::Use(_) | Stmt::Style(_) => {}
                 Stmt::Var(decl) => self.check_var_stmt(decl)?,
                 Stmt::Fn(decl) => self.check_fn_decl(decl)?,
                 Stmt::Component(decl) => self.check_component(decl)?,
@@ -75,6 +77,27 @@ impl TypeChecker<'_> {
                 Stmt::Enum(decl) => {
                     self.declare(&decl.name, Type::EnumNamespace(decl.name.clone()));
                 }
+                Stmt::Impl(decl) => {
+                    // The block makes a value of the type, so the name of the
+                    // type is the name of a value too.
+                    let ty = self
+                        .alias_types
+                        .get(&decl.type_name)
+                        .cloned()
+                        .unwrap_or(Type::Any);
+                    self.declare(
+                        &decl.type_name,
+                        Type::Function(FunctionType {
+                            params: vec![ty.clone()],
+                            required: 1,
+                            rest: false,
+                            ret: Box::new(ty),
+                            checked: true,
+                            constraints: Vec::new(),
+                            type_params: Vec::new(),
+                        }),
+                    );
+                }
                 _ => {}
             }
         }
@@ -92,12 +115,20 @@ impl TypeChecker<'_> {
         };
 
         if let (Some(expected), Some(actual)) = (&annotation, &init_ty) {
-            if !assignable(actual, expected) {
+            if !self.fits(actual, expected) {
                 let pos = decl
                     .init
                     .as_ref()
                     .map(|expr| expr.pos())
                     .unwrap_or(decl.pos);
+                // A field that the type does not have is named, because it
+                // is the mistake that is easy to make.
+                if let Some(field) = extra_field(actual, expected) {
+                    return Err(self.error(
+                        pos,
+                        format!("'{}' is not a field of {}", field, expected.display()),
+                    ));
+                }
                 return Err(self.type_error(pos, actual, expected));
             }
         }
@@ -106,10 +137,9 @@ impl TypeChecker<'_> {
 
         if let Some(expected) = annotation {
             self.declare_pattern_typed(&decl.pattern, &expected);
-        } else if decl.kind == VarKind::Const {
-            let ty = inferred_const_type(init_ty.unwrap_or(Type::Any));
-            self.declare_pattern_typed(&decl.pattern, &ty);
         } else {
+            // A value without a type stays dynamic, so that it may be
+            // anything later on.
             self.declare_pattern_typed(&decl.pattern, &Type::Any);
         }
 
@@ -125,20 +155,35 @@ impl TypeChecker<'_> {
 
     pub(crate) fn check_fn_decl_inner(&mut self, decl: &FnDecl) -> Result<(), VeyError> {
         let mut ty = self.function_type_for_decl(decl)?;
-        self.set_binding(&decl.name, ty.clone());
-        let inferred =
+        let (inferred, param_types) =
             self.check_function(&decl.params, &decl.body, decl.ret.as_ref(), decl.pos)?;
+        // The types of the parameters that were not written are the ones that
+        // the way they are used asks for.
+        if let Type::Function(function) = &mut ty {
+            for (index, param) in decl.params.iter().enumerate() {
+                if param.ty.is_none() {
+                    if let Some(found) = param_types.get(index) {
+                        function.params[index] = found.clone();
+                    }
+                }
+            }
+            // The types of the arguments are known when they were written, or
+            // when the way the parameters are used says what they are.
+            function.checked = decl.params.iter().enumerate().any(|(index, param)| {
+                param.ty.is_some()
+                    || param_types
+                        .get(index)
+                        .is_some_and(|ty| !matches!(ty, Type::Any))
+            });
+        }
         // A type parameter that was settled by a returned value is not
         // generic any more, so the function has that type from then on.
         let bindings = self.type_param_bindings.last().cloned().unwrap_or_default();
         if !bindings.is_empty() {
             ty = substitute_bound(&ty, &bindings);
         }
-        let checked = match &ty {
-            Type::Function(function) => function.checked,
-            _ => false,
-        };
-        if checked && decl.ret.is_none() {
+        // The type of the result is known even when it was not written.
+        if decl.ret.is_none() && !matches!(inferred, Type::Void) {
             if let Type::Function(function) = &mut ty {
                 *function.ret = inferred;
             }
@@ -177,6 +222,33 @@ impl TypeChecker<'_> {
         Ok(params)
     }
 
+    /// Check the functions of a type.
+    pub(crate) fn check_impl(&mut self, decl: &ImplDecl) -> Result<(), VeyError> {
+        let type_ty = match self.alias_types.get(&decl.type_name) {
+            Some(ty) => ty.clone(),
+            None => {
+                return Err(self.error(
+                    decl.pos,
+                    format!("unknown type '{}'", decl.type_name),
+                ))
+            }
+        };
+        for method in &decl.methods {
+            // The value the method is called on is named `self`.
+            self.push_scope();
+            self.declare("self", type_ty.clone());
+            let result = self.check_function(
+                &method.params,
+                &method.body,
+                method.ret.as_ref(),
+                method.pos,
+            );
+            self.pop_scope();
+            result?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {
         let params = self.component_params(decl)?;
         self.components.insert(decl.name.clone(), params);
@@ -193,6 +265,7 @@ impl TypeChecker<'_> {
             Stmt::Var(decl) => self.check_var_stmt(decl),
             Stmt::Fn(decl) => self.check_fn_decl(decl),
             Stmt::Component(decl) => self.check_component(decl),
+            Stmt::Impl(decl) => self.check_impl(decl),
             Stmt::If(decl) => {
                 let test = self.infer_expr(&decl.test)?;
                 self.check_condition(&test, decl.pos)?;
@@ -223,10 +296,42 @@ impl TypeChecker<'_> {
                 }
                 Ok(())
             }
+            Stmt::IfLet(decl) => {
+                let value_ty = self.infer_expr(&decl.value)?;
+                self.push_scope();
+                self.declare_pattern_names(&decl.pattern, &value_ty);
+                self.check_block(&decl.then_block)?;
+                self.pop_scope();
+                if let Some(branch) = &decl.else_branch {
+                    self.check_stmt(branch)?;
+                }
+                Ok(())
+            }
             Stmt::While(decl) => {
                 let test = self.infer_expr(&decl.test)?;
                 self.check_condition(&test, decl.pos)?;
                 self.check_block(&decl.body)
+            }
+            Stmt::WhileLet(decl) => {
+                let value_ty = self.infer_expr(&decl.value)?;
+                self.push_scope();
+                self.declare_pattern_names(&decl.pattern, &value_ty);
+                for inner in &decl.body.body {
+                    self.check_stmt(inner)?;
+                }
+                self.pop_scope();
+                Ok(())
+            }
+            Stmt::LetElse(decl) => {
+                let value_ty = self.infer_expr(&decl.value)?;
+                self.push_scope();
+                self.declare_pattern_typed(&decl.pattern, &value_ty);
+                self.pop_scope();
+                self.check_block(&decl.otherwise)
+            }
+            Stmt::Defer(decl) => {
+                self.infer_expr(&decl.value)?;
+                Ok(())
             }
             Stmt::For(decl) => {
                 let iter_ty = self.infer_expr(&decl.iter)?;
@@ -252,7 +357,11 @@ impl TypeChecker<'_> {
                 Ok(())
             }
             Stmt::Repeat(decl) => {
-                self.infer_expr(&decl.count)?;
+                let count = self.infer_expr(&decl.count)?;
+                // A loop runs a number of times.
+                if !matches!(count, Type::Any) && !assignable(&count, &Type::Number) {
+                    return Err(self.type_error(decl.count.pos(), &count, &Type::Number));
+                }
                 self.check_block(&decl.body)
             }
             Stmt::Return(decl) => {
@@ -302,6 +411,10 @@ impl TypeChecker<'_> {
             Stmt::Enum(decl) => {
                 Err(self.error(decl.pos, "enum declarations must be at the top level"))
             }
+            Stmt::Interface(decl) => Err(self.error(
+                decl.pos,
+                "interface declarations must be at the top level",
+            )),
             Stmt::Expr(decl) => {
                 self.infer_expr(&decl.expr)?;
                 Ok(())
@@ -322,15 +435,40 @@ impl TypeChecker<'_> {
     /// A condition has to be a yes or a no.
     ///
     /// A number or a text is always the same, so it is most likely a
-    /// mistake.
+    /// mistake. A value that may be nothing is asked with its truth, and the
+    /// branch knows that it is there.
     pub(crate) fn check_condition(&self, ty: &Type, pos: Pos) -> Result<(), VeyError> {
         match ty {
-            Type::Number | Type::String => Err(self.error(
-                pos,
-                format!("the condition must be a bool, not a {}", ty.display()),
-            )),
-            _ => Ok(()),
+            Type::Bool => Ok(()),
+            Type::Any | Type::Unknown | Type::Var(_) => Ok(()),
+            Type::Union(items) => {
+                // A value that may be nothing is asked with its truth, and
+                // the branch knows that it is there.
+                let empty = items
+                    .iter()
+                    .any(|item| matches!(item, Type::Null | Type::Undefined));
+                let rest: Vec<&Type> = items
+                    .iter()
+                    .filter(|item| !matches!(item, Type::Null | Type::Undefined))
+                    .collect();
+                if empty && rest.len() == 1 {
+                    Ok(())
+                } else if !rest.is_empty() && rest.iter().all(|item| matches!(item, Type::Bool)) {
+                    Ok(())
+                } else {
+                    Err(self.condition_error(ty, pos))
+                }
+            }
+            _ => Err(self.condition_error(ty, pos)),
         }
+    }
+
+    /// The error for a condition that is not a yes or a no.
+    fn condition_error(&self, ty: &Type, pos: Pos) -> VeyError {
+        self.error(
+            pos,
+            format!("the condition must be a bool, not a {}", ty.display()),
+        )
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) -> Result<(), VeyError> {
@@ -366,12 +504,53 @@ impl TypeChecker<'_> {
             }
             if let Some(default) = &param.default {
                 let actual = self.infer_expr(default)?;
-                if !assignable(&actual, &ty) {
+                if !self.fits(&actual, &ty) {
                     return Err(self.type_error(default.pos(), &actual, &ty));
                 }
             }
         }
         Ok(())
+    }
+
+    /// The names that a pattern takes apart, with the type of the value.
+    pub(crate) fn declare_pattern_names(&mut self, pattern: &Pattern, ty: &Type) {
+        match pattern {
+            Pattern::Binding { name, .. } => {
+                self.declare(name, ty.clone());
+            }
+            Pattern::Enum { bindings, .. } => {
+                for binding in bindings {
+                    self.declare(&binding.name, ty.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Remember the type that a parameter has to have.    ///
+    /// A parameter without a type is judged by the way it is used, so that
+    /// the arguments of a call to the function are checked.
+    pub(crate) fn note_param(&mut self, name: &str, wanted: Type) {
+        if matches!(wanted, Type::Any) {
+            return;
+        }
+        let Some(scope) = self.param_scopes.last_mut() else {
+            return;
+        };
+        match scope.get_mut(name) {
+            Some(current) => {
+                // The type that is there is the one of the first use, and
+                // the later ones have to fit it.
+                if matches!(current, Type::Any) {
+                    *current = wanted;
+                } else {
+                    *current = union(vec![current.clone(), wanted]);
+                }
+            }
+            None => {
+                scope.insert(name.to_string(), wanted);
+            }
+        }
     }
 
     pub(crate) fn check_function(
@@ -380,7 +559,7 @@ impl TypeChecker<'_> {
         body: &Block,
         ret_ann: Option<&TypeExpr>,
         pos: Pos,
-    ) -> Result<Type, VeyError> {
+    ) -> Result<(Type, Vec<Type>), VeyError> {
         self.push_scope();
         self.declare_params(params)?;
         let expected = match ret_ann {
@@ -389,6 +568,19 @@ impl TypeChecker<'_> {
         };
         self.expected_returns.push(expected.clone());
         self.collected_returns.push(Vec::new());
+        // The parameters without a type are judged by the way they are used.
+        self.param_scopes.push(HashMap::new());
+        for param in params {
+            if param.ty.is_some() {
+                continue;
+            }
+            for (name, _) in param.bindings() {
+                self.param_scopes
+                    .last_mut()
+                    .expect("the scope of the parameters")
+                    .insert(name.to_string(), Type::Any);
+            }
+        }
 
         for stmt in &body.body {
             self.check_stmt(stmt)?;
@@ -397,6 +589,35 @@ impl TypeChecker<'_> {
         let collected = self.collected_returns.pop().unwrap_or_default();
         self.expected_returns.pop();
         self.pop_scope();
+        let witnesses = self.param_scopes.pop().unwrap_or_default();
+
+        // The type of a parameter is the type it was given, or the type that
+        // the way it is used asks for.
+        let mut param_types = Vec::new();
+        for param in params {
+            let annotated = self.param_type(param)?;
+            let ty = if param.ty.is_some() {
+                annotated
+            } else {
+                // The type of a parameter is the type that the way it is
+                // used asks for.
+                let mut out: Option<Type> = None;
+                for (name, _) in param.bindings() {
+                    if let Some(found) = witnesses.get(name) {
+                        out = Some(match out {
+                            Some(current) => union(vec![current, found.clone()]),
+                            None => found.clone(),
+                        });
+                    }
+                }
+                out.unwrap_or(annotated)
+            };
+            param_types.push(if param.rest {
+                rest_element_type(&ty)
+            } else {
+                ty
+            });
+        }
 
         if let Some(expected) = &expected {
             if collected.is_empty() && !assignable(&Type::Void, expected) {
@@ -410,11 +631,11 @@ impl TypeChecker<'_> {
                     format!("function must return {} on every path", expected.display()),
                 ));
             }
-            Ok(expected.clone())
+            Ok((expected.clone(), param_types))
         } else if collected.is_empty() {
-            Ok(Type::Void)
+            Ok((Type::Void, param_types))
         } else {
-            Ok(union(collected))
+            Ok((union(collected), param_types))
         }
     }
 
@@ -427,7 +648,7 @@ impl TypeChecker<'_> {
         let bindings = self.type_param_bindings.last().cloned().unwrap_or_default();
         let resolved = substitute_bound(expected, &bindings);
         if !has_type_var(&resolved) {
-            return assignable(actual, &resolved);
+            return self.fits(actual, &resolved);
         }
         let mut trial = bindings.clone();
         if unify_types(actual, &resolved, &mut trial) {
@@ -436,7 +657,7 @@ impl TypeChecker<'_> {
             }
             return true;
         }
-        assignable(actual, &resolved)
+        self.fits(actual, &resolved)
     }
 
     pub(crate) fn check_arrow(
@@ -453,7 +674,10 @@ impl TypeChecker<'_> {
                 self.pop_scope();
                 Ok(ty)
             }
-            ArrowBody::Block(block) => self.check_function(params, block, None, pos),
+            ArrowBody::Block(block) => {
+                let (ty, _) = self.check_function(params, block, None, pos)?;
+                Ok(ty)
+            }
         }
     }
 
@@ -495,7 +719,7 @@ impl TypeChecker<'_> {
                         let actual = self.infer_expr(value)?;
                         if let Some(params) = &signature {
                             if let Some(param) = params.iter().find(|param| param.name == *name) {
-                                if !assignable(&actual, &param.ty) {
+                                if !self.fits(&actual, &param.ty) {
                                     return Err(self.type_error(value.pos(), &actual, &param.ty));
                                 }
                             }
@@ -505,18 +729,25 @@ impl TypeChecker<'_> {
                         // Positional arguments fill the parameters in order.
                         for (index, value) in element.args.iter().enumerate() {
                             let Some(param) = params.get(index) else {
-                                continue;
+                                return Err(self.error(
+                                    value.pos(),
+                                    format!(
+                                        "component '{}' takes {} {}, got {}",
+                                        element.tag,
+                                        params.len(),
+                                        argument_label(params.len()),
+                                        element.args.len()
+                                    ),
+                                ));
                             };
                             let actual = self.infer_expr(value)?;
-                            if !assignable(&actual, &param.ty) {
+                            if !self.fits(&actual, &param.ty) {
                                 return Err(self.type_error(value.pos(), &actual, &param.ty));
                             }
                         }
                         // An argument that the component does not have is a
                         // mistake, unless it takes the rest of them.
-                        if !params.iter().any(|param| param.name == "children")
-                            && !params.iter().any(|param| param.rest)
-                        {
+                        if !params.iter().any(|param| param.rest) {
                             for (attr, value) in &element.attrs {
                                 if params.iter().any(|param| param.name == *attr) {
                                     continue;

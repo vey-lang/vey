@@ -1,6 +1,6 @@
 mod scopes;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::builtins::is_builtin;
@@ -8,9 +8,12 @@ use crate::check::scopes::{BindingKind, Scopes};
 use crate::lexer::Pos;
 use crate::parser::html::is_html_tag;
 use crate::suggest::did_you_mean;
+use crate::types::helpers::block_always_exits;
+use crate::warn::Warning;
 use crate::VeyError;
 
-pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
+/// Check a program and collect the warnings about it.
+pub fn check(program: &Program, file: &str) -> Result<Vec<Warning>, VeyError> {
     let mut checker = Checker {
         file,
         scopes: Scopes::new(),
@@ -18,8 +21,12 @@ pub fn check(program: &Program, file: &str) -> Result<(), VeyError> {
         function_depth: 0,
         declared_at: HashMap::new(),
         statement: 0,
+        exported: HashSet::new(),
+        warnings: Vec::new(),
     };
-    checker.check_program(program)
+    checker.check_program(program)?;
+    checker.pop_scope();
+    Ok(checker.warnings)
 }
 
 struct Checker<'a> {
@@ -31,6 +38,9 @@ struct Checker<'a> {
     declared_at: HashMap<String, usize>,
     /// The statement that is being checked.
     statement: usize,
+    /// The names the program gives to the outside world.
+    exported: HashSet<String>,
+    warnings: Vec<Warning>,
 }
 
 impl Checker<'_> {
@@ -38,9 +48,57 @@ impl Checker<'_> {
         VeyError::new(message, self.file, pos.line, pos.col)
     }
 
+    /// A warning about the program.
+    fn warn(&mut self, warning: Warning) {
+        self.warnings.push(warning);
+    }
+
     fn declare(&mut self, name: &str, kind: BindingKind, pos: Pos) -> Result<(), VeyError> {
+        // A name that hides another one is allowed, but the reader of the
+        // program should know about it.
+        if let Some(previous) = self.scopes.shadowed(name) {
+            self.warn(Warning::new(
+                format!("'{}' hides the name of line {}", name, previous.pos.line),
+                self.file,
+                pos.line,
+                pos.col,
+            ));
+        }
         let file = self.file;
         self.scopes.declare(name, kind, pos, file)
+    }
+
+    /// Leave the scope that is being checked, and say which of its names were
+    /// never read.
+    fn pop_scope(&mut self) {
+        for (name, binding) in self.scopes.take_scope() {
+            if binding.used.get() {
+                continue;
+            }
+            // A name that begins with an underscore asks to be left alone.
+            if name.starts_with('_') {
+                continue;
+            }
+            // A function or a component may be used by the markup or by
+            // another module.
+            if matches!(binding.kind, BindingKind::Function | BindingKind::Component) {
+                continue;
+            }
+            if self.exported.contains(&name) {
+                continue;
+            }
+            let message = match binding.kind {
+                BindingKind::Import => format!("the import '{}' is never used", name),
+                BindingKind::Param => format!("the parameter '{}' is never used", name),
+                _ => format!("'{}' is never used", name),
+            };
+            self.warn(Warning::new(
+                message,
+                self.file,
+                binding.pos.line,
+                binding.pos.col,
+            ));
+        }
     }
 
     fn declare_pattern(
@@ -78,8 +136,9 @@ impl Checker<'_> {
         }
     }
 
-    fn resolve(&self, name: &str) -> Option<scopes::Binding> {
-        self.scopes.resolve(name)
+    /// The name, and a note that it was read.
+    fn read(&self, name: &str) -> Option<std::rc::Rc<scopes::Binding>> {
+        self.scopes.read(name)
     }
 
     /// The names that are in scope, used to suggest a similar one.
@@ -88,6 +147,15 @@ impl Checker<'_> {
     }
 
     fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
+        // The names the program gives to the outside world are used
+        // elsewhere, so they are not reported as unused.
+        for stmt in &program.body {
+            if let Some((name, exported)) = stmt.exported_name() {
+                if exported {
+                    self.exported.insert(name.to_string());
+                }
+            }
+        }
         // The names of the top level are known before the body is checked, so
         // that a function may be used before it is declared. A value is not
         // hoisted, so where it is declared matters.
@@ -109,6 +177,11 @@ impl Checker<'_> {
                     self.declare(&decl.name, BindingKind::Component, decl.pos)?
                 }
                 Stmt::Enum(decl) => self.declare(&decl.name, BindingKind::Const, decl.pos)?,
+                Stmt::Impl(decl) => {
+                    // The block makes a value of the type, so the name of the
+                    // type is the name of a value too.
+                    self.declare(&decl.type_name, BindingKind::Const, decl.pos)?
+                }
                 _ => {}
             }
         }
@@ -154,11 +227,50 @@ impl Checker<'_> {
                     self.check_stmt(branch)?;
                 }
             }
+            Stmt::IfLet(decl) => {
+                self.check_expr(&decl.value)?;
+                self.scopes.push();
+                self.check_pattern_names(&decl.pattern)?;
+                self.check_block(&decl.then_block)?;
+                self.pop_scope();
+                if let Some(branch) = &decl.else_branch {
+                    self.check_stmt(branch)?;
+                }
+            }
             Stmt::While(decl) => {
                 self.check_expr(&decl.test)?;
                 self.loop_depth += 1;
                 self.check_block(&decl.body)?;
                 self.loop_depth -= 1;
+            }
+            Stmt::WhileLet(decl) => {
+                self.check_expr(&decl.value)?;
+                self.loop_depth += 1;
+                self.scopes.push();
+                self.check_pattern_names(&decl.pattern)?;
+                for inner in &decl.body.body {
+                    self.check_stmt(inner)?;
+                }
+                self.pop_scope();
+                self.loop_depth -= 1;
+            }
+            Stmt::LetElse(decl) => {
+                self.check_expr(&decl.value)?;
+                self.scopes.push();
+                self.declare_pattern(&decl.pattern, BindingKind::Let)?;
+                self.pop_scope();
+                // The block has to leave the function, or the value is used
+                // even when it is not there.
+                if self.function_depth > 0 && !block_always_exits(&decl.otherwise) {
+                    return Err(self.error(
+                        decl.pos,
+                        "the block of a value that has to be there must leave the function",
+                    ));
+                }
+                self.check_block(&decl.otherwise)?;
+            }
+            Stmt::Defer(decl) => {
+                self.check_expr(&decl.value)?;
             }
             Stmt::For(decl) => {
                 self.check_expr(&decl.iter)?;
@@ -169,7 +281,7 @@ impl Checker<'_> {
                     self.check_stmt(inner)?;
                 }
                 self.loop_depth -= 1;
-                self.scopes.pop();
+                self.pop_scope();
             }
             Stmt::Repeat(decl) => {
                 self.check_expr(&decl.count)?;
@@ -205,7 +317,7 @@ impl Checker<'_> {
                     for inner in &catch.body {
                         self.check_stmt(inner)?;
                     }
-                    self.scopes.pop();
+                    self.pop_scope();
                 }
                 if let Some(finally) = &decl.finally {
                     self.check_block(finally)?;
@@ -220,6 +332,8 @@ impl Checker<'_> {
                 return Err(self.error(decl.pos, "style blocks must be at the top level"));
             }
             Stmt::Type(_) => {}
+            Stmt::Interface(_) => {}
+            Stmt::Impl(decl) => self.check_impl(decl)?,
             Stmt::Enum(_) => {}
             Stmt::Expr(decl) => self.check_expr(&decl.expr)?,
             Stmt::Assign(decl) => {
@@ -236,7 +350,7 @@ impl Checker<'_> {
         for stmt in &block.body {
             self.check_stmt(stmt)?;
         }
-        self.scopes.pop();
+        self.pop_scope();
         Ok(())
     }
 
@@ -258,14 +372,33 @@ impl Checker<'_> {
             self.check_stmt(stmt)?;
         }
 
-        self.scopes.pop();
+        self.pop_scope();
         self.function_depth -= 1;
         self.loop_depth = loop_depth;
         Ok(())
     }
+    /// Check the functions of a type.
+    fn check_impl(&mut self, decl: &ImplDecl) -> Result<(), VeyError> {
+        for method in &decl.methods {
+            self.scopes.push();
+            // The value the method is called on is named `self`.
+            self.declare("self", BindingKind::Let, method.pos)?;
+            for param in &method.params {
+                for (name, _) in param.bindings() {
+                    self.declare(name, BindingKind::Param, param.pos)?;
+                }
+            }
+            self.function_depth += 1;
+            for stmt in &method.body.body {
+                self.check_stmt(stmt)?;
+            }
+            self.function_depth -= 1;
+            self.pop_scope();
+        }
+        Ok(())
+    }
 
-    fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {
-        self.scopes.push();
+    fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {        self.scopes.push();
         for param in &decl.params {
             if let Some(default) = &param.default {
                 self.check_expr(default)?;
@@ -275,7 +408,7 @@ impl Checker<'_> {
             }
         }
         self.check_markup_nodes(&decl.children)?;
-        self.scopes.pop();
+        self.pop_scope();
         Ok(())
     }
 
@@ -299,7 +432,7 @@ impl Checker<'_> {
                     self.scopes.push();
                     self.declare(&loop_node.name, BindingKind::Let, loop_node.iter.pos())?;
                     self.check_markup_nodes(&loop_node.body)?;
-                    self.scopes.pop();
+                    self.pop_scope();
                 }
             }
         }
@@ -308,7 +441,7 @@ impl Checker<'_> {
 
     fn check_target(&mut self, target: &Expr) -> Result<(), VeyError> {
         match target {
-            Expr::Ident(name, pos) => match self.resolve(name) {
+            Expr::Ident(name, pos) => match self.read(name) {
                 Some(binding) if binding.kind.immutable() => Err(self.error(
                     *pos,
                     format!("cannot assign to {} '{}'", binding.kind.label(), name),
@@ -337,7 +470,7 @@ impl Checker<'_> {
         match expr {
             Expr::Number(_, _) | Expr::Bool(_, _) | Expr::Null(_) => {}
             Expr::Ident(name, pos) => {
-                if self.resolve(name).is_none() && !is_builtin(name) {
+                if self.read(name).is_none() && !is_builtin(name) {
                     let mut error = self.error(*pos, format!("unknown variable '{}'", name));
                     if is_html_tag(name) {
                         // A name of a tag of HTML is often a tag that was
@@ -458,10 +591,12 @@ impl Checker<'_> {
                         self.check_expr(guard)?;
                     }
                     self.check_expr(&arm.body)?;
-                    self.scopes.pop();
+                    self.pop_scope();
                 }
             }
             Expr::Await(arg, _) => self.check_expr(arg)?,
+            Expr::Try(arg, _) => self.check_expr(arg)?,
+            Expr::Yield(arg, _) => self.check_expr(arg)?,
             Expr::Spread(arg, _) => self.check_expr(arg)?,
         }
         Ok(())
@@ -481,6 +616,25 @@ impl Checker<'_> {
         Ok(())
     }
 
+    /// The names that a pattern of a `match` takes apart.
+    fn check_pattern_names(&mut self, pattern: &Pattern) -> Result<(), VeyError> {
+        match pattern {
+            Pattern::Enum { bindings, .. } => {
+                let mut seen = std::collections::HashSet::new();
+                for binding in bindings {
+                    if seen.insert(binding.name.clone()) {
+                        self.declare(&binding.name, BindingKind::Let, binding.pos)?;
+                    }
+                }
+            }
+            Pattern::Binding { name, pos } => {
+                self.declare(name, BindingKind::Let, *pos)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn check_arrow(&mut self, params: &[Param], body: &ArrowBody) -> Result<(), VeyError> {
         match body {
             ArrowBody::Expr(expr) => {
@@ -496,7 +650,7 @@ impl Checker<'_> {
                     }
                 }
                 self.check_expr(expr)?;
-                self.scopes.pop();
+                self.pop_scope();
                 self.loop_depth = loop_depth;
             }
             ArrowBody::Block(block) => self.check_function(params, block)?,

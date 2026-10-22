@@ -3,9 +3,17 @@
 use crate::ast::*;
 use crate::VeyError;
 
-use super::awaits::{block_has_await, expr_has_await};
+use super::awaits::{block_has_await, block_has_yield, expr_has_await};
 use super::js::{format_number, js_key, js_string};
 use super::Codegen;
+
+/// The name of an enum, without the name of the module it comes from.
+///
+/// The value of an enum carries the name it was given where it was written,
+/// so that two enums of the same name do not mix.
+fn local_enum_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
 
 impl Codegen {
     /// The code of an expression, with a mark that says where it came from.
@@ -118,7 +126,72 @@ impl Codegen {
             )),
             Expr::Match(subject, arms, _) => self.gen_match(subject, arms),
             Expr::Await(arg, _) => Ok(format!("(await {})", self.gen_expr(arg)?)),
+            Expr::Try(arg, _) => Ok(format!("V.propagate({})", self.gen_expr(arg)?)),
+            Expr::Yield(arg, _) => Ok(format!("(yield {})", self.gen_expr(arg)?)),
             Expr::Spread(arg, _) => Ok(format!("...{}", self.gen_expr(arg)?)),
+        }
+    }
+
+    /// The condition of a pattern, and the names it binds.
+    ///
+    /// The condition says whether a value fits the pattern, and the names
+    /// are the values that the pattern takes apart.
+    pub(crate) fn gen_pattern(
+        &mut self,
+        pattern: &Pattern,
+        subject: &str,
+    ) -> Result<(String, Vec<(String, String)>), VeyError> {
+        match pattern {
+            Pattern::Binding { name, .. } => Ok((
+                "true".to_string(),
+                vec![(name.clone(), subject.to_string())],
+            )),
+            Pattern::Wildcard => Ok(("true".to_string(), Vec::new())),
+            Pattern::Literal(expr) => {
+                let value = self.gen_expr(expr)?;
+                Ok((format!("{} === {}", subject, value), Vec::new()))
+            }
+            Pattern::Range(start, end) => {
+                let start = self.gen_expr(start)?;
+                let end = self.gen_expr(end)?;
+                Ok((
+                    format!("({} >= {} && {} < {})", subject, start, subject, end),
+                    Vec::new(),
+                ))
+            }
+            Pattern::Enum {
+                enum_name,
+                variant,
+                bindings,
+                ..
+            } => {
+                let condition = format!(
+                    "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
+                    subject,
+                    subject,
+                    js_string(local_enum_name(enum_name)),
+                    subject,
+                    js_string(variant)
+                );
+                let fields = self
+                    .enums
+                    .get(enum_name)
+                    .map(|info| info.field_names(variant))
+                    .unwrap_or_default();
+                let mut taken = Vec::new();
+                let mut positional = 0usize;
+                for binding in bindings {
+                    let field = if let Some(field) = &binding.field {
+                        field.clone()
+                    } else {
+                        let index = positional;
+                        positional += 1;
+                        fields.get(index).cloned().unwrap_or_else(|| binding.name.clone())
+                    };
+                    taken.push((binding.name.clone(), format!("{}.{}", subject, field)));
+                }
+                Ok((condition, taken))
+            }
         }
     }
 
@@ -143,6 +216,7 @@ impl Codegen {
     ) -> Result<String, VeyError> {
         let params_text = self.gen_params(params)?;
         let async_kw = if block_has_await(body) { "async " } else { "" };
+        let generator = if block_has_yield(body) { "*" } else { "" };
         let captured = self.capture(|codegen| {
             codegen.push_scope();
             for param in params {
@@ -150,16 +224,15 @@ impl Codegen {
                     codegen.declare(name);
                 }
             }
-            for stmt in &body.body {
-                codegen.gen_stmt(stmt)?;
-            }
+            codegen.gen_body(body)?;
             codegen.pop_scope();
             Ok(())
         })?;
         let pad = "  ".repeat(self.indent);
         Ok(format!(
-            "({}function({}) {{\n{}\n{}}})",
+            "({}function{}({}) {{\n{}\n{}}})",
             async_kw,
+            generator,
             params_text,
             captured.trim_end_matches('\n'),
             pad
@@ -180,6 +253,7 @@ impl Codegen {
             }
             ArrowBody::Block(block) => {
                 let async_kw = if block_has_await(block) { "async " } else { "" };
+                let generator = if block_has_yield(block) { "*" } else { "" };
                 let captured = self.capture(|codegen| {
                     codegen.push_scope();
                     for param in params {
@@ -187,16 +261,15 @@ impl Codegen {
                             codegen.declare(name);
                         }
                     }
-                    for stmt in &block.body {
-                        codegen.gen_stmt(stmt)?;
-                    }
+                    codegen.gen_body(block)?;
                     codegen.pop_scope();
                     Ok(())
                 })?;
                 let pad = "  ".repeat(self.indent);
                 Ok(format!(
-                    "({}({}) => {{\n{}\n{}}})",
+                    "({}{}({}) => {{\n{}\n{}}})",
                     async_kw,
+                    generator,
                     param_text,
                     captured.trim_end_matches('\n'),
                     pad
@@ -293,7 +366,7 @@ impl Codegen {
                             "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
                             temp,
                             temp,
-                            js_string(enum_name),
+                            js_string(local_enum_name(enum_name)),
                             temp,
                             js_string(variant)
                         )),
@@ -323,7 +396,7 @@ impl Codegen {
                         "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
                         temp,
                         temp,
-                        js_string(enum_name),
+                        js_string(local_enum_name(enum_name)),
                         temp,
                         js_string(variant)
                     );

@@ -9,7 +9,7 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_pipe(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_ternary()?;
-        while self.is_op("|>") {
+        while self.is_op("|>") && !self.line_ends_statement() {
             self.advance()?;
             let right = self.parse_ternary()?;
             let pos = right.pos();
@@ -26,7 +26,7 @@ impl Parser {
 
     pub(crate) fn parse_ternary(&mut self) -> Result<Expr, VeyError> {
         let test = self.parse_nullish()?;
-        if self.is_op("?") {
+        if self.is_op("?") && !self.line_ends_statement() {
             let pos = self.tok.pos;
             self.advance()?;
             let cons = self.parse_expression()?;
@@ -44,7 +44,7 @@ impl Parser {
 
     pub(crate) fn parse_nullish(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_or()?;
-        while self.is_op("??") {
+        while self.is_op("??") && !self.line_ends_statement() {
             let pos = self.tok.pos;
             self.advance()?;
             let right = self.parse_or()?;
@@ -55,7 +55,7 @@ impl Parser {
 
     pub(crate) fn parse_or(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_and()?;
-        while self.is_kw("or") {
+        while self.is_kw("or") && !self.line_ends_statement() {
             let pos = self.tok.pos;
             self.advance()?;
             let right = self.parse_and()?;
@@ -66,7 +66,7 @@ impl Parser {
 
     pub(crate) fn parse_and(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_equality()?;
-        while self.is_kw("and") {
+        while self.is_kw("and") && !self.line_ends_statement() {
             let pos = self.tok.pos;
             self.advance()?;
             let right = self.parse_equality()?;
@@ -77,7 +77,7 @@ impl Parser {
 
     pub(crate) fn parse_equality(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_comparison()?;
-        while self.is_op("==") || self.is_op("!=") {
+        while (self.is_op("==") || self.is_op("!=")) && !self.line_ends_statement() {
             let op_tok = self.advance()?;
             let op = if op_tok.value == "==" { "===" } else { "!==" };
             let right = self.parse_comparison()?;
@@ -88,7 +88,9 @@ impl Parser {
 
     pub(crate) fn parse_comparison(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_bitwise_or()?;
-        while self.is_op("<") || self.is_op("<=") || self.is_op(">") || self.is_op(">=") {
+        while (self.is_op("<") || self.is_op("<=") || self.is_op(">") || self.is_op(">="))
+            && !self.line_ends_statement()
+        {
             let op_tok = self.advance()?;
             let right = self.parse_bitwise_or()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -102,7 +104,7 @@ impl Parser {
     /// JavaScript, so `a < b & c` is `(a < b) & c`.
     pub(crate) fn parse_bitwise_or(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_bitwise_xor()?;
-        while self.is_op("|") {
+        while self.is_op("|") && !self.line_ends_statement() {
             let op_tok = self.advance()?;
             let right = self.parse_bitwise_xor()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -112,7 +114,7 @@ impl Parser {
 
     pub(crate) fn parse_bitwise_xor(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_bitwise_and()?;
-        while self.is_op("^") {
+        while self.is_op("^") && !self.line_ends_statement() {
             let op_tok = self.advance()?;
             let right = self.parse_bitwise_and()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -122,7 +124,7 @@ impl Parser {
 
     pub(crate) fn parse_bitwise_and(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_shift()?;
-        while self.is_op("&") {
+        while self.is_op("&") && !self.line_ends_statement() {
             let op_tok = self.advance()?;
             let right = self.parse_shift()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -132,7 +134,7 @@ impl Parser {
 
     pub(crate) fn parse_shift(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_range()?;
-        while self.is_op("<<") || self.is_op(">>") {
+        while (self.is_op("<<") || self.is_op(">>")) && !self.line_ends_statement() {
             let op_tok = self.advance()?;
             let right = self.parse_range()?;
             left = Expr::Binary(op_tok.value, Box::new(left), Box::new(right), op_tok.pos);
@@ -142,7 +144,7 @@ impl Parser {
 
     pub(crate) fn parse_range(&mut self) -> Result<Expr, VeyError> {
         let start = self.parse_additive()?;
-        if self.is_op("..") {
+        if self.is_op("..") && !self.line_ends_statement() {
             let pos = self.advance()?.pos;
             let end = self.parse_additive()?;
             return Ok(Expr::Range(Box::new(start), Box::new(end), pos));
@@ -152,7 +154,7 @@ impl Parser {
 
     pub(crate) fn parse_additive(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_multiplicative()?;
-        while self.is_op("+") || self.is_op("-") {
+        while (self.is_op("+") || self.is_op("-")) && !self.line_ends_statement() {
             let op = self.advance()?;
             let right = self.parse_multiplicative()?;
             left = Expr::Binary(op.value, Box::new(left), Box::new(right), op.pos);
@@ -162,7 +164,8 @@ impl Parser {
 
     pub(crate) fn parse_multiplicative(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_power()?;
-        while self.is_op("*") || self.is_op("/") || self.is_op("%") {
+        while (self.is_op("*") || self.is_op("/") || self.is_op("%")) && !self.line_ends_statement()
+        {
             let op = self.advance()?;
             let right = self.parse_power()?;
             left = Expr::Binary(op.value, Box::new(left), Box::new(right), op.pos);
@@ -172,7 +175,7 @@ impl Parser {
 
     pub(crate) fn parse_power(&mut self) -> Result<Expr, VeyError> {
         let left = self.parse_unary()?;
-        if self.is_op("**") {
+        if self.is_op("**") && !self.line_ends_statement() {
             let pos = self.advance()?.pos;
             let right = self.parse_power()?;
             return Ok(Expr::Binary(
@@ -208,6 +211,9 @@ impl Parser {
     pub(crate) fn parse_postfix(&mut self) -> Result<Expr, VeyError> {
         let mut expr = self.parse_primary()?;
         loop {
+            if self.line_ends_statement() {
+                break;
+            }
             if self.is_punct(".") {
                 let pos = self.advance()?.pos;
                 let name = self.expect_ident("property name")?;
@@ -252,11 +258,46 @@ impl Parser {
                 let pos = self.tok.pos;
                 let args = self.parse_args()?;
                 expr = Expr::CallGeneric(Box::new(expr), type_args, args, false, pos);
+            } else if self.is_op("?") && !self.ternary_ahead() {
+                // The value hands its failure on.
+                let pos = self.advance()?.pos;
+                expr = Expr::Try(Box::new(expr), pos);
             } else {
                 break;
             }
         }
         Ok(expr)
+    }
+
+    /// Whether the `?` that follows starts a ternary.
+    ///
+    /// A ternary has a `:` at the same depth, and a `?` that hands a failure
+    /// on does not.
+    pub(crate) fn ternary_ahead(&self) -> bool {
+        let mut lexer = self.lexer.clone();
+        let mut depth = 0i32;
+        loop {
+            let token = match lexer.next_token() {
+                Ok(token) => token,
+                Err(_) => return false,
+            };
+            match token.kind {
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            match token.value.as_str() {
+                "(" | "[" | "{" => depth += 1,
+                ")" | "]" | "}" => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                ":" if depth == 0 => return true,
+                ";" => return false,
+                _ => {}
+            }
+        }
     }
 
     /// Whether the `<` that follows names the type arguments of a call.

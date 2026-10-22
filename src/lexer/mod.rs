@@ -47,6 +47,10 @@ pub struct Token {
     pub pos: Pos,
     pub start: usize,
     pub end: usize,
+    /// Whether the token is the first one of its line.
+    ///
+    /// The end of a line may end a statement, so the parser needs to know.
+    pub newline_before: bool,
 }
 
 impl Token {
@@ -59,6 +63,7 @@ impl Token {
             pos,
             start: at,
             end: at,
+            newline_before: false,
         }
     }
 }
@@ -70,6 +75,12 @@ pub struct Lexer {
     pos: usize,
     line: usize,
     col: usize,
+    /// The doc comments of the file, in the order they were written.
+    docs: Vec<(String, Pos)>,
+    /// The version of the language the file was written for.
+    version: Option<String>,
+    /// Whether a newline was crossed before the token that is read.
+    newline: bool,
 }
 
 const OPS: &[&str] = &[
@@ -110,6 +121,8 @@ pub fn is_keyword(word: &str) -> bool {
             | "not"
             | "match"
             | "enum"
+            | "pub"
+            | "priv"
     )
 }
 
@@ -125,7 +138,20 @@ impl Lexer {
             pos: 0,
             line,
             col,
+            docs: Vec::new(),
+            version: None,
+            newline: false,
         }
+    }
+
+    /// The doc comments of the file.
+    pub fn take_docs(&mut self) -> Vec<(String, Pos)> {
+        std::mem::take(&mut self.docs)
+    }
+
+    /// The version of the language the file was written for.
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
     }
 
     fn err(&self, message: impl Into<String>) -> VeyError {
@@ -158,22 +184,57 @@ impl Lexer {
     }
 
     fn skip_space(&mut self) {
+        self.newline = false;
         loop {
             match self.at(0) {
                 // A file that starts with a byte order mark is read as if it
                 // was not there.
                 Some(c) if c.is_whitespace() || c == '\u{feff}' => {
+                    if c == '\n' {
+                        self.newline = true;
+                    }
                     self.bump();
                 }
                 Some('/') if self.at(1) == Some('/') => {
+                    let pos = Pos::new(self.line, self.col);
+                    let mut text = String::new();
                     while let Some(c) = self.at(0) {
                         if c == '\n' {
                             break;
                         }
                         self.bump();
+                        text.push(c);
                     }
+                    self.read_comment(&text, pos);
                 }
                 _ => break,
+            }
+        }
+    }
+
+    /// Read a comment.
+    ///
+    /// A comment of three slashes is a doc comment, and a comment that
+    /// names the version of the language says which one the file was
+    /// written for.
+    fn read_comment(&mut self, text: &str, pos: Pos) {
+        if let Some(rest) = text.strip_prefix("///") {
+            let mut line = rest.to_string();
+            if let Some(hash) = line.find('#') {
+                line.truncate(hash);
+            }
+            self.docs.push((line.trim().to_string(), pos));
+            return;
+        }
+        let trimmed = text.trim_start();
+        let Some(rest) = trimmed.strip_prefix("//") else {
+            return;
+        };
+        let trimmed = rest.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("vey:") {
+            let version = rest.trim();
+            if !version.is_empty() && self.version.is_none() {
+                self.version = Some(version.to_string());
             }
         }
     }
@@ -183,6 +244,7 @@ impl Lexer {
 
         let start = self.pos;
         let pos = Pos::new(self.line, self.col);
+        let newline_before = self.newline;
 
         let Some(c) = self.at(0) else {
             return Ok(Token::eof(pos, start));
@@ -219,6 +281,7 @@ impl Lexer {
                 pos,
                 start,
                 end: self.pos,
+                newline_before,
             });
         }
 
@@ -235,6 +298,7 @@ impl Lexer {
                     pos,
                     start,
                     end: self.pos,
+                    newline_before,
                 });
             }
         }
@@ -249,6 +313,7 @@ impl Lexer {
                 pos,
                 start,
                 end: self.pos,
+                newline_before,
             });
         }
 
@@ -256,6 +321,7 @@ impl Lexer {
     }
 
     fn read_number(&mut self, start: usize, pos: Pos) -> Token {
+        let newline_before = self.newline;
         let mut raw = String::new();
         while let Some(c) = self.at(0) {
             if c.is_ascii_digit() {
@@ -309,6 +375,7 @@ impl Lexer {
             pos,
             start,
             end: self.pos,
+            newline_before,
         }
     }
 }

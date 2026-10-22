@@ -5,15 +5,30 @@ use crate::ast::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Any,
+    /// A value whose shape is not known. It is not the same as `any`: a
+    /// value of this type cannot be used where a number is expected.
+    Unknown,
     Var(String),
     Number,
     String,
     Bool,
     Null,
+    /// The type of a value that is not there.
+    Undefined,
     Void,
     Never,
+    Symbol,
+    BigInt,
     Array(Box<Type>),
+    /// A list of values of different types, such as `[number, string]`.
+    Tuple(Vec<Type>),
+    /// A dictionary, such as `{[string]: number}`.
+    Dict(Box<Type>, Box<Type>),
     Object(Vec<ObjectField>),
+    /// Any value that is not a number, a text or a yes or a no.
+    AnyObject,
+    /// A type with a name of its own, such as an interface.
+    Interface(String, Vec<ObjectField>),
     Function(FunctionType),
     Union(Vec<Type>),
     Enum(String, String),
@@ -26,6 +41,11 @@ pub enum Type {
     Recursion(String),
     /// An object type that has a name, such as a type alias.
     Named(String, Vec<ObjectField>),
+    /// A value that will be there later, such as the result of a request.
+    Promise(Box<Type>),
+    /// A value that may be there, such as the answer of a function that may
+    /// fail.
+    Result(Box<Type>, Box<Type>),
 }
 
 #[derive(Clone)]
@@ -37,6 +57,18 @@ pub(crate) struct Alias {
 #[derive(Clone)]
 pub struct EnumInfo {
     pub variants: Vec<EnumVariantInfo>,
+}
+
+/// The members of an interface.
+#[derive(Clone)]
+pub struct InterfaceInfo {
+    pub members: Vec<crate::ast::InterfaceMember>,
+}
+
+/// The functions of a type.
+#[derive(Clone)]
+pub struct ImplInfo {
+    pub methods: Vec<crate::ast::ImplMethod>,
 }
 
 #[derive(Clone)]
@@ -89,14 +121,28 @@ impl Type {
     pub(crate) fn display(&self) -> String {
         match self {
             Self::Any => "any".to_string(),
+            Self::Unknown => "unknown".to_string(),
             Self::Var(name) => name.clone(),
             Self::Number => "number".to_string(),
             Self::String => "string".to_string(),
             Self::Bool => "bool".to_string(),
             Self::Null => "null".to_string(),
+            Self::Undefined => "undefined".to_string(),
             Self::Void => "void".to_string(),
             Self::Never => "never".to_string(),
+            Self::Symbol => "symbol".to_string(),
+            Self::BigInt => "bigint".to_string(),
             Self::Array(inner) => format!("[{}]", inner.display()),
+            Self::Tuple(items) => {
+                let parts = items
+                    .iter()
+                    .map(|item| item.display())
+                    .collect::<Vec<_>>();
+                format!("[{}]", parts.join(", "))
+            }
+            Self::Dict(key, value) => {
+                format!("{{[{}]: {}}}", key.display(), value.display())
+            }
             Self::Object(fields) => {
                 if fields.is_empty() {
                     return "{}".to_string();
@@ -113,6 +159,8 @@ impl Type {
                     .collect::<Vec<_>>();
                 format!("{{ {} }}", parts.join(", "))
             }
+            Self::AnyObject => "object".to_string(),
+            Self::Interface(name, _) => name.clone(),
             Self::Function(function) => {
                 let mut params = Vec::new();
                 for (index, param) in function.params.iter().enumerate() {
@@ -134,6 +182,10 @@ impl Type {
             Self::EnumNamespace(name) => format!("enum {}", name),
             Self::Recursion(name) => name.clone(),
             Self::Named(name, _) => name.clone(),
+            Self::Promise(inner) => format!("Promise<{}>", inner.display()),
+            Self::Result(ok, err) => {
+                format!("Result<{}, {}>", ok.display(), err.display())
+            }
         }
     }
 
@@ -186,6 +238,8 @@ pub(crate) fn push_unique(out: &mut Vec<Type>, ty: Type) {
 pub(crate) fn element_type(ty: &Type) -> Type {
     match ty {
         Type::Array(inner) => (**inner).clone(),
+        Type::Tuple(items) => union(items.iter().cloned().collect()),
+        Type::Dict(_, value) => (**value).clone(),
         Type::String => Type::String,
         Type::Any => Type::Any,
         Type::Union(items) => union(items.iter().map(element_type).collect()),
@@ -216,6 +270,13 @@ pub(crate) fn project_field(ty: &Type, name: &str) -> Type {
             .find(|field| field.name == name)
             .map(|field| field.ty.clone())
             .unwrap_or(Type::Any),
+        Type::Interface(_, fields) => fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| field.ty.clone())
+            .unwrap_or(Type::Any),
+        // Every key of a dictionary has the same type of value.
+        Type::Dict(_, value) => (**value).clone(),
         Type::Union(items) => union(items.iter().map(|item| project_field(item, name)).collect()),
         Type::Any => Type::Any,
         _ => Type::Any,
@@ -239,6 +300,14 @@ pub(crate) fn object_rest_type(ty: &Type, bound: &[BindingField]) -> Type {
                 .cloned()
                 .collect();
             Type::Named(name.clone(), remaining)
+        }
+        Type::Interface(name, fields) => {
+            let remaining = fields
+                .iter()
+                .filter(|field| !bound.iter().any(|item| item.key == field.name))
+                .cloned()
+                .collect();
+            Type::Interface(name.clone(), remaining)
         }
         Type::Any => Type::Any,
         Type::Union(items) => union(
@@ -270,6 +339,7 @@ pub(crate) fn type_from_kind(kind: &str, original: &Type) -> Option<Type> {
         "number" => Type::Number,
         "boolean" => Type::Bool,
         "null" => Type::Null,
+        "undefined" => Type::Undefined,
         "list" => match original {
             Type::Array(_) => original.clone(),
             _ => Type::Array(Box::new(Type::Any)),
@@ -279,7 +349,7 @@ pub(crate) fn type_from_kind(kind: &str, original: &Type) -> Option<Type> {
             _ => return None,
         },
         "object" => match original {
-            Type::Object(_) | Type::Named(_, _) => original.clone(),
+            Type::Object(_) | Type::Named(_, _) | Type::AnyObject => original.clone(),
             _ => return None,
         },
         "enum" => match original {
@@ -309,5 +379,29 @@ pub(crate) fn remove_type(ty: &Type, target: &Type) -> Type {
         ),
         other if other == target => Type::Never,
         other => other.clone(),
+    }
+}
+
+/// The type of a value without the parts that may be nothing.
+pub(crate) fn without_empty(ty: &Type) -> Type {
+    match ty {
+        Type::Null | Type::Undefined => Type::Never,
+        Type::Union(items) => union(
+            items
+                .iter()
+                .filter(|item| !matches!(item, Type::Null | Type::Undefined))
+                .cloned()
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Whether an expression is a value that is not there.
+pub(crate) fn is_empty(expr: &Expr) -> bool {
+    match expr {
+        Expr::Null(_) => true,
+        Expr::Ident(name, _) => name == "undefined",
+        _ => false,
     }
 }

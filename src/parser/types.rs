@@ -40,9 +40,27 @@ impl Parser {
     pub(crate) fn parse_primary_type(&mut self) -> Result<TypeExpr, VeyError> {
         if self.is_punct("[") {
             let pos = self.advance()?.pos;
-            let inner = self.parse_type()?;
+            // A list of one type is a list of that type. A list of more is a
+            // tuple, whose values have types of their own.
+            if self.is_punct("]") {
+                self.advance()?;
+                return Ok(TypeExpr::Tuple(Vec::new(), pos));
+            }
+            let first = self.parse_type()?;
+            if !self.is_punct(",") {
+                self.expect_punct("]")?;
+                return Ok(TypeExpr::Array(Box::new(first), pos));
+            }
+            let mut items = vec![first];
+            while self.is_punct(",") {
+                self.advance()?;
+                if self.is_punct("]") {
+                    break;
+                }
+                items.push(self.parse_type()?);
+            }
             self.expect_punct("]")?;
-            return Ok(TypeExpr::Array(Box::new(inner), pos));
+            return Ok(TypeExpr::Tuple(items, pos));
         }
 
         if self.is_punct("{") {
@@ -129,6 +147,18 @@ impl Parser {
     pub(crate) fn parse_object_type(&mut self) -> Result<TypeExpr, VeyError> {
         let pos = self.expect_punct("{")?.pos;
         let mut fields = Vec::new();
+
+        // A dictionary, such as `{[string]: number}`, has a key and a value
+        // instead of the fields.
+        if self.is_punct("[") {
+            self.advance()?;
+            let key = self.parse_type()?;
+            self.expect_punct("]")?;
+            self.expect_punct(":")?;
+            let value = self.parse_type()?;
+            self.expect_punct("}")?;
+            return Ok(TypeExpr::Dict(Box::new(key), Box::new(value), pos));
+        }
 
         while !self.is_punct("}") {
             let token = self.tok.clone();

@@ -182,6 +182,11 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "require" => Some(builtin_function(vec![string()], any())),
         "hash" => Some(builtin_function(vec![any()], string())),
         "highlight" => Some(builtin_function(vec![string()], string())),
+        "title" => Some(builtin_function(vec![any()], Type::Void)),
+        "clipboard" => Some(builtin_object(vec![(
+            "write",
+            builtin_function(vec![string()], any()),
+        )])),
         "process" => Some(builtin_object(vec![
             ("cwd", builtin_function(vec![], string())),
             ("argv", builtin_function(vec![], list(string()))),
@@ -258,6 +263,17 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
 pub(crate) fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
-        "any" | "number" | "string" | "bool" | "null" | "void" | "never"
+        "any"
+            | "unknown"
+            | "number"
+            | "string"
+            | "bool"
+            | "null"
+            | "undefined"
+            | "void"
+            | "never"
+            | "symbol"
+            | "bigint"
+            | "object"
     )
 }

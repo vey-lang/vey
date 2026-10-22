@@ -5,15 +5,18 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
-use crate::types::core::{union, FunctionType, ObjectField, Type};
+use crate::types::core::{union, without_empty, EnumInfo, EnumVariantInfo, FunctionType, ObjectField, Type};
 use crate::types::rules::{
-    assignable, collect_type_vars, comparable, erase_type_vars, orderable, substitute,
+    assignable, collect_type_vars, comparable, erase_type_vars, has_type_var, orderable, substitute,
     substitute_bound, unify_types,
 };
 use crate::VeyError;
 
 use super::checker::TypeChecker;
-use super::helpers::{argument_label, set_object_field, type_argument_label};
+use super::helpers::{
+    argument_label, literal_number, operand_type, qualified_type, set_object_field,
+    type_argument_label,
+};
 
 impl TypeChecker<'_> {
     pub(crate) fn infer_expr(&mut self, expr: &Expr) -> Result<Type, VeyError> {
@@ -37,11 +40,17 @@ impl TypeChecker<'_> {
                 let mut types = Vec::new();
                 for item in items {
                     match item {
-                        Expr::Spread(inner, _) => {
+                        Expr::Spread(inner, spread_pos) => {
                             let ty = self.infer_expr(inner)?;
                             match ty {
                                 Type::Array(element) => types.push(*element),
-                                _ => types.push(Type::Any),
+                                Type::Any | Type::Unknown => types.push(Type::Any),
+                                _ => {
+                                    return Err(self.error(
+                                        *spread_pos,
+                                        format!("cannot spread a {}", ty.display()),
+                                    ))
+                                }
                             }
                         }
                         other => types.push(self.infer_expr(other)?),
@@ -72,12 +81,20 @@ impl TypeChecker<'_> {
                         ObjectProp::Spread(value) => {
                             let ty = self.infer_expr(value)?;
                             match ty {
-                                Type::Object(fields) | Type::Named(_, fields) => {
+                                Type::Object(fields)
+                                | Type::Named(_, fields)
+                                | Type::Interface(_, fields) => {
                                     for field in fields {
                                         set_object_field(&mut out, field);
                                     }
                                 }
-                                _ => unknown = true,
+                                Type::Any | Type::Unknown => unknown = true,
+                                _ => {
+                                    return Err(self.error(
+                                        value.pos(),
+                                        format!("cannot spread a {}", ty.display()),
+                                    ))
+                                }
                             }
                         }
                     }
@@ -110,20 +127,26 @@ impl TypeChecker<'_> {
                 }
             }
             Expr::Binary(op, left, right, pos) => {
-                let left = self.infer_expr(left)?;
-                let right = self.infer_expr(right)?;
-                self.binary_result(op, &left, &right, *pos)
+                let left_ty = self.infer_expr(left)?;
+                let right_ty = self.infer_expr(right)?;
+                // The way a value is used says what its type has to be.
+                self.note_operand(op, left, &left_ty, &right_ty);
+                self.note_operand(op, right, &right_ty, &left_ty);
+                self.binary_result(op, &left_ty, &right_ty, *pos)
             }
-            Expr::Logical(_, left, right, _) => {
+            Expr::Logical(_, left, right, pos) => {
                 let left = self.infer_expr(left)?;
                 let right = self.infer_expr(right)?;
-                if matches!(left, Type::Any) || matches!(right, Type::Any) {
-                    Ok(Type::Any)
-                } else if assignable(&left, &Type::Bool) && assignable(&right, &Type::Bool) {
-                    Ok(Type::Bool)
-                } else {
-                    Ok(Type::Any)
+                // A condition is a yes or a no.
+                for ty in [&left, &right] {
+                    if matches!(ty, Type::Any | Type::Unknown | Type::Var(_)) {
+                        continue;
+                    }
+                    if !assignable(ty, &Type::Bool) {
+                        return Err(self.type_error(*pos, ty, &Type::Bool));
+                    }
                 }
+                Ok(Type::Bool)
             }
             Expr::Nullish(left, right, _) => {
                 let left = self.infer_expr(left)?;
@@ -136,9 +159,16 @@ impl TypeChecker<'_> {
                 let else_ty = self.infer_expr(else_value)?;
                 Ok(union(vec![then_ty, else_ty]))
             }
-            Expr::Call(callee, args, _, pos) => {
+            Expr::Call(callee, args, optional, pos) => {
                 let callee_ty = self.infer_expr(callee)?;
                 let (arg_types, has_spread) = self.call_argument_types(args)?;
+                // A call that may not happen has a value that may be
+                // nothing.
+                let callee_ty = if *optional {
+                    without_empty(&callee_ty)
+                } else {
+                    callee_ty
+                };
                 self.check_call(&callee_ty, &arg_types, has_spread, *pos, None, None)
             }
             Expr::CallGeneric(callee, type_args, args, _, pos) => {
@@ -161,14 +191,15 @@ impl TypeChecker<'_> {
                 self.member_type(object, prop, *optional, *pos)
             }
             Expr::Fn(params, body, ret_ann, pos) => {
-                let ret = self.check_function(params, body, ret_ann.as_ref(), *pos)?;
+                let (ret, param_types) =
+                    self.check_function(params, body, ret_ann.as_ref(), *pos)?;
                 // The type of the result is known even when the parameters
                 // are not, so that a closure fits the type it is given.
-                self.function_type_from_parts(params, ret, ret_ann.is_some(), &[])
+                self.function_type_from_parts(params, ret, ret_ann.is_some(), &[], &param_types)
             }
             Expr::Arrow(params, body, pos) => {
                 let ret = self.check_arrow(params, body, *pos)?;
-                self.function_type_from_parts(params, ret, false, &[])
+                self.function_type_from_parts(params, ret, false, &[], &[])
             }
             Expr::Range(start, end, pos) => {
                 let start_ty = self.infer_expr(start)?;
@@ -197,29 +228,21 @@ impl TypeChecker<'_> {
                                 pos,
                             } => {
                                 // resolve enum
-                                if !self.enums.contains_key(enum_name) {
+                                let Some(info) = self.enum_info(enum_name) else {
                                     return Err(
                                         self.error(*pos, format!("unknown enum '{}'", enum_name))
                                     );
-                                }
+                                };
                                 let v_fields: Vec<(String, Option<TypeExpr>)> = {
-                                    let Some(info) = self.enums.get(enum_name) else {
-                                        return Err(self
-                                            .error(*pos, format!("unknown enum '{}'", enum_name)));
-                                    };
-                                    let v = info
-                                        .variants
-                                        .iter()
-                                        .find(|v| v.name == *variant)
-                                        .ok_or_else(|| {
-                                            self.error(
-                                                *pos,
-                                                format!(
-                                                    "enum '{}' has no variant '{}'",
-                                                    enum_name, variant
-                                                ),
-                                            )
-                                        })?;
+                                    let v = info.variant(variant).ok_or_else(|| {
+                                        self.error(
+                                            *pos,
+                                            format!(
+                                                "enum '{}' has no variant '{}'",
+                                                enum_name, variant
+                                            ),
+                                        )
+                                    })?;
                                     v.fields
                                         .iter()
                                         .map(|f| (f.name.clone(), f.ty.clone()))
@@ -332,7 +355,7 @@ impl TypeChecker<'_> {
                 if !has_wildcard {
                     match &subject_ty {
                         Type::EnumUnion(name) => {
-                            if let Some(info) = self.enums.get(name) {
+                            if let Some(info) = self.enum_info(name) {
                                 let missing: Vec<String> = info
                                     .variants
                                     .iter()
@@ -374,11 +397,53 @@ impl TypeChecker<'_> {
                 }
             }
             Expr::Await(inner, _) => {
-                self.infer_expr(inner)?;
-                Ok(Type::Any)
+                let ty = self.infer_expr(inner)?;
+                // The type of an `await` is the type of the value that will
+                // be there.
+                Ok(match ty {
+                    Type::Promise(inner) => *inner,
+                    _ => Type::Any,
+                })
             }
+            Expr::Try(inner, _) => {
+                // The type of a value that hands its failure on is the type
+                // of the value inside it.
+                let ty = self.infer_expr(inner)?;
+                Ok(match ty {
+                    Type::Result(ok, _) => *ok,
+                    Type::Union(items) => union(
+                        items
+                            .iter()
+                            .map(|item| match item {
+                                Type::Result(ok, _) => (**ok).clone(),
+                                other => other.clone(),
+                            })
+                            .collect(),
+                    ),
+                    other => other,
+                })
+            }
+            Expr::Yield(inner, _) => self.infer_expr(inner),
             Expr::Spread(inner, _) => self.infer_expr(inner),
         }
+    }
+
+    /// Remember the type that a parameter has to have.
+    ///
+    /// The operator a value is used with says what its type is, so a
+    /// parameter without a type is known when it is used.
+    pub(crate) fn note_operand(&mut self, op: &str, expr: &Expr, own: &Type, other: &Type) {
+        let Expr::Ident(name, _) = expr else {
+            return;
+        };
+        let Some(wanted) = operand_type(op, other) else {
+            return;
+        };
+        // The value has to fit the type that is already known.
+        if !matches!(own, Type::Any) && !assignable(own, &wanted) {
+            return;
+        }
+        self.note_param(name, wanted);
     }
 
     /// The types of the arguments of a call.
@@ -415,6 +480,49 @@ impl TypeChecker<'_> {
                 let (arg_types, has_spread) = self.call_argument_types(args)?;
                 self.check_call(&callee_ty, &arg_types, has_spread, *pos, None, expected)
             }
+            // A list of values may be a tuple, when that is what is expected.
+            Expr::Array(items, pos) => {                if let Some(Type::Tuple(wanted)) = expected {
+                    if items.len() != wanted.len() {
+                        return Err(self.error(
+                            *pos,
+                            format!(
+                                "expected {} values, found {}",
+                                wanted.len(),
+                                items.len()
+                            ),
+                        ));
+                    }
+                    let mut out = Vec::new();
+                    for (index, item) in items.iter().enumerate() {
+                        let actual = self.infer_expr_as(item, Some(&wanted[index]))?;
+                        if !assignable(&actual, &wanted[index]) {
+                            return Err(self.type_error(item.pos(), &actual, &wanted[index]));
+                        }
+                        out.push(actual);
+                    }
+                    return Ok(Type::Tuple(out));
+                }
+                self.infer_expr(expr)
+            }
+            // An object may be a dictionary, when that is what is expected.
+            Expr::Object(props, pos) => {
+                if let Some(Type::Dict(key_ty, value_ty)) = expected {
+                    for prop in props {
+                        let ObjectProp::Field(_, value) = prop else {
+                            return Err(self.error(*pos, "a dictionary has no spread"));
+                        };
+                        if !assignable(&Type::String, key_ty) {
+                            return Err(self.type_error(*pos, &Type::String, key_ty));
+                        }
+                        let actual = self.infer_expr_as(value, Some(value_ty))?;
+                        if !assignable(&actual, value_ty) {
+                            return Err(self.type_error(value.pos(), &actual, value_ty));
+                        }
+                    }
+                    return Ok(Type::Dict(key_ty.clone(), value_ty.clone()));
+                }
+                self.infer_expr(expr)
+            }
             other => self.infer_expr(other),
         }
     }
@@ -431,45 +539,51 @@ impl TypeChecker<'_> {
         match callee {
             Type::Any => Ok(Type::Any),
             Type::Function(function) => {
-                if has_spread || !function.checked {
-                    return Ok(substitute(&function.ret, &HashMap::new()));
+                // The number of arguments is always known, so it is always
+                // checked, even when the types are not written.
+                if !has_spread {
+                    if function.rest {
+                        if args.len() < function.required {
+                            return Err(self.error(
+                                pos,
+                                format!(
+                                    "expected at least {} {}, got {}",
+                                    function.required,
+                                    argument_label(function.required),
+                                    args.len()
+                                ),
+                            ));
+                        }
+                    } else {
+                        if args.len() < function.required {
+                            return Err(self.error(
+                                pos,
+                                format!(
+                                    "expected at least {} {}, got {}",
+                                    function.required,
+                                    argument_label(function.required),
+                                    args.len()
+                                ),
+                            ));
+                        }
+                        if args.len() > function.params.len() {
+                            return Err(self.error(
+                                pos,
+                                format!(
+                                    "expected at most {} {}, got {}",
+                                    function.params.len(),
+                                    argument_label(function.params.len()),
+                                    args.len()
+                                ),
+                            ));
+                        }
+                    }
                 }
 
-                if function.rest {
-                    if args.len() < function.required {
-                        return Err(self.error(
-                            pos,
-                            format!(
-                                "expected at least {} {}, got {}",
-                                function.required,
-                                argument_label(function.required),
-                                args.len()
-                            ),
-                        ));
-                    }
-                } else {
-                    if args.len() < function.required {
-                        return Err(self.error(
-                            pos,
-                            format!(
-                                "expected at least {} {}, got {}",
-                                function.required,
-                                argument_label(function.required),
-                                args.len()
-                            ),
-                        ));
-                    }
-                    if args.len() > function.params.len() {
-                        return Err(self.error(
-                            pos,
-                            format!(
-                                "expected at most {} {}, got {}",
-                                function.params.len(),
-                                argument_label(function.params.len()),
-                                args.len()
-                            ),
-                        ));
-                    }
+                // The types of the arguments are only checked when they are
+                // known.
+                if has_spread || !function.checked {
+                    return Ok(substitute(&function.ret, &HashMap::new()));
                 }
 
                 let mut subst = HashMap::new();
@@ -524,7 +638,7 @@ impl TypeChecker<'_> {
                     let mut trial = subst.clone();
                     if unify_types(arg, &expected, &mut trial) {
                         subst = trial;
-                    } else if !assignable(arg, &expected) {
+                    } else if !self.fits(arg, &expected) {
                         return Err(self.error(
                             pos,
                             format!(
@@ -553,7 +667,7 @@ impl TypeChecker<'_> {
                         continue;
                     };
                     let constraint = substitute_bound(constraint, &subst);
-                    if !assignable(actual, &constraint) {
+                    if !self.fits(actual, &constraint) {
                         return Err(self.error(
                             pos,
                             format!(
@@ -566,10 +680,36 @@ impl TypeChecker<'_> {
                     }
                 }
 
-                // A type parameter that could not be inferred stays unknown.
-                Ok(erase_type_vars(&substitute(&function.ret, &subst)))
+                // A type parameter that could not be inferred is a mistake:
+                // the answer of the call would be of an unknown type.
+                let result = substitute(&function.ret, &subst);
+                if has_type_var(&result) {
+                    let mut names = Vec::new();
+                    collect_type_vars(&result, &mut names);
+                    return Err(self.error(
+                        pos,
+                        format!("cannot infer the type of {}", names.join(", ")),
+                    ));
+                }
+                Ok(erase_type_vars(&result))
             }
-            Type::Union(_) => Ok(Type::Any),
+            Type::Union(items) => {
+                // Every member of the union has to take the arguments.
+                let mut results = Vec::new();
+                for item in items {
+                    if matches!(item, Type::Null | Type::Undefined | Type::Void) {
+                        continue;
+                    }
+                    let result =
+                        self.check_call(item, args, has_spread, pos, type_args, expected)?;
+                    results.push(result);
+                }
+                if results.is_empty() {
+                    Ok(Type::Any)
+                } else {
+                    Ok(union(results))
+                }
+            }
             other => Err(self.error(
                 pos,
                 format!("value of type {} is not callable", other.display()),
@@ -678,17 +818,61 @@ impl TypeChecker<'_> {
         // module, so that its signature is checked.
         if let (MemberProp::Name(name), Expr::Ident(alias, _)) = (prop, object) {
             if let Some(env) = self.imports.get(alias) {
-                let ty = env
-                    .values
-                    .get(name)
-                    .cloned()
-                    .or_else(|| env.types.get(name).cloned())
-                    .unwrap_or(Type::Any);
+                if env.unchecked {
+                    return Ok(Type::Any);
+                }
+                let ty = match env.values.get(name) {
+                    Some(ty) => ty.clone(),
+                    None => match env.types.get(name) {
+                        Some(ty) => qualified_type(alias, ty.clone()),
+                        None => {
+                            if env.components.contains_key(name) {
+                                Type::Any
+                            } else if env.enums.contains_key(name) {
+                                Type::EnumNamespace(format!("{}.{}", alias, name))
+                            } else if env.private.contains(name) {
+                                return Err(self.error(
+                                    pos,
+                                    format!("'{}' is private to the module '{}'", name, alias),
+                                ));
+                            } else {
+                                return Err(self.error(
+                                    pos,
+                                    format!("module '{}' has no '{}'", alias, name),
+                                ));
+                            }
+                        }
+                    },
+                };
                 return Ok(if optional {
                     union(vec![ty, Type::Null])
                 } else {
                     ty
                 });
+            }
+        }
+
+        // A variant of an enum of another module, such as `t.Status.Nope`.
+        if let (MemberProp::Name(variant), Expr::Member(base, MemberProp::Name(enum_name), _, _)) =
+            (prop, object)
+        {
+            if let Expr::Ident(alias, _) = &**base {
+                if let Some(env) = self.imports.get(alias) {
+                    if let Some(info) = env.enums.get(enum_name) {
+                        let Some(found) = info.variant(variant) else {
+                            return Err(self.error(
+                                pos,
+                                format!("enum '{}' has no variant '{}'", enum_name, variant),
+                            ));
+                        };
+                        let ty = self.variant_type(&format!("{}.{}", alias, enum_name), found)?;
+                        return Ok(if optional {
+                            union(vec![ty, Type::Null])
+                        } else {
+                            ty
+                        });
+                    }
+                }
             }
         }
 
@@ -700,6 +884,12 @@ impl TypeChecker<'_> {
                 match &object_ty {
                     Type::Array(inner) if assignable(&index_ty, &Type::Number) => (**inner).clone(),
                     Type::String if assignable(&index_ty, &Type::Number) => Type::String,
+                    Type::Tuple(items) if assignable(&index_ty, &Type::Number) => {
+                        match literal_number(index) {
+                            Some(index) => items.get(index).cloned().unwrap_or(Type::Any),
+                            None => Type::Any,
+                        }
+                    }
                     Type::Array(_) | Type::String => {
                         return Err(self.type_error(pos, &index_ty, &Type::Number));
                     }
@@ -714,44 +904,108 @@ impl TypeChecker<'_> {
         }
     }
 
+    /// The type of a variant of an enum.
+    ///
+    /// A variant with fields is a function that takes them and gives the
+    /// variant back.
+    pub(crate) fn variant_type(
+        &self,
+        enum_name: &str,
+        variant: &EnumVariantInfo,
+    ) -> Result<Type, VeyError> {
+        if variant.fields.is_empty() {
+            return Ok(Type::Enum(enum_name.to_string(), variant.name.clone()));
+        }
+        let mut params = Vec::new();
+        for field in &variant.fields {
+            params.push(match &field.ty {
+                Some(ty) => self.resolve_type(ty)?,
+                None => Type::Any,
+            });
+        }
+        Ok(Type::Function(FunctionType {
+            params,
+            required: variant.fields.len(),
+            rest: false,
+            ret: Box::new(Type::Enum(enum_name.to_string(), variant.name.clone())),
+            checked: true,
+            constraints: Vec::new(),
+            type_params: Vec::new(),
+        }))
+    }
+
+    /// The type of a function of a type.
+    pub(crate) fn method_type(&self, method: &ImplMethod) -> Result<Type, VeyError> {
+        let mut params = Vec::new();
+        for param in &method.params {
+            params.push(match &param.ty {
+                Some(ty) => self.resolve_type(ty)?,
+                None => Type::Any,
+            });
+        }
+        let ret = match &method.ret {
+            Some(ty) => self.resolve_type(ty)?,
+            None => Type::Any,
+        };
+        let required = params.len();
+        Ok(Type::Function(FunctionType {
+            params,
+            required,
+            rest: false,
+            ret: Box::new(ret),
+            checked: true,
+            constraints: Vec::new(),
+            type_params: Vec::new(),
+        }))
+    }
+
+    /// The variants of an enum, whether it is of this module or of another.
+    pub(crate) fn enum_info(&self, name: &str) -> Option<&EnumInfo> {
+        if let Some((module, name)) = name.split_once('.') {
+            return self
+                .imports
+                .get(module)
+                .and_then(|env| env.enums.get(name));
+        }
+        if let Some(info) = self.enums.get(name) {
+            return Some(info);
+        }
+        for env in self.imports.values() {
+            if let Some(info) = env.enums.get(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
+
     pub(crate) fn lookup_member(&self, ty: &Type, name: &str, pos: Pos) -> Result<Type, VeyError> {
         match ty {
             Type::Any => Ok(Type::Any),
             Type::EnumNamespace(enum_name) => {
                 let info = self
-                    .enums
-                    .get(enum_name)
+                    .enum_info(enum_name)
                     .ok_or_else(|| self.error(pos, format!("unknown enum '{}'", enum_name)))?;
-                let variant = info
-                    .variants
-                    .iter()
-                    .find(|v| v.name == name)
-                    .ok_or_else(|| {
-                        self.error(
-                            pos,
-                            format!("enum '{}' has no variant '{}'", enum_name, name),
-                        )
-                    })?;
-                if variant.fields.is_empty() {
-                    Ok(Type::Enum(enum_name.clone(), name.to_string()))
-                } else {
-                    let mut params = Vec::new();
-                    for field in &variant.fields {
-                        params.push(match &field.ty {
-                            Some(ty) => self.resolve_type(ty)?,
-                            None => Type::Any,
-                        });
-                    }
-                    Ok(Type::Function(FunctionType {
-                        params,
-                        required: variant.fields.len(),
-                        rest: false,
-                        ret: Box::new(Type::Enum(enum_name.clone(), name.to_string())),
-                        checked: true,
-                        constraints: Vec::new(),
-                        type_params: Vec::new(),
-                    }))
-                }
+                let variant = info.variants.iter().find(|v| v.name == name).ok_or_else(|| {
+                    self.error(
+                        pos,
+                        format!("enum '{}' has no variant '{}'", enum_name, name),
+                    )
+                })?;
+                self.variant_type(enum_name, variant)
+            }
+            Type::EnumUnion(enum_name) => {
+                // The variants of an enum are not members of it, but the
+                // name of the enum is.
+                let info = self
+                    .enum_info(enum_name)
+                    .ok_or_else(|| self.error(pos, format!("unknown enum '{}'", enum_name)))?;
+                let variant = info.variants.iter().find(|v| v.name == name).ok_or_else(|| {
+                    self.error(
+                        pos,
+                        format!("enum '{}' has no variant '{}'", enum_name, name),
+                    )
+                })?;
+                self.variant_type(enum_name, variant)
             }
             Type::Enum(enum_name, variant) => {
                 let info = self
@@ -777,11 +1031,20 @@ impl TypeChecker<'_> {
                     })
                     .unwrap_or(Ok(Type::Any))
             }
-            Type::Object(fields) | Type::Named(_, fields) => fields
-                .iter()
-                .find(|field| field.name == name)
-                .map(|field| field.ty.clone())
-                .ok_or_else(|| self.no_field_error(ty, name, pos)),
+            Type::Object(fields) | Type::Named(_, fields) => {
+                if let Some(field) = fields.iter().find(|field| field.name == name) {
+                    return Ok(field.ty.clone());
+                }
+                // The type may have functions of its own.
+                if let Type::Named(type_name, _) = ty {
+                    if let Some(info) = self.impls.get(type_name) {
+                        if let Some(method) = info.methods.iter().find(|m| m.name == name) {
+                            return self.method_type(method);
+                        }
+                    }
+                }
+                Err(self.no_field_error(ty, name, pos))
+            }
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
             Type::Union(items) => {

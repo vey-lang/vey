@@ -8,7 +8,7 @@ use vey::compiler::compile_project;
 use crate::cli::args::parse_args;
 use crate::cli::dev::{serve, DEFAULT_PORT};
 use crate::cli::entry::{collect_vey_files, default_title, entry_from};
-use crate::cli::output::{node_script, report, temp_file};
+use crate::cli::output::{node_script, report, report_warnings, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
     let parsed = match parse_args(args) {
@@ -102,6 +102,7 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             failed += 1;
             continue;
         }
+        report_warnings(&bundle.warnings);
 
         let status = Command::new("node")
             .arg("--enable-source-maps")
@@ -166,9 +167,12 @@ pub(crate) fn cmd_check(args: &[String]) -> i32 {
     };
     for file in files {
         pages += 1;
-        if let Err(err) = compile_project(&file) {
-            report(&err);
-            failed.push(file);
+        match compile_project(&file) {
+            Ok(bundle) => report_warnings(&bundle.warnings),
+            Err(err) => {
+                report(&err);
+                failed.push(file);
+            }
         }
     }
 

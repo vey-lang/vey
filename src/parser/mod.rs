@@ -25,6 +25,12 @@ pub struct Parser {
     tok: Token,
     /// How deep the parser is in nested code.
     depth: usize,
+    /// The names that the program keeps to itself.
+    private_names: Vec<String>,
+    /// Whether the expression that is read is the whole of a statement.
+    statement_expr: bool,
+    /// How deep the parser is in the expressions of the statement.
+    expr_depth: usize,
 }
 
 /// How deeply code may be nested before the parser gives up.
@@ -47,6 +53,9 @@ impl Parser {
             file: file.to_string(),
             tok,
             depth: 0,
+            private_names: Vec::new(),
+            statement_expr: false,
+            expr_depth: 0,
         })
     }
 
@@ -196,10 +205,31 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> Result<Program, VeyError> {
         let mut body = Vec::new();
+        let mut private = Vec::new();
         while self.tok.kind != TokKind::Eof {
-            body.push(self.parse_statement()?);
+            let stmt = self.parse_statement()?;
+            if let Some((name, _)) = stmt.exported_name() {
+                if self.private_names.contains(&name.to_string()) {
+                    private.push(name.to_string());
+                }
+            }
+            body.push(stmt);
         }
-        Ok(Program { body })
+        // The doc comments and the version of the file are read by the
+        // lexer, which has seen the whole file by now.
+        let version = self.lexer.version().map(|version| version.to_string());
+        let docs = self
+            .lexer
+            .take_docs()
+            .into_iter()
+            .map(|(text, pos)| DocComment { text, pos })
+            .collect();
+        Ok(Program {
+            body,
+            docs,
+            version,
+            private,
+        })
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, VeyError> {
@@ -216,6 +246,21 @@ impl Parser {
     }
 
     fn parse_statement_inner(&mut self) -> Result<Stmt, VeyError> {
+        // A name may be public or private.
+        if self.is_kw("pub") || self.is_kw("priv") {
+            let private = self.tok.value == "priv";
+            self.advance()?;
+            let mut stmt = self.parse_declaration()?;
+            if let Some((name, _)) = stmt.exported_name() {
+                if private {
+                    self.private_names.push(name.to_string());
+                } else {
+                    mark_exported(&mut stmt);
+                }
+            }
+            return Ok(stmt);
+        }
+
         if self.is_kw("export") {
             self.advance()?;
             let mut stmt = self.parse_declaration()?;
@@ -230,6 +275,14 @@ impl Parser {
 
         if self.type_decl_here()? {
             return self.parse_type_decl(false);
+        }
+
+        if self.interface_decl_here()? {
+            return self.parse_interface(false);
+        }
+
+        if self.impl_decl_here()? {
+            return self.parse_impl(false);
         }
 
         if self.style_block_here()? {
@@ -251,6 +304,11 @@ impl Parser {
                 "while" => return self.parse_while(),
                 "for" => return self.parse_for(),
                 "repeat" => return self.parse_repeat(),
+                "defer" => {
+                    let pos = self.advance()?.pos;
+                    let value = self.parse_expression()?;
+                    return Ok(Stmt::Defer(DeferStmt { value, pos }));
+                }
                 "return" => return self.parse_return(),
                 "break" => {
                     let pos = self.advance()?.pos;
@@ -285,7 +343,13 @@ impl Parser {
         if self.type_decl_here()? {
             return self.parse_type_decl(false);
         }
-        Err(self.error("export must be followed by let, const, fn, component, enum or type"))
+        if self.interface_decl_here()? {
+            return self.parse_interface(false);
+        }
+        if self.impl_decl_here()? {
+            return self.parse_impl(false);
+        }
+        Err(self.error("export must be followed by let, const, fn, component, enum, type or interface"))
     }
 
     fn parse_var(&mut self, exported: bool) -> Result<Stmt, VeyError> {
@@ -312,6 +376,20 @@ impl Parser {
         }
         if !matches!(pattern, BindingPattern::Name { .. }) && init.is_none() {
             return Err(self.error_at(start.pos, "destructuring requires a value"));
+        }
+        // A value that has to be there: `let value = find() else { return }`.
+        if self.is_kw("else") {
+            let Some(value) = init else {
+                return Err(self.error_at(start.pos, "a value is needed before 'else'"));
+            };
+            self.advance()?;
+            let otherwise = self.parse_block()?;
+            return Ok(Stmt::LetElse(LetElseStmt {
+                pattern,
+                value,
+                otherwise,
+                pos: start.pos,
+            }));
         }
         Ok(Stmt::Var(VarDecl {
             kind,
@@ -545,18 +623,25 @@ impl Parser {
 
     fn parse_if(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("if")?;
+        // A value that is taken apart, as in `if let Some(x) = value { }`.
+        if self.is_kw("let") {
+            self.advance()?;
+            let pattern = self.parse_pattern()?;
+            self.expect_op("=")?;
+            let value = self.parse_expression()?;
+            let then_block = self.parse_block()?;
+            let else_branch = self.parse_else_branch()?;
+            return Ok(Stmt::IfLet(IfLetStmt {
+                pattern,
+                value,
+                then_block,
+                else_branch,
+                pos: start.pos,
+            }));
+        }
         let test = self.parse_expression()?;
         let then_block = self.parse_block()?;
-        let else_branch = if self.eat_kw("else")? {
-            if self.is_kw("if") {
-                Some(Box::new(self.parse_if()?))
-            } else {
-                let pos = self.tok.pos;
-                Some(Box::new(Stmt::Block(self.parse_block()?, pos)))
-            }
-        } else {
-            None
-        };
+        let else_branch = self.parse_else_branch()?;
         Ok(Stmt::If(IfStmt {
             test,
             then_block,
@@ -565,8 +650,34 @@ impl Parser {
         }))
     }
 
+    /// The `else` of an `if`, when there is one.
+    fn parse_else_branch(&mut self) -> Result<Option<Box<Stmt>>, VeyError> {
+        if !self.eat_kw("else")? {
+            return Ok(None);
+        }
+        if self.is_kw("if") {
+            return Ok(Some(Box::new(self.parse_if()?)));
+        }
+        let pos = self.tok.pos;
+        Ok(Some(Box::new(Stmt::Block(self.parse_block()?, pos))))
+    }
+
     fn parse_while(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("while")?;
+        // A value that is taken apart, as in `while let Some(x) = value { }`.
+        if self.is_kw("let") {
+            self.advance()?;
+            let pattern = self.parse_pattern()?;
+            self.expect_op("=")?;
+            let value = self.parse_expression()?;
+            let body = self.parse_block()?;
+            return Ok(Stmt::WhileLet(WhileLetStmt {
+                pattern,
+                value,
+                body,
+                pos: start.pos,
+            }));
+        }
         let test = self.parse_expression()?;
         let body = self.parse_block()?;
         Ok(Stmt::While(WhileStmt {
@@ -612,7 +723,10 @@ impl Parser {
         let value = if self.is_punct("}") || self.is_punct(";") || self.tok.kind == TokKind::Eof {
             None
         } else {
-            Some(self.parse_expression()?)
+            self.statement_expr = true;
+            let value = self.parse_expression();
+            self.statement_expr = false;
+            Some(value?)
         };
         Ok(Stmt::Return(ReturnStmt {
             value,
@@ -732,6 +846,112 @@ impl Parser {
             && (next.value == "=" || next.value == "<"))
     }
 
+    /// Whether an interface is written here.
+    fn interface_decl_here(&mut self) -> Result<bool, VeyError> {
+        if self.tok.kind != TokKind::Ident || self.tok.value != "interface" {
+            return Ok(false);
+        }
+        let name = self.peek_n(1)?;
+        Ok(name.kind == TokKind::Ident)
+    }
+
+    /// Whether an `impl` block is written here.
+    fn impl_decl_here(&mut self) -> Result<bool, VeyError> {
+        if self.tok.kind != TokKind::Ident || self.tok.value != "impl" {
+            return Ok(false);
+        }
+        let name = self.peek_n(1)?;
+        Ok(name.kind == TokKind::Ident)
+    }
+
+    fn parse_impl(&mut self, exported: bool) -> Result<Stmt, VeyError> {
+        let start = self.advance()?;
+        let type_name = self.expect_ident("type name")?;
+        self.expect_punct("{")?;
+        let mut methods = Vec::new();
+        while !self.is_punct("}") {
+            if self.tok.kind == TokKind::Eof {
+                return Err(self.error("unclosed impl block"));
+            }
+            let pos = self.tok.pos;
+            self.expect_kw("fn")?;
+            let name = self.expect_ident("method name")?;
+            let params = self.parse_params()?;
+            let ret = if self.is_op("->") {
+                self.advance()?;
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            let body = self.parse_block()?;
+            methods.push(ImplMethod {
+                name,
+                params,
+                ret,
+                body,
+                pos,
+            });
+        }
+        self.expect_punct("}")?;
+        Ok(Stmt::Impl(ImplDecl {
+            type_name,
+            methods,
+            exported,
+            pos: start.pos,
+        }))
+    }
+
+    fn parse_interface(&mut self, exported: bool) -> Result<Stmt, VeyError> {
+        let start = self.advance()?;
+        let name = self.expect_ident("interface name")?;
+        let type_params = self.parse_type_params()?;
+        self.expect_punct("{")?;
+        let mut members = Vec::new();
+        while !self.is_punct("}") {
+            if self.tok.kind == TokKind::Eof {
+                return Err(self.error("unclosed interface body"));
+            }
+            let pos = self.tok.pos;
+            let member_name = self.expect_ident("member name")?;
+            // A member with parentheses is a method.
+            if self.is_punct("(") {
+                let params = self.parse_params()?;
+                let ret = if self.is_op("->") {
+                    self.advance()?;
+                    self.parse_type()?
+                } else {
+                    return Err(self.error_at(pos, "a method needs a return type"));
+                };                members.push(InterfaceMember::Method(InterfaceMethod {
+                    name: member_name,
+                    params,
+                    ret,
+                    pos,
+                }));
+            } else {
+                let optional = self.eat_op("?")?;
+                self.expect_punct(":")?;
+                let ty = self.parse_type()?;
+                members.push(InterfaceMember::Field(InterfaceField {
+                    name: member_name,
+                    ty,
+                    optional,
+                    pos,
+                }));
+            }
+            if self.is_punct(",") {
+                self.advance()?;
+            }
+        }
+        self.expect_punct("}")?;
+        Ok(Stmt::Interface(InterfaceDecl {
+            name,
+            type_params,
+            members,
+            exported,
+            pos: start.pos,
+        }))
+    }
+
     fn parse_type_decl(&mut self, exported: bool) -> Result<Stmt, VeyError> {
         let start = self.advance()?;
         let name = self.expect_ident("type name")?;
@@ -747,7 +967,9 @@ impl Parser {
         }))
     }
     fn parse_expr_or_assign(&mut self) -> Result<Stmt, VeyError> {
+        self.statement_expr = true;
         let expr = self.parse_expression()?;
+        self.statement_expr = false;
         let pos = expr.pos();
         if self.tok.kind == TokKind::Op && ASSIGN_OPS.contains(&self.tok.value.as_str()) {
             if !matches!(expr, Expr::Ident(..) | Expr::Member(..)) {
@@ -767,9 +989,27 @@ impl Parser {
 
     pub fn parse_expression(&mut self) -> Result<Expr, VeyError> {
         self.enter()?;
+        self.expr_depth += 1;
         let result = self.parse_pipe();
+        self.expr_depth -= 1;
         self.leave();
         result
+    }
+
+    /// Whether the end of the line ends the statement.
+    ///
+    /// The end of a line ends a statement, so that a line that begins with
+    /// a mark is a new statement and not the rest of the one before it.
+    /// A line that begins with a dot goes on, because that is a chain of
+    /// members and there is no other way to write it.
+    pub(crate) fn line_ends_statement(&self) -> bool {
+        if !self.statement_expr || self.expr_depth != 1 {
+            return false;
+        }
+        if !self.tok.newline_before {
+            return false;
+        }
+        !matches!(self.tok.value.as_str(), "." | "?." | "|>")
     }
 }
 
@@ -780,6 +1020,8 @@ fn mark_exported(stmt: &mut Stmt) {
         Stmt::Component(c) => c.exported = true,
         Stmt::Type(t) => t.exported = true,
         Stmt::Enum(e) => e.exported = true,
+        Stmt::Interface(i) => i.exported = true,
+        Stmt::Impl(i) => i.exported = true,
         _ => {}
     }
 }

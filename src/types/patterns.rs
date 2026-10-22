@@ -2,8 +2,8 @@
 
 use crate::ast::*;
 use crate::types::core::{
-    element_type, object_rest_type, project_field, remove_type, string_literal, type_from_kind,
-    Type,
+    element_type, is_empty, object_rest_type, project_field, remove_type, string_literal,
+    type_from_kind, union, without_empty, Type,
 };
 use crate::VeyError;
 
@@ -11,9 +11,24 @@ use super::checker::TypeChecker;
 
 impl TypeChecker<'_> {
     pub(crate) fn narrow_condition(&self, expr: &Expr) -> Option<(String, Type, Type)> {
+        // The truth of a value: `if user { }`. A value that may be nothing
+        // is asked with its truth, and the branch knows that it is there.
+        if let Expr::Ident(name, _) = expr {
+            let original = self.lookup(name)?;
+            let then_ty = without_empty(&original);
+            if then_ty == original {
+                return None;
+            }
+            let else_ty = union(vec![Type::Null, Type::Undefined]);
+            return Some((name.clone(), then_ty, else_ty));
+        }
+
         let Expr::Binary(op, left, right, _) = expr else {
             return None;
         };
+        if op == "instanceof" {
+            return self.narrow_instanceof(left, right);
+        }
         if !matches!(op.as_str(), "==" | "===" | "!=" | "!==") {
             return None;
         }
@@ -23,6 +38,35 @@ impl TypeChecker<'_> {
         } else {
             Some((name, then_ty, else_ty))
         }
+    }
+
+    /// The narrowing of a check with `instanceof`.
+    ///
+    /// The value is of the type on the right, when that is a type of the
+    /// program.
+    fn narrow_instanceof(&self, left: &Expr, right: &Expr) -> Option<(String, Type, Type)> {
+        let Expr::Ident(name, _) = left else {
+            return None;
+        };
+        let Expr::Ident(type_name, _) = right else {
+            return None;
+        };
+        let original = self.lookup(name)?;
+        let target = self.type_by_name(type_name)?;
+        let then_ty = union(vec![target.clone(), original.clone()]);
+        let else_ty = remove_type(&original, &target);
+        Some((name.clone(), then_ty, else_ty))
+    }
+
+    /// The type of the program with this name, when it is one.
+    pub(crate) fn type_by_name(&self, name: &str) -> Option<Type> {
+        if self.interfaces.contains_key(name) {
+            return self.interface_type(name).ok();
+        }
+        if let Some(ty) = self.alias_types.get(name) {
+            return Some(ty.clone());
+        }
+        None
     }
 
     pub(crate) fn narrow_comparison(
@@ -46,18 +90,20 @@ impl TypeChecker<'_> {
             }
         }
 
+        // A value that is compared with nothing is narrowed to nothing, and
+        // the other way around.
         if let Expr::Ident(name, _) = left {
-            if matches!(right, Expr::Null(_)) {
+            if is_empty(right) {
                 let original = self.lookup(name)?;
-                let else_ty = original.without_null();
+                let else_ty = without_empty(&original);
                 return Some((name.clone(), Type::Null, else_ty));
             }
         }
 
         if let Expr::Ident(name, _) = right {
-            if matches!(left, Expr::Null(_)) {
+            if is_empty(left) {
                 let original = self.lookup(name)?;
-                let else_ty = original.without_null();
+                let else_ty = without_empty(&original);
                 return Some((name.clone(), Type::Null, else_ty));
             }
         }

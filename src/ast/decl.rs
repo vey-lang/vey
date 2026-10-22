@@ -1,6 +1,6 @@
 //! The declarations of a program.
 
-use crate::ast::expr::Expr;
+use crate::ast::expr::{Expr, Pattern};
 use crate::ast::markup::MarkupNode;
 use crate::ast::pattern::BindingPattern;
 use crate::ast::stmt::Stmt;
@@ -10,6 +10,19 @@ use crate::lexer::Pos;
 #[derive(Debug, Clone)]
 pub struct Program {
     pub body: Vec<Stmt>,
+    /// The doc comments of the file, in the order they were written.
+    pub docs: Vec<DocComment>,
+    /// The version of the language the file was written for.
+    pub version: Option<String>,
+    /// The names the program keeps to itself.
+    pub private: Vec<String>,
+}
+
+/// A comment that says what a piece of the program does.
+#[derive(Debug, Clone)]
+pub struct DocComment {
+    pub text: String,
+    pub pos: Pos,
 }
 
 #[derive(Debug, Clone)]
@@ -95,10 +108,46 @@ pub struct IfStmt {
     pub pos: Pos,
 }
 
+/// An `if` that takes a value apart.
+#[derive(Debug, Clone)]
+pub struct IfLetStmt {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub then_block: Block,
+    pub else_branch: Option<Box<Stmt>>,
+    pub pos: Pos,
+}
+
 #[derive(Debug, Clone)]
 pub struct WhileStmt {
     pub test: Expr,
     pub body: Block,
+    pub pos: Pos,
+}
+
+/// A `while` that takes a value apart.
+#[derive(Debug, Clone)]
+pub struct WhileLetStmt {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub body: Block,
+    pub pos: Pos,
+}
+
+/// A value that has to be there.
+#[derive(Debug, Clone)]
+pub struct LetElseStmt {
+    pub pattern: BindingPattern,
+    pub value: Expr,
+    /// The block that runs when the value is not there.
+    pub otherwise: Block,
+    pub pos: Pos,
+}
+
+/// A piece of code that runs when the block is left.
+#[derive(Debug, Clone)]
+pub struct DeferStmt {
+    pub value: Expr,
     pub pos: Pos,
 }
 
@@ -161,6 +210,62 @@ pub struct EnumDecl {
     pub name: String,
     pub variants: Vec<EnumVariant>,
     pub exported: bool,
+    pub pos: Pos,
+}
+
+/// A type with a name and a shape of its own.
+///
+/// An interface says what a value has to have, without saying what it is.
+/// A value may have more than the interface asks for.
+#[derive(Debug, Clone)]
+pub struct InterfaceDecl {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub members: Vec<InterfaceMember>,
+    pub exported: bool,
+    pub pos: Pos,
+}
+
+#[derive(Debug, Clone)]
+pub enum InterfaceMember {
+    Field(InterfaceField),
+    Method(InterfaceMethod),
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceField {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub optional: bool,
+    pub pos: Pos,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: TypeExpr,
+    pub pos: Pos,
+}
+
+/// The functions of a type.
+///
+/// An `impl` block gives a type functions of its own, so that a program of
+/// many types does not have a file of free functions.
+#[derive(Debug, Clone)]
+pub struct ImplDecl {
+    pub type_name: String,
+    pub methods: Vec<ImplMethod>,
+    pub exported: bool,
+    pub pos: Pos,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Option<TypeExpr>,
+    pub body: Block,
     pub pos: Pos,
 }
 

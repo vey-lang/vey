@@ -44,15 +44,27 @@ impl BindingKind {
 }
 
 /// A name that is in scope.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Binding {
     pub(crate) kind: BindingKind,
     pub(crate) pos: Pos,
+    /// Whether the name was read.
+    ///
+    /// A name that is written and never read is not used, and the compiler
+    /// says so. The mark is shared by every copy of the name, so that a
+    /// read in one place is seen in every other.
+    pub(crate) used: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+impl Binding {
+    pub(crate) fn read(&self) {
+        self.used.set(true);
+    }
 }
 
 /// The names of a program, in the scopes they belong to.
 pub(crate) struct Scopes {
-    scopes: Vec<HashMap<String, Binding>>,
+    scopes: Vec<HashMap<String, std::rc::Rc<Binding>>>,
 }
 
 impl Scopes {
@@ -64,10 +76,6 @@ impl Scopes {
 
     pub(crate) fn push(&mut self) {
         self.scopes.push(HashMap::new());
-    }
-
-    pub(crate) fn pop(&mut self) {
-        self.scopes.pop();
     }
 
     /// Add a name, and report it when it is already taken.
@@ -82,7 +90,7 @@ impl Scopes {
             .scopes
             .last()
             .and_then(|scope| scope.get(name))
-            .copied();
+            .cloned();
         if let Some(previous) = previous {
             return Err(VeyError::new(
                 format!(
@@ -95,17 +103,51 @@ impl Scopes {
             ));
         }
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), Binding { kind, pos });
+            scope.insert(
+                name.to_string(),
+                std::rc::Rc::new(Binding {
+                    kind,
+                    pos,
+                    used: std::rc::Rc::new(std::cell::Cell::new(false)),
+                }),
+            );
         }
         Ok(())
     }
 
     /// The name, when it is in scope.
-    pub(crate) fn resolve(&self, name: &str) -> Option<Binding> {
+    pub(crate) fn resolve(&self, name: &str) -> Option<std::rc::Rc<Binding>> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
+            .find_map(|scope| scope.get(name).cloned())
+    }
+
+    /// The name, when it is in scope, and mark it as read.
+    pub(crate) fn read(&self, name: &str) -> Option<std::rc::Rc<Binding>> {
+        let binding = self.resolve(name)?;
+        binding.read();
+        Some(binding)
+    }
+
+    /// The name that a new one would hide.
+    ///
+    /// A name that hides another one is allowed, but the compiler says so.
+    pub(crate) fn shadowed(&self, name: &str) -> Option<std::rc::Rc<Binding>> {
+        let mut scopes = self.scopes.iter().rev();
+        let first = scopes.next()?;
+        if first.contains_key(name) {
+            return None;
+        }
+        scopes.find_map(|scope| scope.get(name).cloned())
+    }
+
+    /// The names of the scope that is about to be left.
+    pub(crate) fn take_scope(&mut self) -> Vec<(String, std::rc::Rc<Binding>)> {
+        match self.scopes.pop() {
+            Some(scope) => scope.into_iter().collect(),
+            None => Vec::new(),
+        }
     }
 
     /// How many scopes there are.

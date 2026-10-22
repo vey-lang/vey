@@ -90,6 +90,10 @@ pub enum Expr {
     Range(Box<Expr>, Box<Expr>, Pos),
     Match(Box<Expr>, Vec<MatchArm>, Pos),
     Await(Box<Expr>, Pos),
+    /// A value that hands its failure on.
+    Try(Box<Expr>, Pos),
+    /// A value that a generator hands back one by one.
+    Yield(Box<Expr>, Pos),
     Spread(Box<Expr>, Pos),
 }
 
@@ -116,6 +120,8 @@ impl Expr {
             | Expr::Range(_, _, p)
             | Expr::Match(_, _, p)
             | Expr::Await(_, p)
+            | Expr::Try(_, p)
+            | Expr::Yield(_, p)
             | Expr::Spread(_, p) => *p,
         }
     }

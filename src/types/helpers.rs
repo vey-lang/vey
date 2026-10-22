@@ -183,19 +183,6 @@ pub(crate) fn expr_assigns_name(expr: &Expr, name: &str) -> bool {
     }
 }
 
-pub(crate) fn inferred_const_type(ty: Type) -> Type {
-    match ty {
-        Type::Number
-        | Type::String
-        | Type::Bool
-        | Type::Null
-        | Type::Function(_)
-        | Type::EnumUnion(_)
-        | Type::Enum(_, _) => ty,
-        _ => Type::Any,
-    }
-}
-
 /// Give an object type the name of the alias it came from.
 ///
 /// The name makes the type easier to read in an error message.
@@ -214,10 +201,71 @@ pub(crate) fn argument_label(count: usize) -> &'static str {
     }
 }
 
+/// The type that a value has to have, judged by the operator it is used with.///
+/// A number cannot be compared with a text, and a text cannot be added to a
+/// number, so the operator says what the type of the value is.
+pub(crate) fn operand_type(op: &str, other: &Type) -> Option<Type> {
+    match op {
+        "-" | "*" | "/" | "%" | "**" => Some(Type::Number),
+        "<" | "<=" | ">" | ">=" => Some(Type::Number),
+        "+" => match other {
+            Type::String => Some(Type::String),
+            Type::Number => Some(Type::Number),
+            _ => None,
+        },
+        "==" | "!=" | "===" | "!==" => match other {
+            Type::Any | Type::Var(_) => None,
+            other => Some(other.clone()),
+        },
+        _ => None,
+    }
+}
+
 pub(crate) fn type_argument_label(count: usize) -> &'static str {
     if count == 1 {
         "argument"
     } else {
         "arguments"
     }
+}
+
+/// The name of a type of another module, with the name of the module in
+/// front of it.
+///
+/// Two modules may have types of the same name, so the name of the module is
+/// part of the name of the type.
+pub(crate) fn qualified_type(module: &str, ty: Type) -> Type {
+    match ty {
+        Type::EnumUnion(name) => Type::EnumUnion(format!("{}.{}", module, name)),
+        Type::Named(name, fields) => Type::Named(format!("{}.{}", module, name), fields),
+        Type::Interface(name, fields) => {
+            Type::Interface(format!("{}.{}", module, name), fields)
+        }
+        other => other,
+    }
+}
+
+/// The number of an expression, when it is a plain number.
+pub(crate) fn literal_number(expr: &Expr) -> Option<usize> {
+    match expr {
+        Expr::Number(value, _) if *value >= 0.0 => Some(*value as usize),
+        _ => None,
+    }
+}
+
+/// The field of a value that the type it is given does not have.
+pub(crate) fn extra_field(source: &Type, target: &Type) -> Option<String> {
+    let (source_fields, target_fields) = match (source, target) {
+        (Type::Object(source), Type::Object(target)) => (source, target),
+        (Type::Object(source), Type::Named(_, target)) => (source, target),
+        _ => return None,
+    };
+    source_fields
+        .iter()
+        .find(|field| {
+            !target_fields
+                .iter()
+                .any(|target_field| target_field.name == field.name)
+        })
+        .map(|field| field.name.clone())
 }

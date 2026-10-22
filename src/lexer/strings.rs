@@ -28,6 +28,7 @@ impl Lexer {
                     pos,
                     start,
                     end: self.pos,
+                    newline_before: false,
                 });
             }
 

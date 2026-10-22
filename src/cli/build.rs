@@ -6,7 +6,7 @@ use vey::compiler::compile_project;
 
 use crate::cli::args::{parse_args, ParsedArgs};
 use crate::cli::entry::{entry_from, project_root};
-use crate::cli::output::{node_script, replace_extension, report};
+use crate::cli::output::{node_script, replace_extension, report, report_warnings};
 use crate::cli::site::write_site;
 
 /// The folder the site is written to.
@@ -102,6 +102,7 @@ pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
             return 1;
         }
     };
+    report_warnings(&bundle.warnings);
 
     let output = parsed
         .output

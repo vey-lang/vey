@@ -4,12 +4,12 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::suggest::did_you_mean;
-use crate::types::core::{union, FunctionType, ObjectField, Type};
-use crate::types::rules::substitute;
+use crate::types::core::{rest_element_type, union, FunctionType, ObjectField, Type};
+use crate::types::rules::{assignable, substitute};
 use crate::VeyError;
 
 use super::checker::TypeChecker;
-use super::helpers::{name_alias, type_argument_label};
+use super::helpers::{name_alias, qualified_type, type_argument_label};
 
 impl TypeChecker<'_> {
     pub(crate) fn resolve_type(&self, expr: &TypeExpr) -> Result<Type, VeyError> {
@@ -40,9 +40,9 @@ impl TypeChecker<'_> {
                         ),
                     ));
                 }
-                env.types.get(name).cloned().ok_or_else(|| {
-                    self.error(*pos, format!("module '{}' has no type '{}'", module, name))
-                })
+                env.types.get(name).cloned().map(|ty| qualified_type(module, ty)).ok_or_else(
+                    || self.error(*pos, format!("module '{}' has no type '{}'", module, name)),
+                )
             }
             TypeExpr::Name(name, pos) => {
                 if let Some(ty) = vars.get(name) {
@@ -53,12 +53,17 @@ impl TypeChecker<'_> {
                 }
                 match name.as_str() {
                     "any" => Ok(Type::Any),
+                    "unknown" => Ok(Type::Unknown),
                     "number" => Ok(Type::Number),
                     "string" => Ok(Type::String),
                     "bool" => Ok(Type::Bool),
                     "null" => Ok(Type::Null),
+                    "undefined" => Ok(Type::Undefined),
                     "void" => Ok(Type::Void),
                     "never" => Ok(Type::Never),
+                    "symbol" => Ok(Type::Symbol),
+                    "bigint" => Ok(Type::BigInt),
+                    "object" => Ok(Type::AnyObject),
                     _ => {
                         if let Some(alias) = self.aliases.get(name) {
                             if !alias.params.is_empty() {
@@ -93,6 +98,9 @@ impl TypeChecker<'_> {
                         if self.enums.contains_key(name) {
                             return Ok(Type::EnumUnion(name.clone()));
                         }
+                        if self.interfaces.contains_key(name) {
+                            return self.interface_type(name);
+                        }
                         let mut error = self.error(*pos, format!("unknown type '{}'", name));
                         if let Some(hint) = did_you_mean(name, self.known_types()) {
                             error = error.with_hint(hint);
@@ -102,6 +110,11 @@ impl TypeChecker<'_> {
                 }
             }
             TypeExpr::Generic(name, args, pos) => {
+                // A type of the language that takes type arguments, such as
+                // `Promise<number>`.
+                if let Some(ty) = self.builtin_generic_type(name, args, *pos, stack, vars)? {
+                    return Ok(ty);
+                }
                 // A generic alias of another module, written `module.Name<...>`.
                 if let Some((module, alias_name)) = name.split_once('.') {
                     let env = self
@@ -162,8 +175,26 @@ impl TypeChecker<'_> {
                 }
                 stack.push(name.clone());
                 let mut alias_vars = HashMap::new();
-                for (param, ty) in alias.params.iter().zip(resolved_args) {
-                    alias_vars.insert(param.name.clone(), ty);
+                for (param, ty) in alias.params.iter().zip(resolved_args.iter()) {
+                    alias_vars.insert(param.name.clone(), ty.clone());
+                }
+                // The constraint of a type parameter has to hold.
+                for (param, ty) in alias.params.iter().zip(resolved_args.iter()) {
+                    let Some(constraint) = &param.constraint else {
+                        continue;
+                    };
+                    let constraint = self.resolve_type_with(constraint, stack, &alias_vars)?;
+                    if !assignable(ty, &constraint) {
+                        return Err(self.error(
+                            *pos,
+                            format!(
+                                "type '{}' expects {}, found {}",
+                                name,
+                                constraint.display(),
+                                ty.display()
+                            ),
+                        ));
+                    }
                 }
                 let resolved = self.resolve_type_with(&alias.body, stack, &alias_vars);
                 stack.pop();
@@ -172,6 +203,18 @@ impl TypeChecker<'_> {
             TypeExpr::Array(inner, _) => Ok(Type::Array(Box::new(
                 self.resolve_type_with(inner, stack, vars)?,
             ))),
+            TypeExpr::Tuple(items, _) => {
+                let mut out = Vec::new();
+                for item in items {
+                    out.push(self.resolve_type_with(item, stack, vars)?);
+                }
+                Ok(Type::Tuple(out))
+            }
+            TypeExpr::Dict(key, value, _) => {
+                let key = self.resolve_type_with(key, stack, vars)?;
+                let value = self.resolve_type_with(value, stack, vars)?;
+                Ok(Type::Dict(Box::new(key), Box::new(value)))
+            }
             TypeExpr::Object(fields, _) => {
                 let mut out = Vec::new();
                 for field in fields {
@@ -219,6 +262,121 @@ impl TypeChecker<'_> {
                     type_params: Vec::new(),
                 }))
             }
+        }
+    }
+
+    /// The shape of an interface, with the methods as functions.
+    pub(crate) fn interface_type(&self, name: &str) -> Result<Type, VeyError> {
+        let Some(info) = self.interfaces.get(name) else {
+            return Err(self.error(
+                crate::lexer::Pos::new(1, 1),
+                format!("unknown type '{}'", name),
+            ));
+        };
+        let mut fields = Vec::new();
+        for member in &info.members {
+            match member {
+                InterfaceMember::Field(field) => {
+                    let mut ty = self.resolve_type(&field.ty)?;
+                    if field.optional {
+                        ty = union(vec![ty, Type::Null]);
+                    }
+                    fields.push(ObjectField {
+                        name: field.name.clone(),
+                        ty,
+                        optional: field.optional,
+                    });
+                }
+                InterfaceMember::Method(method) => {
+                    let mut params = Vec::new();
+                    let mut required = 0usize;
+                    let mut rest = false;
+                    for param in &method.params {
+                        let ty = match &param.ty {
+                            Some(ty) => self.resolve_type(ty)?,
+                            None => Type::Any,
+                        };
+                        if param.rest {
+                            rest = true;
+                            params.push(rest_element_type(&ty));
+                        } else {
+                            params.push(ty);
+                        }
+                        if param.default.is_none() && !param.rest {
+                            required += 1;
+                        }
+                    }
+                    let ret = self.resolve_type(&method.ret)?;
+                    fields.push(ObjectField {
+                        name: method.name.clone(),
+                        ty: Type::Function(FunctionType {
+                            params,
+                            required,
+                            rest,
+                            ret: Box::new(ret),
+                            checked: true,
+                            constraints: Vec::new(),
+                            type_params: Vec::new(),
+                        }),
+                        optional: false,
+                    });
+                }
+            }
+        }
+        Ok(Type::Interface(name.to_string(), fields))
+    }
+
+    /// The types of the language that take type arguments.
+    fn builtin_generic_type(        &self,
+        name: &str,
+        args: &[TypeExpr],
+        pos: crate::lexer::Pos,
+        stack: &mut Vec<String>,
+        vars: &HashMap<String, Type>,
+    ) -> Result<Option<Type>, VeyError> {
+        match name {
+            "Promise" => {
+                if args.len() != 1 {
+                    return Err(self.error(
+                        pos,
+                        format!(
+                            "type 'Promise' expects 1 type argument, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let inner = self.resolve_type_with(&args[0], stack, vars)?;
+                Ok(Some(Type::Promise(Box::new(inner))))
+            }
+            "Option" => {
+                if args.len() != 1 {
+                    return Err(self.error(
+                        pos,
+                        format!(
+                            "type 'Option' expects 1 type argument, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let inner = self.resolve_type_with(&args[0], stack, vars)?;
+                // A value that may be there is the value or nothing.
+                Ok(Some(union(vec![inner, Type::Null])))
+            }
+            "Result" => {
+                if args.len() != 2 {
+                    return Err(self.error(
+                        pos,
+                        format!(
+                            "type 'Result' expects 2 type arguments, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let ok = self.resolve_type_with(&args[0], stack, vars)?;
+                let err = self.resolve_type_with(&args[1], stack, vars)?;
+                Ok(Some(Type::Result(Box::new(ok), Box::new(err))))
+            }
+            _ => Ok(None),
         }
     }
 }

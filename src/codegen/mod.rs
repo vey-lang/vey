@@ -12,7 +12,7 @@ use crate::sourcemap::marker;
 use crate::types::core::EnumInfo;
 use crate::VeyError;
 
-pub(crate) use awaits::block_has_await;
+pub(crate) use awaits::{block_has_await, block_has_defer, block_has_try, block_has_yield};
 pub(crate) use js::{js_key, js_string};
 
 pub struct Options {
@@ -55,6 +55,7 @@ pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError
         out: String::new(),
         source: opts.source,
         pending: None,
+        current_defer: None,
         indent: 0,
         scopes: vec![HashSet::new()],
         temp: 0,
@@ -77,6 +78,8 @@ struct Codegen {
     source: usize,
     /// The mark of the statement that is being written.
     pending: Option<Pos>,
+    /// The list of the pieces of code that run when the function is left.
+    current_defer: Option<String>,
     indent: usize,
     scopes: Vec<HashSet<String>>,
     temp: usize,
@@ -157,12 +160,13 @@ impl Codegen {
                 self.gen_stmt(stmt)?;
             }
         }
-        for stmt in &program.body {
-            if matches!(stmt, Stmt::Use(_)) {
-                continue;
-            }
-            self.gen_stmt(stmt)?;
-        }
+        let rest: Vec<Stmt> = program
+            .body
+            .iter()
+            .filter(|stmt| !matches!(stmt, Stmt::Use(_)))
+            .cloned()
+            .collect();
+        self.gen_body(&Block { body: rest })?;
         if self.module {
             for name in self.exports.clone() {
                 self.emit(&format!(
@@ -224,9 +228,12 @@ impl Codegen {
                 } else {
                     ""
                 };
+                // A function that hands values back one by one is a
+                // generator.
+                let generator = if block_has_yield(&decl.body) { "*" } else { "" };
                 self.emit(&format!(
-                    "{}function _{} ({}) {{",
-                    async_kw, decl.name, params
+                    "{}function{} _{} ({}) {{",
+                    async_kw, generator, decl.name, params
                 ));
                 self.indent += 1;
                 self.push_scope();
@@ -235,9 +242,7 @@ impl Codegen {
                         self.declare(name);
                     }
                 }
-                for inner in &decl.body.body {
-                    self.gen_stmt(inner)?;
-                }
+                self.gen_body(&decl.body)?;
                 self.pop_scope();
                 self.indent -= 1;
                 self.emit("}");
@@ -344,6 +349,32 @@ impl Codegen {
                 }
                 self.emit("}");
             }
+            Stmt::IfLet(decl) => {
+                // The value is taken once, and the names of the pattern take
+                // it apart when it fits.
+                let slot = self.temp;
+                self.temp += 1;
+                let value = self.gen_expr(&decl.value)?;
+                self.emit(&format!("const __let{} = {};", slot, value));
+                let (condition, bindings) = self.gen_pattern(&decl.pattern, &format!("__let{}", slot))?;
+                self.emit(&format!("if ({}) {{", condition));
+                self.indent += 1;
+                self.push_scope();
+                for (name, expression) in &bindings {
+                    self.declare(name);
+                    self.emit(&format!("const _{} = {};", name, expression));
+                }
+                self.gen_block(&decl.then_block)?;
+                self.pop_scope();
+                self.indent -= 1;
+                if let Some(branch) = &decl.else_branch {
+                    self.emit("} else {");
+                    self.indent += 1;
+                    self.gen_stmt(branch)?;
+                    self.indent -= 1;
+                }
+                self.emit("}");
+            }
             Stmt::While(decl) => {
                 let test = self.gen_expr(&decl.test)?;
                 self.emit(&format!("while ({}) {{", test));
@@ -351,6 +382,55 @@ impl Codegen {
                 self.gen_block(&decl.body)?;
                 self.indent -= 1;
                 self.emit("}");
+            }
+            Stmt::WhileLet(decl) => {
+                // The value is taken again on every turn of the loop.
+                let slot = self.temp;
+                self.temp += 1;
+                let value = self.gen_expr(&decl.value)?;
+                self.emit("while (true) {");
+                self.indent += 1;
+                self.emit(&format!("const __let{} = {};", slot, value));
+                let (condition, bindings) = self.gen_pattern(&decl.pattern, &format!("__let{}", slot))?;
+                self.emit(&format!("if (!({})) break;", condition));
+                self.push_scope();
+                for (name, expression) in &bindings {
+                    self.declare(name);
+                    self.emit(&format!("const _{} = {};", name, expression));
+                }
+                self.gen_block(&decl.body)?;
+                self.pop_scope();
+                self.indent -= 1;
+                self.emit("}");
+            }
+            Stmt::LetElse(decl) => {
+                // The value has to be there, or the block runs.
+                let slot = self.temp;
+                self.temp += 1;
+                let value = self.gen_expr(&decl.value)?;
+                self.emit(&format!("const __let{} = {};", slot, value));
+                self.emit(&format!(
+                    "if (__let{} === null || __let{} === undefined) {{",
+                    slot, slot
+                ));
+                self.indent += 1;
+                self.gen_block(&decl.otherwise)?;
+                self.indent -= 1;
+                self.emit("}");
+                self.push_scope();
+                for (name, _) in decl.pattern.bindings() {
+                    self.declare(name);
+                    self.emit(&format!("const _{} = __let{};", name, slot));
+                }
+                self.pop_scope();
+            }
+            Stmt::Defer(decl) => {
+                // The piece of code runs when the function is left.
+                let value = self.gen_expr(&decl.value)?;
+                let Some(name) = self.current_defer.clone() else {
+                    return Err(self.err("defer is only allowed inside a function"));
+                };
+                self.emit(&format!("{}.push(() => ({}));", name, value));
             }
             Stmt::For(decl) => {
                 let iter = self.gen_expr(&decl.iter)?;
@@ -435,6 +515,47 @@ impl Codegen {
                 }
             }
             Stmt::Type(_) => {}
+            Stmt::Interface(_) => {}
+            Stmt::Impl(decl) => {
+                // The block becomes a function that makes a value of the
+                // type and gives it the functions of the type.
+                let name = format!("_{}", decl.type_name);
+                self.emit(&format!("function {}(__veyValue) {{", name));
+                self.indent += 1;
+                self.emit("const __veySelf = __veyValue;");
+                for method in &decl.methods {
+                    let params = self.gen_params(&method.params)?;
+                    let async_kw = if block_has_await(&method.body) {
+                        "async "
+                    } else {
+                        ""
+                    };
+                    let generator = if block_has_yield(&method.body) { "*" } else { "" };
+                    self.emit(&format!(
+                        "__veySelf.{} = {}function{}({}) {{",
+                        js_key(&method.name),
+                        async_kw,
+                        generator,
+                        params
+                    ));
+                    self.indent += 1;
+                    self.push_scope();
+                    self.declare("self");
+                    self.emit("const _self = __veySelf;");
+                    for param in &method.params {
+                        for (name, _) in param.bindings() {
+                            self.declare(name);
+                        }
+                    }
+                    self.gen_body(&method.body)?;
+                    self.pop_scope();
+                    self.indent -= 1;
+                    self.emit("};");
+                }
+                self.emit("return __veySelf;");
+                self.indent -= 1;
+                self.emit("}");
+            }
             Stmt::Style(_) => {}
             Stmt::Use(decl) => {
                 if decl.path.ends_with(".css") {
@@ -493,6 +614,72 @@ impl Codegen {
             self.gen_stmt(stmt)?;
         }
         self.pop_scope();
+        Ok(())
+    }
+
+    /// The body of a function, with the parts that wrap it.
+    ///
+    /// A function that has something to do when it is left keeps a list of
+    /// the pieces of code, and a function that hands a failure on catches
+    /// the failure that is thrown.
+    fn gen_body(&mut self, block: &Block) -> Result<(), VeyError> {
+        let has_defer = block_has_defer(block);
+        let has_try = block_has_try(block);
+        let outer = self.current_defer.clone();
+
+        if has_defer {
+            let slot = self.temp;
+            self.temp += 1;
+            self.current_defer = Some(format!("__defers{}", slot));
+            self.emit(&format!("const __defers{} = [];", slot));
+        }
+        if has_defer || has_try {
+            self.emit("try {");
+            self.indent += 1;
+        }
+        if has_try {
+            self.emit("try {");
+            self.indent += 1;
+        }
+
+        for stmt in &block.body {
+            self.gen_stmt(stmt)?;
+        }
+
+        if has_try {
+            self.indent -= 1;
+            self.emit("} catch (__veyErr) {");
+            self.indent += 1;
+            self.emit("if (__veyErr && __veyErr.__veyFailure !== undefined) {");
+            self.indent += 1;
+            self.emit("return V.failure(__veyErr.__veyFailure);");
+            self.indent -= 1;
+            self.emit("}");
+            self.emit("if (__veyErr && __veyErr.__veyNothing) {");
+            self.indent += 1;
+            self.emit("return null;");
+            self.indent -= 1;
+            self.emit("}");
+            self.emit("throw __veyErr;");
+            self.indent -= 1;
+            self.emit("}");
+        }
+        if has_defer || has_try {
+            self.indent -= 1;
+            self.emit("} finally {");
+            self.indent += 1;
+            if has_defer {
+                let name = self.current_defer.clone().unwrap_or_default();
+                self.emit(&format!("while ({}.length > 0) {{", name));
+                self.indent += 1;
+                self.emit(&format!("{}.pop()();", name));
+                self.indent -= 1;
+                self.emit("}");
+            }
+            self.indent -= 1;
+            self.emit("}");
+        }
+        self.current_defer = outer;
         Ok(())
     }
 

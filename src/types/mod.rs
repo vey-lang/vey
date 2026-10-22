@@ -8,7 +8,7 @@ pub mod builtins;
 pub mod checker;
 pub mod core;
 mod exprs;
-mod helpers;
+pub mod helpers;
 mod patterns;
 mod resolve;
 mod rules;

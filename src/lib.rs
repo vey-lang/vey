@@ -9,6 +9,7 @@ pub mod runtime;
 pub mod sourcemap;
 pub mod suggest;
 pub mod types;
+pub mod warn;
 
 use std::fmt;
 

@@ -85,10 +85,39 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
 
     match (source, target) {
         (Type::Array(source), Type::Array(target)) => assignable(source, target),
-        (Type::Object(source), Type::Object(target)) => object_assignable(source, target),
+        (Type::Tuple(source), Type::Tuple(target)) => {
+            source.len() == target.len()
+                && source
+                    .iter()
+                    .zip(target.iter())
+                    .all(|(source, target)| assignable(source, target))
+        }
+        // A list of any length fits a tuple of the same shape.
+        (Type::Array(source), Type::Tuple(target)) => {
+            target.iter().all(|item| assignable(source, item))
+        }
+        (Type::Tuple(source), Type::Array(target)) => {
+            source.iter().all(|item| assignable(item, target))
+        }
+        (Type::Dict(source_key, source_value), Type::Dict(target_key, target_value)) => {
+            assignable(source_key, target_key) && assignable(source_value, target_value)
+        }
+        (Type::Object(source), Type::Object(target)) => object_assignable_exact(source, target),
         (Type::Named(_, source), Type::Object(target)) => object_assignable(source, target),
-        (Type::Object(source), Type::Named(_, target)) => object_assignable(source, target),
+        (Type::Object(source), Type::Named(_, target)) => object_assignable_exact(source, target),
         (Type::Named(_, source), Type::Named(_, target)) => object_assignable(source, target),
+        // An interface is a promise, not a shape: a value may have more
+        // than it asks for.
+        (Type::Interface(_, source), Type::Object(target)) => object_assignable(source, target),
+        (Type::Object(source), Type::Interface(_, target)) => object_assignable(source, target),
+        (Type::Named(_, source), Type::Interface(_, target)) => object_assignable(source, target),
+        (Type::Interface(_, source), Type::Named(_, target)) => object_assignable(source, target),
+        (Type::Interface(_, source), Type::Interface(_, target)) => object_assignable(source, target),
+        // A value of an unknown shape may be anything that is an object.
+        (Type::Unknown, Type::AnyObject) => true,
+        (Type::Object(_), Type::AnyObject) => true,
+        (Type::Named(_, _), Type::AnyObject) => true,
+        (Type::Interface(_, _), Type::AnyObject) => true,
         (Type::Function(source), Type::Function(target)) => function_assignable(source, target),
         (Type::Enum(e1, v1), Type::Enum(e2, v2)) => e1 == e2 && v1 == v2,
         (Type::Enum(e, _), Type::EnumUnion(e2)) => e == e2,
@@ -114,6 +143,25 @@ pub(crate) fn object_assignable(source: &[ObjectField], target: &[ObjectField]) 
             }
             None if target_field.optional => {}
             None => return false,
+        }
+    }
+    true
+}
+
+/// Whether an object has exactly the fields of the target.
+///
+/// A field that the target does not have is a mistake, because the value
+/// would be read as something it is not.
+pub(crate) fn object_assignable_exact(source: &[ObjectField], target: &[ObjectField]) -> bool {
+    if !object_assignable(source, target) {
+        return false;
+    }
+    for source_field in source {
+        if !target
+            .iter()
+            .any(|target_field| target_field.name == source_field.name)
+        {
+            return false;
         }
     }
     true
@@ -156,8 +204,13 @@ pub(crate) fn type_has_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
         Type::Array(inner) => type_has_var(inner),
+        Type::Tuple(items) => items.iter().any(type_has_var),
+        Type::Dict(key, value) => type_has_var(key) || type_has_var(value),
+        Type::Promise(inner) => type_has_var(inner),
+        Type::Result(ok, err) => type_has_var(ok) || type_has_var(err),
         Type::Object(fields) => fields.iter().any(|field| type_has_var(&field.ty)),
         Type::Named(_, fields) => fields.iter().any(|field| type_has_var(&field.ty)),
+        Type::Interface(_, fields) => fields.iter().any(|field| type_has_var(&field.ty)),
         Type::Function(function) => function_has_vars(function),
         Type::Union(items) => items.iter().any(type_has_var),
         _ => false,
@@ -193,6 +246,18 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
     match ty {
         Type::Var(_) => Type::Any,
         Type::Array(inner) => Type::Array(Box::new(erase_type_vars(inner))),
+        Type::Tuple(items) => {
+            Type::Tuple(items.iter().map(erase_type_vars).collect())
+        }
+        Type::Dict(key, value) => Type::Dict(
+            Box::new(erase_type_vars(key)),
+            Box::new(erase_type_vars(value)),
+        ),
+        Type::Promise(inner) => Type::Promise(Box::new(erase_type_vars(inner))),
+        Type::Result(ok, err) => Type::Result(
+            Box::new(erase_type_vars(ok)),
+            Box::new(erase_type_vars(err)),
+        ),
         Type::Object(fields) => Type::Object(
             fields
                 .iter()
@@ -243,6 +308,18 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
             None => ty.clone(),
         },
         Type::Array(inner) => Type::Array(Box::new(substitute_bound(inner, subst))),
+        Type::Tuple(items) => {
+            Type::Tuple(items.iter().map(|item| substitute_bound(item, subst)).collect())
+        }
+        Type::Dict(key, value) => Type::Dict(
+            Box::new(substitute_bound(key, subst)),
+            Box::new(substitute_bound(value, subst)),
+        ),
+        Type::Promise(inner) => Type::Promise(Box::new(substitute_bound(inner, subst))),
+        Type::Result(ok, err) => Type::Result(
+            Box::new(substitute_bound(ok, subst)),
+            Box::new(substitute_bound(err, subst)),
+        ),
         Type::Object(fields) => Type::Object(
             fields
                 .iter()
@@ -296,8 +373,13 @@ pub(crate) fn has_type_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
         Type::Array(inner) => has_type_var(inner),
+        Type::Tuple(items) => items.iter().any(has_type_var),
+        Type::Dict(key, value) => has_type_var(key) || has_type_var(value),
+        Type::Promise(inner) => has_type_var(inner),
+        Type::Result(ok, err) => has_type_var(ok) || has_type_var(err),
         Type::Object(fields) => fields.iter().any(|field| has_type_var(&field.ty)),
         Type::Named(_, fields) => fields.iter().any(|field| has_type_var(&field.ty)),
+        Type::Interface(_, fields) => fields.iter().any(|field| has_type_var(&field.ty)),
         Type::Function(function) => {
             function.params.iter().any(has_type_var) || has_type_var(&function.ret)
         }
@@ -315,12 +397,31 @@ pub(crate) fn collect_type_vars(ty: &Type, out: &mut Vec<String>) {
             }
         }
         Type::Array(inner) => collect_type_vars(inner, out),
+        Type::Tuple(items) => {
+            for item in items {
+                collect_type_vars(item, out);
+            }
+        }
+        Type::Dict(key, value) => {
+            collect_type_vars(key, out);
+            collect_type_vars(value, out);
+        }
+        Type::Promise(inner) => collect_type_vars(inner, out),
+        Type::Result(ok, err) => {
+            collect_type_vars(ok, out);
+            collect_type_vars(err, out);
+        }
         Type::Object(fields) => {
             for field in fields {
                 collect_type_vars(&field.ty, out);
             }
         }
         Type::Named(_, fields) => {
+            for field in fields {
+                collect_type_vars(&field.ty, out);
+            }
+        }
+        Type::Interface(_, fields) => {
             for field in fields {
                 collect_type_vars(&field.ty, out);
             }
@@ -344,7 +445,21 @@ pub(crate) fn type_contains_var(ty: &Type, name: &str) -> bool {
     match ty {
         Type::Var(other) => other == name,
         Type::Array(inner) => type_contains_var(inner, name),
+        Type::Tuple(items) => items.iter().any(|item| type_contains_var(item, name)),
+        Type::Dict(key, value) => {
+            type_contains_var(key, name) || type_contains_var(value, name)
+        }
+        Type::Promise(inner) => type_contains_var(inner, name),
+        Type::Result(ok, err) => {
+            type_contains_var(ok, name) || type_contains_var(err, name)
+        }
         Type::Object(fields) => fields
+            .iter()
+            .any(|field| type_contains_var(&field.ty, name)),
+        Type::Named(_, fields) => fields
+            .iter()
+            .any(|field| type_contains_var(&field.ty, name)),
+        Type::Interface(_, fields) => fields
             .iter()
             .any(|field| type_contains_var(&field.ty, name)),
         Type::Function(function) => {
@@ -438,6 +553,24 @@ pub(crate) fn unify_types(
 
     match (actual, expected) {
         (Type::Array(actual), Type::Array(expected)) => unify_types(actual, expected, subst),
+        (Type::Tuple(actual), Type::Tuple(expected)) => {
+            if actual.len() != expected.len() {
+                return false;
+            }
+            actual
+                .iter()
+                .zip(expected.iter())
+                .all(|(actual, expected)| unify_types(actual, expected, subst))
+        }
+        (Type::Dict(actual_key, actual_value), Type::Dict(expected_key, expected_value)) => {
+            unify_types(actual_key, expected_key, subst)
+                && unify_types(actual_value, expected_value, subst)
+        }
+        (Type::Promise(actual), Type::Promise(expected)) => unify_types(actual, expected, subst),
+        (Type::Result(actual_ok, actual_err), Type::Result(expected_ok, expected_err)) => {
+            unify_types(actual_ok, expected_ok, subst)
+                && unify_types(actual_err, expected_err, subst)
+        }
         (Type::Object(actual), Type::Object(expected))
         | (Type::Named(_, actual), Type::Object(expected))
         | (Type::Object(actual), Type::Named(_, expected))
@@ -504,6 +637,21 @@ pub(crate) fn substitute_with(
             }
         }
         Type::Array(inner) => Type::Array(Box::new(substitute_with(inner, subst, seen))),
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_with(item, subst, seen))
+                .collect(),
+        ),
+        Type::Dict(key, value) => Type::Dict(
+            Box::new(substitute_with(key, subst, seen)),
+            Box::new(substitute_with(value, subst, seen)),
+        ),
+        Type::Promise(inner) => Type::Promise(Box::new(substitute_with(inner, subst, seen))),
+        Type::Result(ok, err) => Type::Result(
+            Box::new(substitute_with(ok, subst, seen)),
+            Box::new(substitute_with(err, subst, seen)),
+        ),
         Type::Object(fields) => Type::Object(
             fields
                 .iter()

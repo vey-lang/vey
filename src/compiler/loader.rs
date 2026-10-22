@@ -47,6 +47,11 @@ pub(crate) fn load_module(
     let mut parser = Parser::new(&source, &file_label)?;
     let ast = parser.parse_program()?;
 
+    // A file may say which version of the language it was written for.
+    if let Some(version) = &ast.version {
+        check_version(version, &file_label)?;
+    }
+
     let mut deps = Vec::new();
     let mut packages: Vec<(String, String)> = Vec::new();
     if let Some(parent) = path.parent() {
@@ -259,4 +264,40 @@ fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+/// The version of the language a file was written for.
+///
+/// A file that is written for a newer version of the language cannot be
+/// read by this compiler.
+fn check_version(version: &str, file: &str) -> Result<(), VeyError> {
+    let wanted = parse_version(version);
+    let ours = parse_version(env!("CARGO_PKG_VERSION"));
+    if wanted > ours {
+        return Err(VeyError::new(
+            format!(
+                "this file is written for Vey {}, and this compiler is {}",
+                version,
+                env!("CARGO_PKG_VERSION")
+            ),
+            file,
+            1,
+            1,
+        ));
+    }
+    Ok(())
+}
+
+/// The major and the minor part of a version.
+fn parse_version(version: &str) -> (u32, u32) {
+    let mut parts = version.split('.');
+    let major = parts
+        .next()
+        .and_then(|part| part.trim().parse().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|part| part.trim().parse().ok())
+        .unwrap_or(0);
+    (major, minor)
 }

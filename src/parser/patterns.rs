@@ -16,27 +16,36 @@ impl Parser {
             let next = self.peek()?;
             if next.kind == TokKind::Punct && next.value == "." {
                 let pos = self.tok.pos;
-                let enum_name = self.advance()?.value;
+                let first = self.advance()?.value;
                 self.advance()?; // "."
-                let variant = self.expect_ident("variant name")?;
+                let second = self.expect_ident("enum name")?;
+                // The enum of another module is written `module.Enum`, and
+                // its variant `module.Enum.Variant`.
+                let (enum_name, variant) = if self.is_punct(".") {
+                    self.advance()?;
+                    let variant = self.expect_ident("variant name")?;
+                    (format!("{}.{}", first, second), variant)
+                } else {
+                    (first, second)
+                };
                 let mut bindings = Vec::new();
                 if self.is_punct("(") {
                     self.advance()?;
                     while !self.is_punct(")") {
                         let bpos = self.tok.pos;
-                        let first = self.expect_ident("binding name")?;
+                        let name = self.expect_ident("binding name")?;
                         if self.is_punct(":") {
                             self.advance()?;
                             let second = self.expect_ident("binding name")?;
                             bindings.push(EnumBinding {
-                                field: Some(first),
+                                field: Some(name),
                                 name: second,
                                 pos: bpos,
                             });
                         } else {
                             bindings.push(EnumBinding {
                                 field: None,
-                                name: first,
+                                name,
                                 pos: bpos,
                             });
                         }

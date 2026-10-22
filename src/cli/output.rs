@@ -139,6 +139,16 @@ pub(crate) fn report(err: &VeyError) {
     eprintln!("{}", format_error(err, &source));
 }
 
+/// The warnings of a program, printed one under the other.
+pub(crate) fn report_warnings(warnings: &[vey::warn::Warning]) {
+    for warning in warnings {
+        eprintln!("{}", warning);
+        if let Some(hint) = &warning.hint {
+            eprintln!("  hint: {}", hint);
+        }
+    }
+}
+
 pub(crate) fn print_help() {
     println!(
         r#"Vey {version}

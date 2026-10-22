@@ -10,6 +10,7 @@ use crate::check;
 use crate::codegen::{generate, Options};
 use crate::sourcemap;
 use crate::types;
+use crate::warn::Warning;
 use crate::VeyError;
 
 use loader::load_module;
@@ -45,6 +46,8 @@ pub struct Bundle {
     /// CSS collected from `style { ... }` blocks and `.css` imports, in
     /// dependency order.
     pub styles: Vec<StyleFile>,
+    /// The warnings of the program.
+    pub warnings: Vec<Warning>,
 }
 
 pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
@@ -82,6 +85,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
 
     let mut chunks = Vec::new();
     let mut sources = Vec::new();
+    let mut warnings: Vec<Warning> = Vec::new();
 
     for module in &modules {
         let deps = module
@@ -98,7 +102,8 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             source: sources.len(),
             enums: std::collections::HashMap::new(),
         };
-        check::check(&module.ast, &module.path.display().to_string())?;
+        let found = check::check(&module.ast, &module.path.display().to_string())?;
+        warnings.extend(found);
         // build imports map for this module from its deps
         let mut imports: HashMap<String, types::ModuleTypeEnv> = HashMap::new();
         for (alias, dep_id) in &module.deps {
@@ -108,7 +113,9 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         }
         // A package of npm is not checked, so it is an empty environment.
         for (alias, _) in &module.packages {
-            imports.insert(alias.clone(), types::ModuleTypeEnv::default());
+            let mut env = types::ModuleTypeEnv::default();
+            env.unchecked = true;
+            imports.insert(alias.clone(), env);
         }
         let env = types::check(&module.ast, &module.path.display().to_string(), &imports)?;
         while type_envs.len() < module.id {
@@ -144,6 +151,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         sources,
         mappings,
         styles,
+        warnings,
     })
 }
 fn wrap_module(id: usize, code: &str) -> (String, usize) {
