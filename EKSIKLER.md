@@ -1020,7 +1020,7 @@ Bu yüzden `onMount(...)`, `onDestroy(...)`, `print(...)` gibi **yan etki** ifad
 ### D1 · `res` nesnesi yetersiz
 `src/runtime/shared.js:244-357` — sunduğu: `status, set, get, getHeaders, remove, send, json, end, cookie, onFinish, transform, head, getStatus, isFinished, sendStatus, vary`.
 
-**Eksik (yeniden denetlenecek):** `req` geri referansı. `redirect`, `type`/`contentType`, `location`, `append`, `write`, `writeHead`, `flushHeaders`, `headersSent`, `locals`, `sendFile` ve `download` artık mevcut. Dosya yardımcıları asenkron `fs.readFile` kullanıyor; büyük dosyalar için streaming hâlâ D2 kapsamındaki eksik.
+`redirect`, `type`/`contentType`, `location`, `append`, `write`, `writeHead`, `flushHeaders`, `headersSent`, `locals`, `req`, `sendFile` ve `download` artık mevcut. Dosya yardımcıları gerçek stream kullanıyor; genel kullanıcı stream API'si ve upload streaming hâlâ D2 kapsamındaki eksik.
 
 `res.send("merhaba")` → `Content-Type: text/html` ilan ediyor (`shared.js:209-223`) → JSON döndürmek isteyen bir program `res.json()` kullanmak zorunda (var, iyi).
 

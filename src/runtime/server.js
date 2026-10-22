@@ -948,6 +948,7 @@ function veyServer(ctx) {
       }
       readBody(request, max).then(function (body) {
         var info = makeRequest(request, url, found ? found.params : {});
+        res.req = info;
         info.body = body.parsed;
         info.text = body.raw;
         info.files = body.files;

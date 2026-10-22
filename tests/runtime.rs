@@ -699,6 +699,34 @@ app.start(() => {
 }
 
 #[test]
+fn response_exposes_the_request_that_is_being_handled() {
+    let text = run_runtime(
+        "response-request",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.get("/check", (req, res) => ({
+  samePath: res.req.path === req.path,
+  sameMethod: res.req.method === "GET",
+  sameObject: res.req === req
+}));
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/check", res => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      console.log(body);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains(r#"{"samePath":true,"sameMethod":true,"sameObject":true}"#), "{text}");
+}
+
+#[test]
 fn cors_answers_preflight_with_the_configured_headers() {
     let text = run_runtime(
         "cors-preflight",
