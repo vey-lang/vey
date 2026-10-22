@@ -265,11 +265,19 @@ function veyHttp(ctx) {
           return wait(retryDelay).then(function () { return attempt(remaining - 1); });
         }
         return answer.text().then(function (text) {
-          return Response(text, {
+          // A JSON answer is a value, anything else is a text. The answer
+          // of `http.get` is the same.
+          var contentType = answer.headers.get("content-type") || "";
+          var body = text;
+          if (contentType.indexOf("json") !== -1) {
+            try { body = JSON.parse(text); } catch (err) { body = text; }
+          }
+          return Response(body, {
             status: answer.status,
             statusText: answer.statusText,
             headers: answer.headers,
-            url: answer.url
+            url: answer.url,
+            text: text
           });
         });
       }, function (err) {

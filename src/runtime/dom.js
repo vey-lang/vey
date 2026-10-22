@@ -256,10 +256,32 @@ function veyDom(ctx) {
   ctx.title = title;
   ctx.toDom = toDom;
 
+  // The name of an item of a list, so that the list may be changed and put
+  // in another order without trouble.
+  function withKey(nodes, key) {
+    var list = Array.isArray(nodes) ? nodes : [nodes];
+    for (var i = 0; i < list.length; i++) {
+      var node = list[i];
+      if (!node || typeof node !== "object") continue;
+      try {
+        Object.defineProperty(node, "__veyKey", {
+          value: String(key),
+          writable: true,
+          enumerable: false,
+          configurable: true
+        });
+      } catch (err) {
+        node.__veyKey = String(key);
+      }
+    }
+    return list;
+  }
+
   return {
     // The builder of the markup, which the compiler calls and a program
     // does not.
     __h: h,
+    withKey: withKey,
     html: html,
     raw: raw,
     bind: bind,

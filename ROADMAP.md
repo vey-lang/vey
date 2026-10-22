@@ -833,23 +833,31 @@ gap that is closed.
 - [x] **The condition of a `match` arm was joined with `||`,** so the
       condition of the arm was ignored and the arm held whenever its
       pattern held. (`src/codegen/exprs.rs`)
-- [ ] **An `await` in the condition of a `match` arm writes JavaScript
+- [x] **An `await` in the condition of a `match` arm writes JavaScript
       that is not valid,** so the whole bundle does not load. The same
       holds for the condition of a markup `match`.
       (`src/codegen/exprs.rs`, `src/codegen/markup.rs`)
-- [ ] **A pattern of an object reads a field of nothing,** so a value that
-      is not there makes the program fall over.
+- [x] **A pattern of an object reads a field of nothing,** so a value that
+      is not there makes the program fall over. The same holds for a value
+      of a `let` that takes a value apart.
       (`src/codegen/exprs.rs`)
-- [ ] **A value of a `let` that takes a value apart reads a field of
-      nothing,** the same as the pattern of a `match`.
-      (`src/codegen/exprs.rs`)
-- [ ] **The value of a parameter that names another parameter is the
+- [x] **The value of a parameter that names another parameter is the
       helper of the runtime with that name,** because the names of the
-      parameters are written after the values of them.
+      parameters are written after the values of them. The names of the
+      parameters are known before the values of them now.
       (`src/codegen/mod.rs`, `src/codegen/exprs.rs`)
-- [ ] **Two enums with the same name in two modules cannot be told
-      apart,** so the arm of one of them takes the value of the other.
-      (`src/codegen/exprs.rs`, `src/runtime/enum.js`)
+- [x] **Two enums with the same name in two modules cannot be told
+      apart,** so the arm of one of them takes the value of the other. The
+      name of an enum has the number of its module in front of it now.
+      (`src/codegen/exprs.rs`, `src/codegen/mod.rs`, `src/runtime/enum.js`)
+- [ ] **A `yield` in the body of an arrow or of a `match` arm is written
+      into a function that is not a generator,** so the bundle is not valid
+      JavaScript. (`src/codegen/exprs.rs`)
+- [ ] **A number that is too big is written as `inf`,** which is not
+      JavaScript. (`src/codegen/js.rs`)
+- [ ] **The `match` of the markup throws the names that its patterns bind
+      away,** so the bundle names something that was never written.
+      (`src/codegen/markup.rs`)
 - [x] **The build cache does not know the stylesheets,** so a change in a
       `.css` file was served from the cache and the old style was kept.
       The stylesheets are part of the key of the cache now.
@@ -1029,23 +1037,45 @@ gap that is closed.
       and a warning are both invisible in the editor. The file is now
       checked with the modules it uses, and the warnings are published as
       well. (`src/cli/lsp.rs`, `src/compiler/mod.rs`)
-- [ ] **A `is` with a type of the program is true for any object,** so the
-      branch is taken for a value that is not of that type.
-      (`src/codegen/exprs.rs`, `src/runtime/core.js`)
-- [ ] **`assertMatch` does not know the `regex` helper,** so it holds for
+- [x] **A `is` with a type of the program is true for any object,** so the
+      branch is taken for a value that is not of that type. The checker
+      says that a type of the program cannot be checked with `is`, and the
+      runtime holds for a kind it does not know.
+      (`src/types/exprs.rs`, `src/runtime/core.js`)
+- [x] **`assertMatch` does not know the `regex` helper,** so it holds for
       a text that the pattern does not match. (`src/runtime/core.js`)
-- [ ] **The server says that it listens on `http://:::`** when it listens
+- [x] **The server says that it listens on `http://:::`** when it listens
       on every address, and the name of the host is left in the air.
       (`src/runtime/server.js`)
-- [ ] **`http.get` and `http.fetch` give two different answers,** so the
-      body of one is a value and the body of the other is a text.
-      (`src/runtime/http.js`)
-- [ ] **The `key` of a `for` of the markup cannot be written,** although
+- [x] **`http.get` and `http.fetch` give two different answers,** so the
+      body of one is a value and the body of the other is a text. The two
+      give the same answer now. (`src/runtime/http.js`)
+- [x] **The `key` of a `for` of the markup cannot be written,** although
       the README writes it, and the part of the code that would use it is
-      never reached. (`src/parser/markup.rs`, `src/codegen/markup.rs`)
-- [ ] **The `match` of the markup refuses a comma between its arms,** so
+      never reached. The name of an item is written on the nodes of the
+      loop now. (`src/parser/markup.rs`, `src/codegen/markup.rs`,
+      `src/runtime/dom.js`, `src/check/mod.rs`)
+- [x] **The `match` of the markup refuses a comma between its arms,** so
       the same text is a mistake in the markup and not in an expression.
       (`src/parser/markup.rs`)
+- [ ] **A number in another base that does not fit in 64 bits is
+      silently zero.** (`src/lexer/mod.rs`)
+- [ ] **A `?` that hands a failure on is read as a ternary** when a `:`
+      is written later in the same block. (`src/parser/exprs.rs`)
+- [ ] **The token of a text always says that no line ended before it,** so
+      the rule "the end of a line ends a statement" does not hold for a
+      line that starts with a text. (`src/lexer/strings.rs`)
+- [ ] **The parser of the types takes the `?` of a ternary,** so a
+      ternary after an `is` or an `as` is a mistake.
+      (`src/parser/types.rs`)
+- [ ] **A pattern of an object holds for every value that is not
+      nothing,** because the field of it is never checked.
+      (`src/codegen/exprs.rs`)
+- [ ] **The `if let` and the `while let` do not check the enum of a
+      pattern,** so a pattern that can never hold is accepted.
+      (`src/types/stmts.rs`)
+- [ ] **The markup has no depth guard,** so a markup that is nested a few
+      hundred deep takes the compiler down. (`src/parser/markup.rs`)
 - [ ] **A range with a step to the other way walks nothing,** when the
       range itself counts up. (`src/codegen/mod.rs`)
 - [ ] **`html` falls over on a value that only looks like a node of the

@@ -7,14 +7,6 @@ use super::awaits::{block_has_await, block_has_yield, expr_has_await};
 use super::js::{format_number, js_key, js_string};
 use super::Codegen;
 
-/// The name of an enum, without the name of the module it comes from.
-///
-/// The value of an enum carries the name it was given where it was written,
-/// so that two enums of the same name do not mix.
-fn local_enum_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
 impl Codegen {
     /// The code of an expression, with a mark that says where it came from.
     ///
@@ -193,7 +185,7 @@ impl Codegen {
                     "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
                     subject,
                     subject,
-                    js_string(local_enum_name(enum_name)),
+                    js_string(&self.enum_runtime_name(enum_name)),
                     subject,
                     js_string(variant)
                 );
@@ -243,7 +235,9 @@ impl Codegen {
             }
             Pattern::Object(fields, _) => {
                 // The fields of an object, such as `{ name, age }`.
-                let mut conditions = vec![format!("{} !== null", subject)];
+                // A value that is not there has no fields, so the pattern
+                // does not hold.
+                let mut conditions = vec![format!("{} != null", subject)];
                 let mut taken = Vec::new();
                 for (key, pattern) in fields {
                     let value = format!("{}[{}]", subject, js_string(key));
@@ -296,20 +290,18 @@ impl Codegen {
         params: &[Param],
         body: &Block,
     ) -> Result<String, VeyError> {
+        // The scope of the function is open before the parameters are
+        // written, so that a value of a parameter may name the parameter in
+        // front of it.
+        self.push_scope();
         let params_text = self.gen_params(params)?;
         let async_kw = if block_has_await(body) { "async " } else { "" };
         let generator = if block_has_yield(body) { "*" } else { "" };
         let captured = self.capture(|codegen| {
-            codegen.push_scope();
-            for param in params {
-                for (name, _) in param.bindings() {
-                    codegen.declare(name);
-                }
-            }
             codegen.gen_body(body)?;
-            codegen.pop_scope();
             Ok(())
         })?;
+        self.pop_scope();
         let pad = "  ".repeat(self.indent);
         Ok(format!(
             "({}function{}({}) {{\n{}\n{}}})",
@@ -326,27 +318,26 @@ impl Codegen {
         params: &[Param],
         body: &ArrowBody,
     ) -> Result<String, VeyError> {
+        // The scope of the arrow is open before the parameters are written,
+        // so that a value of a parameter may name the parameter in front of
+        // it.
+        self.push_scope();
         let param_text = self.gen_params(params)?;
         match body {
             ArrowBody::Expr(expr) => {
                 let value = self.gen_expr(expr)?;
                 let async_kw = if expr_has_await(expr) { "async " } else { "" };
+                self.pop_scope();
                 Ok(format!("({}({}) => {})", async_kw, param_text, value))
             }
             ArrowBody::Block(block) => {
                 let async_kw = if block_has_await(block) { "async " } else { "" };
                 let generator = if block_has_yield(block) { "*" } else { "" };
                 let captured = self.capture(|codegen| {
-                    codegen.push_scope();
-                    for param in params {
-                        for (name, _) in param.bindings() {
-                            codegen.declare(name);
-                        }
-                    }
                     codegen.gen_body(block)?;
-                    codegen.pop_scope();
                     Ok(())
                 })?;
+                self.pop_scope();
                 let pad = "  ".repeat(self.indent);
                 Ok(format!(
                     "({}{}({}) => {{\n{}\n{}}})",
@@ -517,8 +508,12 @@ impl Codegen {
         })?;
         let pad = "  ".repeat(self.indent);
         // An `await` inside an arm needs an async arrow, otherwise the
-        // generated JavaScript is a syntax error.
-        let async_kw = if arms.iter().any(|arm| expr_has_await(&arm.body)) {
+        // generated JavaScript is a syntax error. The condition of an arm
+        // may wait as well.
+        let async_kw = if arms.iter().any(|arm| {
+            expr_has_await(&arm.body)
+                || arm.guard.as_ref().is_some_and(|guard| expr_has_await(guard))
+        }) {
             "async "
         } else {
             ""

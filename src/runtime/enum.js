@@ -1,15 +1,16 @@
 // The values of the enums of the language.
 function veyEnum(ctx) {
   var str = ctx.str;
-  function enumValue(enumName, variant) {
+  function enumValue(enumName, variant, displayName) {
     var value = {};
+    var shown = displayName === undefined ? enumName : displayName;
     // The bookkeeping fields stay hidden so that they do not show up in
     // `keys`, `values` or `entries`.
     Object.defineProperty(value, "__veyEnum", { value: enumName, enumerable: false });
     Object.defineProperty(value, "__veyVariant", { value: variant, enumerable: false });
     Object.defineProperty(value, "toString", {
       value: function () {
-        return enumName + "." + variant;
+        return shown + "." + variant;
       },
       enumerable: false
     });

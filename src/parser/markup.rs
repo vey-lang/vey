@@ -310,8 +310,9 @@ impl Parser {
         self.expect_kw("in")?;
         let iter = self.parse_expression()?;
         // The items of the list may be told apart, so that a list may change
-        // without the page being built again.
-        let key = if self.is_kw("key") {
+        // without the page being built again. The name `key` is not a word
+        // of the language, so it is a name that is written here.
+        let key = if self.tok.kind == TokKind::Ident && self.tok.value == "key" {
             self.advance()?;
             self.expect_op("=")?;
             Some(self.parse_expression()?)
@@ -354,6 +355,10 @@ impl Parser {
             self.expect_punct("{")?;
             let body = self.parse_markup_nodes()?;
             self.expect_punct("}")?;
+            // The arms may be told apart with a comma, as in an expression.
+            if self.is_punct(",") {
+                self.advance()?;
+            }
             arms.push(MMatchArm {
                 patterns,
                 guard,

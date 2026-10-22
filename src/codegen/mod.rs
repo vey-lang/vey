@@ -253,6 +253,10 @@ impl Codegen {
             }
             Stmt::Fn(decl) => {
                 self.declare(&decl.name);
+                // The scope of the function is open before the parameters
+                // are written, so that a value of a parameter may name the
+                // parameter in front of it.
+                self.push_scope();
                 let params = self.gen_params(&decl.params)?;
                 let async_kw = if block_has_await(&decl.body) {
                     "async "
@@ -267,12 +271,6 @@ impl Codegen {
                     async_kw, generator, decl.name, params
                 ));
                 self.indent += 1;
-                self.push_scope();
-                for param in &decl.params {
-                    for (name, _) in param.bindings() {
-                        self.declare(name);
-                    }
-                }
                 self.gen_body(&decl.body)?;
                 self.pop_scope();
                 self.indent -= 1;
@@ -284,10 +282,11 @@ impl Codegen {
                 for variant in &decl.variants {
                     if variant.fields.is_empty() {
                         entries.push(format!(
-                            "{}: V.enumValue({}, {})",
+                            "{}: V.enumValue({}, {}, {})",
                             js_key(&variant.name),
-                            js_string(&decl.name),
-                            js_string(&variant.name)
+                            js_string(&self.enum_runtime_name(&decl.name)),
+                            js_string(&variant.name),
+                            js_string(&decl.name)
                         ));
                     } else {
                         let names = variant
@@ -299,7 +298,7 @@ impl Codegen {
                         entries.push(format!(
                             "{}: V.enumCtor({}, {}, [{}])",
                             js_key(&variant.name),
-                            js_string(&decl.name),
+                            js_string(&self.enum_runtime_name(&decl.name)),
                             js_string(&variant.name),
                             names
                         ));
@@ -634,6 +633,11 @@ impl Codegen {
                 self.indent += 1;
                 self.emit("const __veySelf = __veyValue;");
                 for method in &decl.methods {
+                    // The scope of the method is open before the parameters
+                    // are written, so that a value of a parameter may name
+                    // the parameter in front of it.
+                    self.push_scope();
+                    self.declare("self");
                     let params = self.gen_params(&method.params)?;
                     let async_kw = if block_has_await(&method.body) {
                         "async "
@@ -649,14 +653,7 @@ impl Codegen {
                         params
                     ));
                     self.indent += 1;
-                    self.push_scope();
-                    self.declare("self");
                     self.emit("const _self = __veySelf;");
-                    for param in &method.params {
-                        for (name, _) in param.bindings() {
-                            self.declare(name);
-                        }
-                    }
                     self.gen_body(&method.body)?;
                     self.pop_scope();
                     self.indent -= 1;
@@ -926,11 +923,36 @@ impl Codegen {
         }
     }
 
+    /// The name of an enum at runtime.
+    ///
+    /// The name has the number of the module in front of it, so that two
+    /// enums of the same name in two modules do not mix. The name that is
+    /// shown to the reader is the name the enum was given.
+    fn enum_runtime_name(&self, name: &str) -> String {
+        match name.split_once('.') {
+            Some((alias, plain)) => {
+                let module = self
+                    .deps
+                    .iter()
+                    .find(|(other, _)| other == alias)
+                    .map(|(_, module)| module.clone())
+                    .unwrap_or_else(|| alias.to_string());
+                format!("{}.{}", module, plain)
+            }
+            None => format!("__m{}.{}", self.source, name),
+        }
+    }
+
     fn gen_params(&mut self, params: &[Param]) -> Result<String, VeyError> {
         let mut parts = Vec::new();
         for param in params {
             // A parameter that takes the argument apart becomes a pattern.
             let pattern = self.gen_binding_pattern(&param.pattern)?;
+            // The names of the parameters are known before the values of
+            // them, so that a value may name the parameter in front of it.
+            for (name, _) in param.bindings() {
+                self.declare(name);
+            }
             if param.rest {
                 parts.push(format!("...{}", pattern));
                 continue;

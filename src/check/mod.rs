@@ -559,13 +559,15 @@ impl Checker<'_> {
                 }
                 MarkupNode::For(loop_node) => {
                     self.check_expr(&loop_node.iter)?;
-                    if let Some(key) = &loop_node.key {
-                        self.check_expr(key)?;
-                    }
                     self.scopes.push();
                     self.declare(&loop_node.name, BindingKind::Let, loop_node.iter.pos())?;
                     if let Some(index) = &loop_node.index {
                         self.declare(index, BindingKind::Let, loop_node.iter.pos())?;
+                    }
+                    // The name of an item is written in the scope of the
+                    // loop, so that it may be the item itself.
+                    if let Some(key) = &loop_node.key {
+                        self.check_expr(key)?;
                     }
                     self.check_markup_nodes(&loop_node.body)?;
                     self.pop_scope();

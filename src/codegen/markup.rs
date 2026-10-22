@@ -3,6 +3,7 @@
 use crate::ast::*;
 use crate::VeyError;
 
+use super::awaits::{expr_has_await, markup_has_await};
 use super::js::{event_attr, js_key, js_string};
 use super::Codegen;
 
@@ -37,9 +38,9 @@ impl Codegen {
                 let key = match &loop_node.key {
                     Some(key) => {
                         let key = self.gen_expr(key)?;
-                        format!(", {}", key)
+                        format!("V.withKey({}, {})", body, key)
                     }
-                    None => String::new(),
+                    None => body.clone(),
                 };
                 // The place of the item in the list may be wanted as well.
                 let index = match &loop_node.index {
@@ -47,8 +48,8 @@ impl Codegen {
                     None => String::new(),
                 };
                 Ok(format!(
-                    "V.flatMap({}, function(_{}{}) {{ return {}; }}{})",
-                    iter, loop_node.name, index, body, key
+                    "V.flatMap({}, function(_{}{}) {{ return {}; }})",
+                    iter, loop_node.name, index, key
                 ))
             }
             MarkupNode::Match(m) => self.gen_markup_match(m),
@@ -113,8 +114,23 @@ impl Codegen {
             Ok(())
         })?;
         let pad = "  ".repeat(self.indent);
+        // An `await` inside an arm needs an async function, otherwise the
+        // generated JavaScript is a syntax error. The condition of an arm
+        // may wait as well.
+        let async_kw = if m.arms.iter().any(|arm| {
+            markup_has_await(&arm.body)
+                || arm
+                    .guard
+                    .as_ref()
+                    .is_some_and(|guard| expr_has_await(guard))
+        }) {
+            "async "
+        } else {
+            ""
+        };
         Ok(format!(
-            "(({}) => {{\n{}\n{}}})({})",
+            "({}({}) => {{\n{}\n{}}})({})",
+            async_kw,
             temp,
             captured.trim_end_matches('\n'),
             pad,

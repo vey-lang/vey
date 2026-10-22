@@ -161,8 +161,16 @@ function veyCore(ctx) {
   }
 
   function assertMatch(text, pattern, message) {
-    var regex = pattern instanceof RegExp ? pattern : new RegExp(String(pattern));
-    if (!regex.test(String(text))) {
+    var holds;
+    if (pattern && typeof pattern.test === "function") {
+      // The pattern may be the pattern of the `regex` helper, which knows
+      // how to hold a text.
+      holds = pattern.test(String(text));
+    } else {
+      var regex = pattern instanceof RegExp ? pattern : new RegExp(String(pattern));
+      holds = regex.test(String(text));
+    }
+    if (!holds) {
       throw new Error(
         (message === undefined ? "" : String(message) + ": ") +
         show(text) + " does not match " + show(pattern)

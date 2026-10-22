@@ -528,6 +528,14 @@ impl TypeChecker<'_> {
             }
             Expr::Is(inner, ty, pos) => {
                 let actual = self.infer_expr(inner)?;
+                // The runtime knows the kinds of the values of JavaScript,
+                // but not the types of the program.
+                if !is_builtin_kind(ty) {
+                    return Err(self.error(
+                        *pos,
+                        "a type of the program cannot be checked with `is`",
+                    ));
+                }
                 let wanted = self.resolve_type(ty)?;
                 if !self.fits(&actual, &wanted) && !self.fits(&wanted, &actual) {
                     return Err(self.type_error(*pos, &actual, &wanted));
@@ -1118,6 +1126,13 @@ impl TypeChecker<'_> {
                     ))
                 }
             }
+            "??" => {
+                // The value of the left, unless it is nothing.
+                if matches!(left, Type::Any) || matches!(right, Type::Any) {
+                    return Ok(Type::Any);
+                }
+                Ok(union(vec![without_empty(left), right.clone()]))
+            }
             "==" | "!=" | "===" | "!==" => {
                 // Two values of different types are never the same, so the
                 // comparison is most likely a mistake.
@@ -1634,5 +1649,31 @@ impl TypeChecker<'_> {
             return error.with_hint(format!("use {}(...) instead", name));
         }
         error
+    }
+}
+
+/// Whether a type is one of the kinds the runtime knows.
+///
+/// The kinds are the types of the values of JavaScript, so a value may be
+/// checked with them. A type of the program is not one of them.
+fn is_builtin_kind(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Name(name, _) => matches!(
+            name.as_str(),
+            "number"
+                | "int"
+                | "string"
+                | "bool"
+                | "boolean"
+                | "null"
+                | "undefined"
+                | "object"
+                | "function"
+        ),
+        TypeExpr::Array(_, _) | TypeExpr::Tuple(_, _) => true,
+        TypeExpr::Object(_, _) => true,
+        TypeExpr::Dict(_, _, _) => true,
+        TypeExpr::Function(_, _, _, _) => true,
+        _ => false,
     }
 }
