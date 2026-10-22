@@ -972,7 +972,7 @@ gap that is closed.
       and has drifted:** `pub`, `priv`, `throw`, `yield`, `defer` and `is`
       are missing, and `type` is there. (`src/runtime/highlight.js`,
       `src/lexer/mod.rs`)
-- [ ] **There are two highlighters of the same language,** and they colour
+- [x] **There are two highlighters of the same language,** and they colour
       it differently. (`src/cli/highlight.rs`, `src/runtime/highlight.js`)
 - [x] **There are two escapers of HTML,** and the one of the tools does
       not escape the apostrophe. (`src/runtime/shared.js`,

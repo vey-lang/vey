@@ -4,7 +4,6 @@ use std::path::Path;
 
 use vey::VeyError;
 
-use crate::cli::highlight::highlight;
 use crate::cli::output::escape_html;
 
 #[derive(Clone)]
@@ -87,7 +86,7 @@ impl BuildError {
                 "<span class=\"{}\"><span class=\"no\">{}</span><span class=\"text\">{}</span></span>",
                 class,
                 number,
-                highlight(lines[number - 1])
+                escape_html(lines[number - 1])
             ));
             if number == target {
                 out.push_str(&format!(
@@ -235,6 +234,12 @@ impl BuildError {
   .num { color: #fdba74; }
   .cm { color: #6b7280; font-style: italic; }
   .fn { color: #93c5fd; }
+  .ty { color: #7dd3fc; }
+  .tag { color: #f9a8d4; }
+  .cls { color: #fcd34d; }
+  .at { color: #fdba74; }
+  .op { color: #a1a1aa; }
+  .cp { color: #93c5fd; }
   .hint {
     display: flex;
     gap: 0.75rem;
@@ -304,7 +309,14 @@ impl BuildError {
                 inline_code(hint)
             ));
         }
-        out.push_str("<footer>Vey dev &middot; watching for changes</footer></main></body></html>");
+        out.push_str("<footer>Vey dev &middot; watching for changes</footer></main>");
+        // The code is painted by the highlighter of the runtime, so that a
+        // sample of a page and the line of an error have the same colours.
+        out.push_str("<script data-vey-highlight>");
+        out.push_str(include_str!("../runtime/highlight.js"));
+        out.push_str(
+            "</script>\n<script>(function(){var paint=veyHighlight({});var nodes=document.querySelectorAll('pre.code .text');for(var i=0;i<nodes.length;i++){var node=nodes[i];if(node.querySelector('.caret'))continue;node.innerHTML=paint.highlight(node.textContent);}})();</script>\n</body></html>",
+        );
         out
     }
 }

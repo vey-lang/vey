@@ -182,10 +182,18 @@ fn the_error_page_shows_the_code_with_colours() {
 
     let (status, body) = wait_for(port, "/", "Compile error");
     assert!(status.contains("500"), "status: {status}");
-    assert!(body.contains("class=\"cm\""), "the comment is not coloured");
-    assert!(body.contains("class=\"kw\""), "the keyword is not coloured");
-    assert!(body.contains("class=\"str\""), "the text is not coloured");
-    assert!(body.contains("class=\"num\""), "the number is not coloured");
+    // The code is shown, and the page carries the highlighter of the
+    // runtime, so that the colours of an error are the colours of a sample.
+    assert!(body.contains("let count = 42"), "the code is not shown");
+    assert!(body.contains("a comment"), "the comment is not shown");
+    assert!(
+        body.contains("data-vey-highlight"),
+        "the highlighter is not in the page"
+    );
+    // The classes of the highlighter are styled by the page.
+    for class in [".cm {", ".kw {", ".str {", ".num {"] {
+        assert!(body.contains(class), "the class '{}' has no colour", class);
+    }
     // The hint is readable.
     assert!(body.contains("<b>Hint</b><span>"), "{body}");
     assert!(body.contains("did you mean"), "{body}");

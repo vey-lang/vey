@@ -15,7 +15,6 @@ pub mod entry;
 pub mod error;
 pub mod explain;
 pub mod fmt;
-pub mod highlight;
 pub mod json;
 pub mod lint;
 pub mod lsp;

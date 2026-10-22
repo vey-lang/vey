@@ -1422,7 +1422,6 @@ src/cli/             the commands
   scaffold.rs        new projects
   entry.rs           finding the entry file
   error.rs           build errors with a source frame
-  highlight.rs       the colouring of the code in the error page
   output.rs          turning a bundle into runnable output
   fmt.rs             the shape of the files
   lint.rs            the smells of a program
