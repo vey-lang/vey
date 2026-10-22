@@ -17,6 +17,7 @@ pub(crate) fn load_module(
     ids: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
     styles: &mut Vec<StyleFile>,
+    text: Option<&str>,
 ) -> Result<usize, VeyError> {
     if let Some(id) = ids.get(path) {
         return Ok(*id);
@@ -35,14 +36,19 @@ pub(crate) fn load_module(
 
     stack.push(path.to_path_buf());
 
-    let source = fs::read_to_string(path).map_err(|err| {
-        VeyError::new(
-            format!("cannot read file: {}", err),
-            path.display().to_string(),
-            1,
-            1,
-        )
-    })?;
+    // The text of the file may be another one than the one on the disk,
+    // which is what a language server needs.
+    let source = match text {
+        Some(text) => text.to_string(),
+        None => fs::read_to_string(path).map_err(|err| {
+            VeyError::new(
+                format!("cannot read file: {}", err),
+                path.display().to_string(),
+                1,
+                1,
+            )
+        })?,
+    };
 
     let file_label = path.display().to_string();
     let mut parser = Parser::new(&source, &file_label)?;
@@ -136,7 +142,7 @@ pub(crate) fn load_module(
                         }
                         continue;
                     }
-                    let id = load_module(&target, modules, ids, stack, styles)?;
+                    let id = load_module(&target, modules, ids, stack, styles, None)?;
                     deps.push((use_stmt.alias.clone(), id));
                 }
                 _ => {}

@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-use vey::check;
 use vey::parser::Parser;
 use vey::types;
 
@@ -185,14 +184,23 @@ impl Server {
             Ok(parser) => parser,
             Err(err) => return vec![problem(&err, 1, 1)],
         };
-        let program = match parser.parse_program() {
-            Ok(program) => program,
-            Err(err) => return vec![problem(&err, err.line, err.col)],
-        };
+        if let Err(err) = parser.parse_program() {
+            return vec![problem(&err, err.line, err.col)];
+        }
 
+        // The file is checked with the modules it uses, so that the
+        // mistakes of the types and the warnings are said as well.
         let mut out = Vec::new();
-        if let Err(err) = check::check(&program, &label) {
-            out.push(problem(&err, err.line, err.col));
+        match vey::compiler::check_file(&path, Some(text)) {
+            Ok(problems) => {
+                for warning in &problems.warnings {
+                    out.push(warning_problem(warning));
+                }
+                if let Some(err) = &problems.error {
+                    out.push(problem(err, err.line, err.col));
+                }
+            }
+            Err(err) => out.push(problem(&err, err.line, err.col)),
         }
         out
     }
@@ -312,6 +320,38 @@ fn problem(err: &vey::VeyError, line: usize, col: usize) -> Value {
         ("message", json::text(&err.message)),
     ];
     if let Some(hint) = &err.hint {
+        items.push(("hint", json::text(hint)));
+    }
+    json::object(items)
+}
+
+/// A warning of the compiler, as the protocol wants it.
+fn warning_problem(warning: &vey::warn::Warning) -> Value {
+    let mut items = vec![
+        (
+            "range",
+            json::object(vec![
+                (
+                    "start",
+                    json::object(vec![
+                        ("line", json::number((warning.line.max(1) - 1) as f64)),
+                        ("character", json::number((warning.col.max(1) - 1) as f64)),
+                    ]),
+                ),
+                (
+                    "end",
+                    json::object(vec![
+                        ("line", json::number((warning.line.max(1) - 1) as f64)),
+                        ("character", json::number(warning.col.max(1) as f64)),
+                    ]),
+                ),
+            ]),
+        ),
+        ("severity", json::number(2.0)),
+        ("source", json::text("vey")),
+        ("message", json::text(&warning.message)),
+    ];
+    if let Some(hint) = &warning.hint {
         items.push(("hint", json::text(hint)));
     }
     json::object(items)

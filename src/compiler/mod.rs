@@ -84,7 +84,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
     let mut stack: Vec<PathBuf> = Vec::new();
     let mut styles: Vec<StyleFile> = Vec::new();
 
-    let entry_id = load_module(&entry, &mut modules, &mut ids, &mut stack, &mut styles)?;
+    let entry_id = load_module(&entry, &mut modules, &mut ids, &mut stack, &mut styles, None)?;
 
     // An exported function that nothing reads is not written.
     loader::mark_unused(&mut modules, entry_id);
@@ -220,6 +220,78 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
     };
     cache::store(&root, &bundle);
     Ok(bundle)
+}
+
+/// The problems of one file of a project.
+///
+/// The text of the file may be another one than the one on the disk, which
+/// is what a language server needs. The modules that the file uses are read
+/// from the disk.
+pub fn check_file(path: &Path, text: Option<&str>) -> Result<FileProblems, VeyError> {
+    let mut modules: Vec<Module> = Vec::new();
+    let mut ids: HashMap<PathBuf, usize> = HashMap::new();
+    let mut stack: Vec<PathBuf> = Vec::new();
+    let mut styles: Vec<StyleFile> = Vec::new();
+    let entry_id = load_module(path, &mut modules, &mut ids, &mut stack, &mut styles, text)?;
+
+    let mut warnings: Vec<Warning> = Vec::new();
+    for module in &modules {
+        let label = module.path.display().to_string();
+        match check::check(&module.ast, &label) {
+            Ok(found) => warnings.extend(found),
+            Err(err) => {
+                // The mistake is said as a warning, so that the editor may
+                // show it next to the other ones.
+                warnings.push(Warning::new(
+                    err.message.clone(),
+                    label.clone(),
+                    err.line,
+                    err.col,
+                ));
+            }
+        }
+    }
+
+    // The types of the modules, in the order they are loaded.
+    let mut envs: Vec<types::ModuleTypeEnv> = Vec::with_capacity(modules.len());
+    let mut error = None;
+    for module in &modules {
+        let mut imports: HashMap<String, types::ModuleTypeEnv> = HashMap::new();
+        for (alias, id) in &module.deps {
+            if let Some(env) = envs.get(*id) {
+                imports.insert(alias.clone(), env.clone());
+            }
+        }
+        let label = module.path.display().to_string();
+        match types::check(&module.ast, &label, &imports) {
+            Ok(env) => {
+                while envs.len() < module.id {
+                    envs.push(types::ModuleTypeEnv::default());
+                }
+                if envs.len() == module.id {
+                    envs.push(env);
+                } else {
+                    envs[module.id] = env;
+                }
+            }
+            Err(err) => {
+                if module.id == entry_id {
+                    error = Some(err);
+                }
+                // A module with a mistake is not known to the ones that
+                // use it, so the check stops here.
+                break;
+            }
+        }
+    }
+
+    Ok(FileProblems { warnings, error })
+}
+
+/// The problems of a file: the warnings and the mistake, if there is one.
+pub struct FileProblems {
+    pub warnings: Vec<Warning>,
+    pub error: Option<VeyError>,
 }
 
 /// The folder the cache of a project is written in.

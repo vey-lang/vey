@@ -89,7 +89,13 @@ fn collect_files(files: &[String]) -> Result<Vec<PathBuf>, String> {
         if path.is_dir() {
             collect_tool_files(&path, &mut out);
         } else if path.is_file() {
-            out.push(path);
+            // Only a program is written, so that a text or a stylesheet is
+            // left as it is.
+            if path.extension().is_some_and(|extension| extension == "vey") {
+                out.push(path);
+            } else {
+                return Err(format!("{} is not a Vey file", path.display()));
+            }
         } else {
             return Err(format!("cannot find {}", path.display()));
         }
@@ -105,9 +111,38 @@ pub(crate) fn format_source(source: &str) -> String {
     let mut level: usize = 0;
     let mut lines = source.lines().peekable();
 
+    // A text that spans lines keeps its spaces, so the lines of it are
+    // written as they are.
+    let mut in_text = false;
+
     while let Some(line) = lines.next() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if in_text {
+            // The line of a text is written as it is, with the spaces it
+            // has.
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(line);
+            if line.contains('`') {
+                in_text = false;
+            }
+            continue;
+        }
+
+        // A text may start in the middle of a line. The rest of the line
+        // belongs to the text, so it is kept as it is written.
+        let (head, tail) = match line.find('`') {
+            Some(at) => (&line[..at], &line[at..]),
+            None => (line, ""),
+        };
+        // The space before a text is kept, so that the text starts where it
+        // was written.
+        let trimmed = if tail.is_empty() {
+            head.trim()
+        } else {
+            head.trim_start()
+        };
+        if trimmed.is_empty() && tail.is_empty() {
             // A line with nothing on it stays empty, and the line before an
             // empty line keeps its space.
             if !out.is_empty() && !out.ends_with("\n\n") {
@@ -116,7 +151,7 @@ pub(crate) fn format_source(source: &str) -> String {
             continue;
         }
 
-        let (opens, closes) = braces(trimmed);
+        let (opens, closes, text_open) = braces(line);
         // A line that closes a block is put back where the block began.
         let mut here = level as isize;
         if closes > 0 && trimmed.starts_with('}') {
@@ -133,8 +168,12 @@ pub(crate) fn format_source(source: &str) -> String {
             out.push(' ');
         }
         out.push_str(trimmed);
+        if !tail.is_empty() {
+            out.push_str(tail);
+        }
 
         level = (level as isize + opens as isize - closes as isize).max(0) as usize;
+        in_text = text_open;
     }
 
     if !out.is_empty() {
@@ -145,12 +184,20 @@ pub(crate) fn format_source(source: &str) -> String {
 
 /// The marks that a line opens and the marks that it closes.
 ///
-/// The marks that are in a text or in a comment do not count.
-fn braces(line: &str) -> (usize, usize) {
+/// The marks that are in a text or in a comment do not count. The last
+/// value says whether the line ends inside a text, which may span lines.
+fn braces(line: &str) -> (usize, usize, bool) {
     let mut opens = 0usize;
     let mut closes = 0usize;
+    let mut in_text = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
+        if in_text {
+            if c == '`' {
+                in_text = false;
+            }
+            continue;
+        }
         match c {
             '"' | '\'' => {
                 // The text of a line may hold any mark.
@@ -165,11 +212,13 @@ fn braces(line: &str) -> (usize, usize) {
                     }
                 }
             }
+            // A text may hold any mark, and it may span lines.
+            '`' => in_text = true,
             '/' if chars.peek() == Some(&'/') => break,
             '{' => opens += 1,
             '}' => closes += 1,
             _ => {}
         }
     }
-    (opens, closes)
+    (opens, closes, in_text)
 }

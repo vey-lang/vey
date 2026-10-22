@@ -833,6 +833,23 @@ gap that is closed.
 - [x] **The condition of a `match` arm was joined with `||`,** so the
       condition of the arm was ignored and the arm held whenever its
       pattern held. (`src/codegen/exprs.rs`)
+- [ ] **An `await` in the condition of a `match` arm writes JavaScript
+      that is not valid,** so the whole bundle does not load. The same
+      holds for the condition of a markup `match`.
+      (`src/codegen/exprs.rs`, `src/codegen/markup.rs`)
+- [ ] **A pattern of an object reads a field of nothing,** so a value that
+      is not there makes the program fall over.
+      (`src/codegen/exprs.rs`)
+- [ ] **A value of a `let` that takes a value apart reads a field of
+      nothing,** the same as the pattern of a `match`.
+      (`src/codegen/exprs.rs`)
+- [ ] **The value of a parameter that names another parameter is the
+      helper of the runtime with that name,** because the names of the
+      parameters are written after the values of them.
+      (`src/codegen/mod.rs`, `src/codegen/exprs.rs`)
+- [ ] **Two enums with the same name in two modules cannot be told
+      apart,** so the arm of one of them takes the value of the other.
+      (`src/codegen/exprs.rs`, `src/runtime/enum.js`)
 - [x] **The build cache does not know the stylesheets,** so a change in a
       `.css` file was served from the cache and the old style was kept.
       The stylesheets are part of the key of the cache now.
@@ -1008,13 +1025,37 @@ gap that is closed.
 
 ### 14.3 The runtime and the tools
 
-- [ ] **The language server publishes no diagnostics,** so a type error
-      and a warning are both invisible in the editor. (`src/cli/lsp.rs`)
-- [ ] **`vey fmt` eats the spaces of a text that spans lines,** so the
-      program means something else after it is written. (`src/cli/fmt.rs`)
-- [ ] **`vey fmt` writes any file it is given,** so a Markdown file or a
-      stylesheet is written as if it were a program.
-      (`src/cli/fmt.rs`)
+- [x] **The language server publishes no diagnostics,** so a type error
+      and a warning are both invisible in the editor. The file is now
+      checked with the modules it uses, and the warnings are published as
+      well. (`src/cli/lsp.rs`, `src/compiler/mod.rs`)
+- [ ] **A `is` with a type of the program is true for any object,** so the
+      branch is taken for a value that is not of that type.
+      (`src/codegen/exprs.rs`, `src/runtime/core.js`)
+- [ ] **`assertMatch` does not know the `regex` helper,** so it holds for
+      a text that the pattern does not match. (`src/runtime/core.js`)
+- [ ] **The server says that it listens on `http://:::`** when it listens
+      on every address, and the name of the host is left in the air.
+      (`src/runtime/server.js`)
+- [ ] **`http.get` and `http.fetch` give two different answers,** so the
+      body of one is a value and the body of the other is a text.
+      (`src/runtime/http.js`)
+- [ ] **The `key` of a `for` of the markup cannot be written,** although
+      the README writes it, and the part of the code that would use it is
+      never reached. (`src/parser/markup.rs`, `src/codegen/markup.rs`)
+- [ ] **The `match` of the markup refuses a comma between its arms,** so
+      the same text is a mistake in the markup and not in an expression.
+      (`src/parser/markup.rs`)
+- [ ] **A range with a step to the other way walks nothing,** when the
+      range itself counts up. (`src/codegen/mod.rs`)
+- [ ] **`html` falls over on a value that only looks like a node of the
+      markup.** (`src/runtime/dom.js`)
+- [x] **`vey fmt` eats the spaces of a text that spans lines,** so the
+      program means something else after it is written. The lines of a
+      text are now kept as they are. (`src/cli/fmt.rs`)
+- [x] **`vey fmt` writes any file it is given,** so a Markdown file or a
+      stylesheet is written as if it were a program. Only a program is
+      written now. (`src/cli/fmt.rs`)
 - [x] **A value that is used in its own initializer is not caught,** so
       the program passes the check and fails at runtime.
       (`src/check/mod.rs`)
