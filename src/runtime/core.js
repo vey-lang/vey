@@ -404,7 +404,9 @@ function veyCore(ctx) {
     err: err,
     propagate: propagate,
     failure: err,
-    is: is,
+    // The helper of the `is` operator of the language, which a program
+    // does not call by its name.
+    __is: is,
     todo: todo,
     unimplemented: unimplemented,
   };

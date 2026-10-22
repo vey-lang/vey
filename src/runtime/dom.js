@@ -251,7 +251,9 @@ function veyDom(ctx) {
   ctx.toDom = toDom;
 
   return {
-    h: h,
+    // The builder of the markup, which the compiler calls and a program
+    // does not.
+    __h: h,
     html: html,
     raw: raw,
     bind: bind,

@@ -194,8 +194,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
     let mut chunks = Vec::new();
     for (module, result) in modules.iter().zip(generated.into_iter()) {
         let generated = result?;
-        let (wrapped, _) = wrap_module(module.id, &generated.code);
-        chunks.push(wrapped);
+        chunks.push(wrap_module(module.id, &generated.code));
     }
 
     // The marks of the code say where every piece came from. They are taken
@@ -234,7 +233,7 @@ fn project_root(entry: &Path) -> PathBuf {
     parent.to_path_buf()
 }
 
-fn wrap_module(id: usize, code: &str) -> (String, usize) {
+fn wrap_module(id: usize, code: &str) -> String {
     let body = code
         .lines()
         .map(|line| {
@@ -246,10 +245,8 @@ fn wrap_module(id: usize, code: &str) -> (String, usize) {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let text = format!(
+    format!(
         "const __m{} = await (async function () {{\n{}\n}})();",
         id, body
-    );
-    let line_count = text.lines().count();
-    (text, line_count)
+    )
 }

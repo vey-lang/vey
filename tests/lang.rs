@@ -561,7 +561,7 @@ bind("#app", App())
     assert!(html.contains("index.js"));
     let script = fs::read_to_string(output_path.join("index.js")).unwrap();
     assert!(script.contains("createVeyRuntime"));
-    assert!(script.contains("V.h"));
+    assert!(script.contains("V.__h"));
 }
 
 #[test]

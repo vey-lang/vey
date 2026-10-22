@@ -181,13 +181,13 @@ impl Codegen {
                 args.push(self.gen_expr(arg)?);
             }
             return Ok(format!(
-                "V.h({}, {}, {}, [{}])",
+                "V.__h({}, {}, {}, [{}])",
                 tag,
                 props,
                 children,
                 args.join(", ")
             ));
         }
-        Ok(format!("V.h({}, {}, {})", tag, props, children))
+        Ok(format!("V.__h({}, {}, {})", tag, props, children))
     }
 }

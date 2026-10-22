@@ -55,8 +55,8 @@ fn inherited_names_are_not_treated_as_void_tags() {
     let text = run_runtime(
         "void-tags",
         r#"
-console.log(runtime.html(runtime.h("constructor", null, [])));
-console.log(runtime.html(runtime.h("br", null, [])));
+console.log(runtime.html(runtime.__h("constructor", null, [])));
+console.log(runtime.html(runtime.__h("br", null, [])));
 "#,
     );
     assert!(text.contains("<constructor></constructor>"), "{text}");
@@ -88,7 +88,7 @@ const fakeDoc = {
   }
 };
 const browser = new Function(require('node:fs').readFileSync(RUNTIME, 'utf8') + '\nreturn createVeyRuntime;')()({ document: fakeDoc, console }, null);
-const el = browser.h("p", null, [browser.raw("<strong>x</strong>")]);
+const el = browser.__h("p", null, [browser.raw("<strong>x</strong>")]);
 console.log(el.children.length, el.children[0].nodeType);
 "#,
     );
@@ -102,7 +102,7 @@ fn styles_use_the_same_key_format_on_both_paths() {
     let text = run_runtime(
         "style-keys",
         r#"
-console.log(runtime.html(runtime.h("div", { style: { backgroundColor: "red", "font-size": "12px" } }, [])));
+console.log(runtime.html(runtime.__h("div", { style: { backgroundColor: "red", "font-size": "12px" } }, [])));
 "#,
     );
     assert!(text.contains("background-color: red"), "{text}");
@@ -391,16 +391,16 @@ fn a_page_is_changed_in_place_and_its_list_is_put_in_another_order() {
     let text = run_browser(
         "mount",
         r##"
-const first = browser.h("ul", { class: "list" }, [
-  browser.h("li", { key: "a" }, ["a"]),
-  browser.h("li", { key: "b" }, ["b"])
+const first = browser.__h("ul", { class: "list" }, [
+  browser.__h("li", { key: "a" }, ["a"]),
+  browser.__h("li", { key: "b" }, ["b"])
 ]);
 const page = browser.mount("#app", first);
 const list = dom.root.childNodes[0];
 const item = list.childNodes[0];
-page.update(browser.h("ul", { class: "list" }, [
-  browser.h("li", { key: "b" }, ["b!"]),
-  browser.h("li", { key: "a" }, ["a!"])
+page.update(browser.__h("ul", { class: "list" }, [
+  browser.__h("li", { key: "b" }, ["b!"]),
+  browser.__h("li", { key: "a" }, ["a!"])
 ]));
 console.log(dom.root.childNodes[0] === list);
 console.log(list.childNodes[0] === list.childNodes[1]);
@@ -422,7 +422,7 @@ const server = dom.document.createElement("p");
 server.setAttribute("class", "hello");
 server.appendChild(dom.document.createTextNode("hi"));
 dom.root.appendChild(server);
-browser.mount("#app", browser.h("p", { class: "hello" }, ["hi"]));
+browser.mount("#app", browser.__h("p", { class: "hello" }, ["hi"]));
 console.log(dom.root.childNodes.length);
 console.log(dom.root.childNodes[0] === server);
 "##
@@ -436,7 +436,7 @@ fn the_events_of_one_s_own_are_attached_to_a_node() {
     let text = run_browser(
         "events",
         r##"
-browser.mount("#app", browser.h("div", {}, [browser.h("span", { class: "item" }, ["x"])]));
+browser.mount("#app", browser.__h("div", {}, [browser.__h("span", { class: "item" }, ["x"])]));
 let seen = 0;
 browser.on("#app", "click", () => { seen += 1; });
 browser.delegate("#app", "click", ".item", () => { seen += 10; });
@@ -447,11 +447,11 @@ let mounted = 0;
 let destroyed = 0;
 browser.onMount(() => { mounted += 1; });
 browser.onDestroy(() => { destroyed += 1; });
-const page = browser.mount("#app", browser.h("p", {}, ["x"]));
+const page = browser.mount("#app", browser.__h("p", {}, ["x"]));
 page.destroy();
 console.log(mounted, destroyed);
 const input = browser.ref();
-browser.mount("#app", browser.h("input", { ref: input }, []));
+browser.mount("#app", browser.__h("input", { ref: input }, []));
 console.log(input.value.tagName);
 "##
     );
@@ -468,9 +468,9 @@ fn the_routes_of_the_browser_show_another_page() {
 const seen = [];
 browser.route("/users/{id}", (params) => {
   seen.push(params.id);
-  return browser.h("p", {}, ["user " + params.id]);
+  return browser.__h("p", {}, ["user " + params.id]);
 });
-browser.mount("#app", browser.h("p", {}, ["start"]));
+browser.mount("#app", browser.__h("p", {}, ["start"]));
 browser.navigate("/users/7");
 console.log(JSON.stringify(seen));
 console.log(dom.root.textContent);

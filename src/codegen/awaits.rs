@@ -2,15 +2,12 @@
 
 use crate::ast::*;
 
+// The question "does this piece of code yield?" is answered in one place,
+// so that the checker and the writer of the code cannot disagree.
+pub(crate) use crate::types::helpers::block_has_yield;
+
 pub(crate) fn block_has_await(block: &Block) -> bool {
     block.body.iter().any(stmt_has_await)
-}
-
-/// Whether a piece of code hands a value back one by one.
-///
-/// A function that yields is a generator.
-pub(crate) fn block_has_yield(block: &Block) -> bool {
-    block.body.iter().any(stmt_has_yield)
 }
 
 /// Whether a piece of code has something to do when the block is left.
@@ -69,55 +66,6 @@ pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
         Stmt::Expr(decl) => expr_has_await(&decl.expr),
         Stmt::Assign(decl) => expr_has_await(&decl.target) || expr_has_await(&decl.value),
         Stmt::Block(block, _) => block_has_await(block),
-    }
-}
-
-pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Var(decl) => decl.init.as_ref().map(expr_has_yield).unwrap_or(false),
-        Stmt::Fn(_) | Stmt::Component(_) => false,
-        Stmt::If(decl) => {
-            expr_has_yield(&decl.test)
-                || block_has_yield(&decl.then_block)
-                || decl
-                    .else_branch
-                    .as_ref()
-                    .map(|s| stmt_has_yield(s))
-                    .unwrap_or(false)
-        }
-        Stmt::IfLet(decl) => {
-            expr_has_yield(&decl.value)
-                || block_has_yield(&decl.then_block)
-                || decl
-                    .else_branch
-                    .as_ref()
-                    .map(|s| stmt_has_yield(s))
-                    .unwrap_or(false)
-        }
-        Stmt::While(decl) => expr_has_yield(&decl.test) || block_has_yield(&decl.body),
-        Stmt::WhileLet(decl) => expr_has_yield(&decl.value) || block_has_yield(&decl.body),
-        Stmt::LetElse(decl) => expr_has_yield(&decl.value) || block_has_yield(&decl.otherwise),
-        Stmt::Defer(decl) => expr_has_yield(&decl.value),
-        Stmt::Throw(decl) => expr_has_yield(&decl.value),
-        Stmt::For(decl) => expr_has_yield(&decl.iter) || block_has_yield(&decl.body),
-        Stmt::Repeat(decl) => expr_has_yield(&decl.count) || block_has_yield(&decl.body),
-        Stmt::Return(decl) => decl.value.as_ref().map(expr_has_yield).unwrap_or(false),
-        Stmt::Break(_, _)
-        | Stmt::Continue(_, _)
-        | Stmt::Use(_)
-        | Stmt::Style(_)
-        | Stmt::Type(_)
-        | Stmt::Interface(_)
-        | Stmt::Impl(_)
-        | Stmt::Enum(_) => false,
-        Stmt::Try(decl) => {
-            block_has_yield(&decl.body)
-                || decl.catch.as_ref().is_some_and(block_has_yield)
-                || decl.finally.as_ref().is_some_and(block_has_yield)
-        }
-        Stmt::Expr(decl) => expr_has_yield(&decl.expr),
-        Stmt::Assign(decl) => expr_has_yield(&decl.target) || expr_has_yield(&decl.value),
-        Stmt::Block(block, _) => block_has_yield(block),
     }
 }
 
@@ -222,11 +170,6 @@ pub(crate) fn stmt_has_try(stmt: &Stmt) -> bool {
 /// Whether an expression uses `await`.
 pub(crate) fn expr_has_await(expr: &Expr) -> bool {
     walk(expr, &|expr| matches!(expr, Expr::Await(_, _)))
-}
-
-/// Whether an expression yields a value.
-pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
-    walk(expr, &|expr| matches!(expr, Expr::Yield(_, _)))
 }
 
 /// Whether an expression hands a failure on.

@@ -799,7 +799,7 @@ gap that is closed.
       that says it is not allowed can never fire. (`src/codegen/mod.rs`)
 - [x] **The wildcard pattern has no place,** so an error in it is reported
       at the top of the file. (`src/ast/expr.rs`, `src/parser/patterns.rs`)
-- [ ] **Two copies of "does this piece of code yield?" disagree,** so a
+- [x] **Two copies of "does this piece of code yield?" disagree,** so a
       function that yields inside a `throw` is typed as a generator and
       written as an ordinary one. (`src/codegen/awaits.rs`,
       `src/types/helpers.rs`)
@@ -818,7 +818,7 @@ gap that is closed.
 - [x] **A `try` of the program catches the failure of `?` as a wrapper
       error,** so the reason of the failure is lost and the failure is not
       handed on. (`src/codegen/mod.rs`, `src/runtime/core.js`)
-- [ ] **The line count of a wrapped module is computed and thrown away.**
+- [x] **The line count of a wrapped module is computed and thrown away.**
       (`src/compiler/mod.rs`)
 - [x] **`pub let { a } = x` exports nothing, without a word.**
       (`src/parser/mod.rs`)
@@ -943,7 +943,7 @@ gap that is closed.
       `src/runtime/server.js`)
 - [x] **The list of the middle pieces is a dead object.** Nothing reads it
       and no program can reach it. (`src/runtime/middleware.js`)
-- [ ] **Two helpers of the runtime cannot be called by a program,** and one
+- [x] **Two helpers of the runtime cannot be called by a program,** and one
       of them has the name of a word of the language. (`src/runtime/core.js`)
 - [x] **`env()` fails silently in the browser** and gives a wrong answer
       without a word. (`src/runtime/node.js`)

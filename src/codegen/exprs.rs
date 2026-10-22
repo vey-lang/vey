@@ -143,7 +143,7 @@ impl Codegen {
             Expr::As(arg, _, _) => self.gen_expr(arg),
             Expr::Is(arg, ty, _) => {
                 let value = self.gen_expr(arg)?;
-                Ok(format!("V.is({}, {})", value, js_string(&kind_of(ty))))
+                Ok(format!("V.__is({}, {})", value, js_string(&kind_of(ty))))
             }
             Expr::Yield(arg, _) => Ok(format!("(yield {})", self.gen_expr(arg)?)),
             Expr::Spread(arg, _) => Ok(format!("...{}", self.gen_expr(arg)?)),
