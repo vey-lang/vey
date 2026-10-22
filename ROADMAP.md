@@ -152,8 +152,10 @@ where it should speak.
       known is `any`, without an error (`src/types/exprs.rs:666-679`). A
       typo in `ui.Card` or `math.PIe` is silent.
 
-- [ ] **A `let` without a type is `any`** (the language is gradual, and a
-      value without a type stays dynamic) (`src/types/stmts.rs:113`) and the
+- [x] **A `let` without a type stays dynamic.** The language is gradual, so
+      a value without a type may be anything later on. A value with a type
+      is checked, and the type of a function is guessed from the way it is
+      used. (`src/types/stmts.rs:113`) and the
       type of a `const` is only guessed for the simple shapes
       (`src/types/helpers.rs:186-197`).
 
@@ -164,7 +166,9 @@ where it should speak.
       spread, throws the whole type away** (`src/types/exprs.rs:40-45`,
       `:72-87`).
 
-- [ ] **`any` fits everywhere**, in both directions
+- [x] **`any` fits everywhere**, in both directions: that is what makes the
+      language gradual. The type that does *not* fit is `unknown`, which
+      asks for the type to be checked before it is used.
       (`src/types/rules.rs:61-65`), so one `any` in a program turns the
       checking off for everything it touches.
 
