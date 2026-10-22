@@ -697,7 +697,7 @@ impl TypeChecker<'_> {
             };
             let actual = self.infer_expr(value)?;
             let expected = &function.params[index];
-            if !assignable(&actual, expected) {
+            if !self.fits(&actual, expected) {
                 return Err(self.type_error(value.pos(), &actual, expected));
             }
             taken.push(index);
@@ -754,7 +754,7 @@ impl TypeChecker<'_> {
                     let mut out = Vec::new();
                     for (index, item) in items.iter().enumerate() {
                         let actual = self.infer_expr_as(item, Some(&wanted[index]))?;
-                        if !assignable(&actual, &wanted[index]) {
+                        if !self.fits(&actual, &wanted[index]) {
                             return Err(self.type_error(item.pos(), &actual, &wanted[index]));
                         }
                         out.push(actual);

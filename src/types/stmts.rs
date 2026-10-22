@@ -381,7 +381,7 @@ impl TypeChecker<'_> {
                     Some(annotation) => {
                         let expected = self.resolve_type(annotation)?;
                         let actual = element_type(&iter_ty);
-                        if !assignable(&actual, &expected) {
+                        if !self.fits(&actual, &expected) {
                             return Err(self.type_error(decl.pos, &actual, &expected));
                         }
                         expected
@@ -652,19 +652,16 @@ impl TypeChecker<'_> {
         if matches!(wanted, Type::Any) {
             return;
         }
-        let Some(scope) = self.param_scopes.last_mut() else {
-            return;
-        };
-        match scope.get_mut(name) {
-            Some(current) => {
+        // The name may be a parameter of a function around the one that is
+        // being checked, so the scopes are walked from the inside out.
+        for scope in self.param_scopes.iter_mut().rev() {
+            if let Some(current) = scope.get_mut(name) {
                 // The type that is there is the one of the first use, and
                 // the later uses have to fit it, so they do not widen it.
                 if matches!(current, Type::Any) {
                     *current = wanted;
                 }
-            }
-            None => {
-                scope.insert(name.to_string(), wanted);
+                return;
             }
         }
     }
@@ -1014,7 +1011,7 @@ impl TypeChecker<'_> {
                 let op = decl.op.trim_end_matches('=');
                 self.binary_result(op, &target_ty, &value_ty, decl.pos)?
             };
-            if !assignable(&result, &target_ty) {
+            if !self.fits(&result, &target_ty) {
                 return Err(self.type_error(decl.pos, &result, &target_ty));
             }
         }

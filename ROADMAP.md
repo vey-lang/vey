@@ -846,10 +846,10 @@ gap that is closed.
       typed `any`. (`src/types/rules.rs`, `src/types/builtins.rs`)
 - [x] **`object` does not take a list, a dictionary, an enum or a
       function.** (`src/types/rules.rs`)
-- [ ] **The recursive part of a type is only opened up in one of the three
+- [x] **The recursive part of a type is only opened up in one of the three
       places,** so an assignment and a call are not checked like a `let`.
       (`src/types/stmts.rs`, `src/types/exprs.rs`)
-- [ ] **The type of a parameter that is used inside another function is
+- [x] **The type of a parameter that is used inside another function is
       lost or given to the wrong parameter.** (`src/types/stmts.rs`)
 - [x] **A type parameter is not assignable to anything,** so a value of a
       known type cannot be given to a variable of the type parameter.
