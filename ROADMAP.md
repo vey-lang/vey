@@ -781,7 +781,7 @@ gap that is closed.
 - [ ] **The arguments that are given by name are not handled in the path of
       a call with type arguments,** so the marker of the named arguments is
       counted as an argument. (`src/types/exprs.rs`, `src/codegen/exprs.rs`)
-- [ ] **A `match` on an enum of another module binds the wrong field,** so
+- [x] **A `match` on an enum of another module binds the wrong field,** so
       the value of the field is `undefined`. (`src/codegen/exprs.rs`)
 - [x] **A `for ... by` with a destructuring pattern writes JavaScript that
       cannot be parsed,** and a negative step never ends.
@@ -838,10 +838,10 @@ gap that is closed.
       checked two ways. (`src/types/exprs.rs`)
 - [x] **Every member of an interface was `any`:** an interface was not
       checked at all. (`src/types/exprs.rs`)
-- [ ] **The tuple type could not be used:** a list of values is never a
+- [x] **The tuple type could not be used:** a list of values is never a
       tuple, and a tuple does not fit a list. (`src/types/rules.rs`,
       `src/types/exprs.rs`)
-- [ ] **`Promise<T>` and `Result<T, E>` are not in the rule that says
+- [x] **`Promise<T>` and `Result<T, E>` are not in the rule that says
       whether a value fits,** and the helpers that hand a promise back are
       typed `any`. (`src/types/rules.rs`, `src/types/builtins.rs`)
 - [ ] **`object` does not take a list, a dictionary, an enum or a
@@ -854,9 +854,9 @@ gap that is closed.
 - [ ] **A type parameter is not assignable to anything,** so a value of a
       known type cannot be given to a variable of the type parameter.
       (`src/types/rules.rs`)
-- [ ] **`is` does not narrow,** so the type of the value is not known in
+- [x] **`is` does not narrow,** so the type of the value is not known in
       the branch. (`src/types/exprs.rs`)
-- [ ] **The exhaustiveness of a `match` on a `bool` is not checked.**
+- [x] **The exhaustiveness of a `match` on a `bool` is not checked.**
       (`src/types/exprs.rs`)
 - [ ] **The literal patterns of a `match` are not compared with the type
       of the subject,** so a pattern of the wrong type is taken.
@@ -874,7 +874,7 @@ gap that is closed.
       (`src/types/rules.rs`)
 - [ ] **An interface is missing from the substitution, the unification and
       the erasure.** (`src/types/rules.rs`)
-- [ ] **The type parameters of an interface are parsed and then thrown
+- [x] **The type parameters of an interface are parsed and then thrown
       away,** so an interface with a type parameter does not work.
       (`src/types/checker.rs`, `src/types/resolve.rs`)
 - [x] **The methods of an `impl` block are not known to the other
@@ -905,7 +905,7 @@ gap that is closed.
 - [ ] **`vey explain` gives the type `any` for a name inside a function,**
       because the checker of the explanation does not walk into the
       functions. (`src/types/explain.rs`)
-- [ ] **`unknown` fits nothing but `any` and `object`,** so it cannot be
+- [x] **`unknown` fits nothing but `any` and `object`,** so it cannot be
       used as the type of a value that is not known yet.
       (`src/types/rules.rs`)
 - [x] **The type of the values of a dictionary is not used** for
@@ -938,10 +938,10 @@ gap that is closed.
 - [x] **The warning that a name hides a helper of the runtime was said for
       every parameter,** so it was said for a name that is used most of the
       time. (`src/check/mod.rs`)
-- [ ] **The middle piece that catches the mistakes never fires,** because
+- [x] **The middle piece that catches the mistakes never fires,** because
       the server catches them before it. (`src/runtime/middleware.js`,
       `src/runtime/server.js`)
-- [ ] **The list of the middle pieces is a dead object.** Nothing reads it
+- [x] **The list of the middle pieces is a dead object.** Nothing reads it
       and no program can reach it. (`src/runtime/middleware.js`)
 - [ ] **Two helpers of the runtime cannot be called by a program,** and one
       of them has the name of a word of the language. (`src/runtime/core.js`)
@@ -960,10 +960,10 @@ gap that is closed.
       `vey docs`, `vey migrate` and `vey check`. (`src/cli/entry.rs`)
 - [x] **The help of the command has no arm for `vey lsp`,** so it falls
       back to the general help. (`src/cli/output.rs`)
-- [ ] **`vey fmt` and `vey migrate` write several files one after the
+- [x] **`vey fmt` and `vey migrate` write several files one after the
       other,** without a name between them. (`src/cli/fmt.rs`,
       `src/cli/migrate.rs`)
-- [ ] **The report of an error swallows a file that cannot be read,** so
+- [x] **The report of an error swallows a file that cannot be read,** so
       the frame of the code is missing. (`src/cli/output.rs`)
 - [x] **The general help does not name `--target` and `--write`.**
       (`src/cli/output.rs`)

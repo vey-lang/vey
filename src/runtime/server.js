@@ -330,9 +330,12 @@ function veyServer(ctx) {
         res.send("The request is too large.");
         return;
       }
-      if (errorHandler) {
+      // The catch of the mistakes is either the one of the server, or the
+      // one of a middle piece.
+      var catcher = errorHandler || ctx.catchMistakes;
+      if (catcher) {
         try {
-          errorHandler(err, info, res);
+          catcher(err, info, res);
           return;
         } catch (ignored) {
           // The handler of the mistakes had a mistake of its own.

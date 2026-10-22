@@ -161,8 +161,18 @@ pub(crate) fn temp_file(prefix: &str, extension: &str) -> PathBuf {
 }
 
 pub(crate) fn report(err: &VeyError) {
-    let source = fs::read_to_string(&err.file).unwrap_or_default();
-    eprintln!("{}", format_error(err, &source));
+    match fs::read_to_string(&err.file) {
+        Ok(source) => eprintln!("{}", format_error(err, &source)),
+        Err(read_err) => {
+            // The file cannot be read, so the frame of the code is not there,
+            // but the reason is said, so that the mistake is not lost.
+            eprintln!("{}:{}:{}: {}", err.file, err.line, err.col, err.message);
+            eprintln!("cannot read the file: {}", read_err);
+            if let Some(hint) = &err.hint {
+                eprintln!("  hint: {}", hint);
+            }
+        }
+    }
 }
 
 /// The warnings of a program, printed one under the other.
@@ -203,7 +213,6 @@ build options:
   -o, --out <dir>                 output directory (default: .dist)
   --title <text>                  page title
   --node                          emit a node script instead of a site
-  --force                         write the files even when they are there
 
 server options:
   --port <n>                      port to listen on (default: 4000)

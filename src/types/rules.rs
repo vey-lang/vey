@@ -94,6 +94,9 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
     }
 
     match (source, target) {
+        // A type parameter is a name for a type that is not known yet, so it
+        // takes anything and is taken by anything.
+        (Type::Var(_), _) | (_, Type::Var(_)) => true,
         (Type::Array(source), Type::Array(target)) => assignable(source, target),
         (Type::Tuple(source), Type::Tuple(target)) => {
             source.len() == target.len()
@@ -129,6 +132,10 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
         (Type::Named(_, _), Type::AnyObject) => true,
         (Type::Interface(_, _), Type::AnyObject) => true,
         (Type::Function(source), Type::Function(target)) => function_assignable(source, target),
+        (Type::Promise(source), Type::Promise(target)) => assignable(source, target),
+        (Type::Result(source_ok, source_err), Type::Result(target_ok, target_err)) => {
+            assignable(source_ok, target_ok) && assignable(source_err, target_err)
+        }
         (Type::Enum(e1, v1), Type::Enum(e2, v2)) => e1 == e2 && v1 == v2,
         (Type::Enum(e, _), Type::EnumUnion(e2)) => e == e2,
         (Type::EnumUnion(e), Type::EnumUnion(e2)) => e == e2,

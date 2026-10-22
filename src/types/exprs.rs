@@ -163,27 +163,7 @@ impl TypeChecker<'_> {
                 Ok(union(vec![then_ty, else_ty]))
             }
             Expr::Call(callee, args, optional, pos) => {
-                let callee_ty = self.infer_expr(callee)?;
-                // The callee may be a value that may be nothing.
-                let callee_ty = if *optional {
-                    without_empty(&callee_ty)
-                } else {
-                    callee_ty
-                };
-                // The arguments that are given by name are matched with the
-                // parameters, and the order of the arguments is written down
-                // for the code generator.
-                let (positional, named) = self.split_named(args)?;
-                let order = if named.is_empty() {
-                    positional.clone()
-                } else {
-                    self.match_named(&callee_ty, &positional, &named, *pos)?
-                };
-                let (arg_types, has_spread) = self.argument_types(&order)?;
-                if !named.is_empty() {
-                    self.resolved.insert((pos.line, pos.col), order);
-                }
-                self.check_call(&callee_ty, &arg_types, has_spread, *pos, None, None)
+                self.infer_call(callee, args, *optional, *pos, None)
             }
             Expr::CallGeneric(callee, type_args, args, _, pos) => {
                 let callee_ty = self.infer_expr(callee)?;
@@ -246,6 +226,8 @@ impl TypeChecker<'_> {
                 let subject_ty = self.infer_expr(subject)?;
                 let mut types = Vec::new();
                 let mut covered = std::collections::HashSet::new();
+                // The two values of a bool that the arms take.
+                let mut covered_bools = std::collections::HashSet::new();
                 let mut has_wildcard = false;
                 for arm in arms {
                     self.push_scope();
@@ -365,6 +347,26 @@ impl TypeChecker<'_> {
                                     has_wildcard = true;
                                 }
                             }
+                            Pattern::Literal(expr) => {
+                                // The pattern has to be of the type of the
+                                // subject, or it never holds.
+                                let literal = self.infer_expr(expr)?;
+                                if !matches!(subject_ty, Type::Any)
+                                    && !comparable(&subject_ty, &literal)
+                                {
+                                    return Err(self.error(
+                                        expr.pos(),
+                                        format!(
+                                            "this pattern is a {}, and the subject is a {}",
+                                            literal.display(),
+                                            subject_ty.display()
+                                        ),
+                                    ));
+                                }
+                                if let Expr::Bool(value, _) = expr {
+                                    covered_bools.insert(*value);
+                                }
+                            }
                             _ => {
                                 self.check_pattern(pattern)?;
                             }
@@ -416,6 +418,23 @@ impl TypeChecker<'_> {
                                     name, v, v
                                 ),
                             ));
+                        }
+                        // A match on a bool has to take both of its values.
+                        Type::Bool => {
+                            let missing: Vec<&str> = [true, false]
+                                .iter()
+                                .filter(|value| !covered_bools.contains(value))
+                                .map(|value| if *value { "true" } else { "false" })
+                                .collect();
+                            if !missing.is_empty() {
+                                return Err(self.error(
+                                    subject.pos(),
+                                    format!(
+                                        "match on 'bool' is not exhaustive, missing: {}",
+                                        missing.join(", ")
+                                    ),
+                                ));
+                            }
                         }
                         // A value of a union may be one of many, so the match
                         // has to take them all.
@@ -526,12 +545,77 @@ impl TypeChecker<'_> {
         self.note_param(name, wanted);
     }
 
+    /// The type of a call.
+    ///
+    /// The arguments that are given by name are matched with the parameters,
+    /// and the order of the arguments is written down for the code generator.
+    pub(crate) fn infer_call(
+        &mut self,
+        callee: &Expr,
+        args: &[Expr],
+        optional: bool,
+        pos: Pos,
+        expected: Option<&Type>,
+    ) -> Result<Type, VeyError> {
+        let callee_ty = self.infer_expr(callee)?;
+        // The callee may be a value that may be nothing.
+        let callee_ty = if optional {
+            without_empty(&callee_ty)
+        } else {
+            callee_ty
+        };
+        let (positional, named) = self.split_named(args)?;
+        let order = if named.is_empty() {
+            positional.clone()
+        } else {
+            self.match_named(&callee_ty, &positional, &named, pos)?
+        };
+        // The arguments are checked against the parameters, so that a list
+        // of values may be a tuple.
+        let (arg_types, has_spread) = self.argument_types_against(&callee_ty, &order)?;
+        if !named.is_empty() {
+            self.resolved.insert((pos.line, pos.col), order);
+        }
+        self.check_call(&callee_ty, &arg_types, has_spread, pos, None, expected)
+    }
+
     /// The types of the arguments of a call.
     pub(crate) fn call_argument_types(
         &mut self,
         args: &[Expr],
     ) -> Result<(Vec<Type>, bool), VeyError> {
         self.argument_types(args)
+    }
+
+    /// The types of the arguments of a call, checked against the
+    /// parameters.
+    ///
+    /// A list of values may be a tuple, so the type that is expected is
+    /// needed before the type of the argument is known.
+    fn argument_types_against(
+        &mut self,
+        callee: &Type,
+        args: &[Expr],
+    ) -> Result<(Vec<Type>, bool), VeyError> {
+        let expected: Vec<Type> = match callee {
+            Type::Function(function) => function.params.clone(),
+            _ => Vec::new(),
+        };
+        let mut types = Vec::new();
+        let mut has_spread = false;
+        for (index, arg) in args.iter().enumerate() {
+            match arg {
+                Expr::Spread(inner, _) => {
+                    has_spread = true;
+                    types.push(self.infer_expr(inner)?);
+                }
+                other => {
+                    let want = expected.get(index).cloned();
+                    types.push(self.infer_expr_as(other, want.as_ref())?);
+                }
+            }
+        }
+        Ok((types, has_spread))
     }
 
     /// The types of a list of arguments.
@@ -665,10 +749,8 @@ impl TypeChecker<'_> {
         expected: Option<&Type>,
     ) -> Result<Type, VeyError> {
         match expr {
-            Expr::Call(callee, args, _, pos) => {
-                let callee_ty = self.infer_expr(callee)?;
-                let (arg_types, has_spread) = self.call_argument_types(args)?;
-                self.check_call(&callee_ty, &arg_types, has_spread, *pos, None, expected)
+            Expr::Call(callee, args, optional, pos) => {
+                self.infer_call(callee, args, *optional, *pos, expected)
             }
             // A list of values may be a tuple, when that is what is expected.
             Expr::Array(items, pos) => {                if let Some(Type::Tuple(wanted)) = expected {

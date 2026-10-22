@@ -11,6 +11,18 @@ use super::checker::TypeChecker;
 
 impl TypeChecker<'_> {
     pub(crate) fn narrow_condition(&self, expr: &Expr) -> Option<(String, Type, Type)> {
+        // A check of the type: `if value is string { }`.
+        if let Expr::Is(inner, ty, _) = expr {
+            let Expr::Ident(name, _) = &**inner else {
+                return None;
+            };
+            let original = self.lookup(name)?;
+            let wanted = self.resolve_type(ty).ok()?;
+            // In the branch the value is of the type that was asked for, and
+            // outside it is the rest.
+            let else_ty = remove_type(&original, &wanted);
+            return Some((name.clone(), wanted, else_ty));
+        }
         // The truth of a value: `if user { }`. A value that may be nothing
         // is asked with its truth, and the branch knows that it is there.
         if let Expr::Ident(name, _) = expr {

@@ -174,6 +174,17 @@ impl Parser {
         Ok(self.advance()?.value)
     }
 
+    /// The name of a member of a value.
+    ///
+    /// A word of the language may be the name of a member, because the dot
+    /// says that it is a name and not a word: `app.use(...)`.
+    fn expect_member_name(&mut self, what: &str) -> Result<String, VeyError> {
+        if self.tok.kind != TokKind::Ident && self.tok.kind != TokKind::Keyword {
+            return Err(self.reserved_word_error(what));
+        }
+        Ok(self.advance()?.value)
+    }
+
     /// `async` is reserved so that it cannot be used as a plain name, but it
     /// is not part of the language. Report that instead of a bare
     /// "expected identifier".

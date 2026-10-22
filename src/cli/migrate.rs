@@ -87,7 +87,13 @@ pub(crate) fn cmd_migrate(args: &[String]) -> i32 {
             }
             println!("migrated {}", file.display());
         } else {
+            // The name of the file is said, so that the files may be told
+            // apart.
+            println!("// {}", file.display());
             print!("{}", migrated);
+            if !migrated.ends_with('\n') {
+                println!();
+            }
         }
     }
 

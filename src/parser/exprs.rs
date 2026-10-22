@@ -223,7 +223,7 @@ impl Parser {
             }
             if self.is_punct(".") {
                 let pos = self.advance()?.pos;
-                let name = self.expect_ident("property name")?;
+                let name = self.expect_member_name("property name")?;
                 expr = Expr::Member(Box::new(expr), MemberProp::Name(name), false, pos);
             } else if self.is_op("?.") {
                 let pos = self.advance()?.pos;
@@ -241,7 +241,7 @@ impl Parser {
                         pos,
                     );
                 } else {
-                    let name = self.expect_ident("property name")?;
+                    let name = self.expect_member_name("property name")?;
                     expr = Expr::Member(Box::new(expr), MemberProp::Name(name), true, pos);
                 }
             } else if self.is_punct("[") {

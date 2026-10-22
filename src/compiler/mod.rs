@@ -155,9 +155,18 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             type_envs[module.id] = env.clone();
         }
         // The enums of the module are described by the checker, and the code
-        // generator uses the same description.
+        // generator uses the same description. The enums of the modules that
+        // are used are there too, under the name of their alias, so that a
+        // match on an enum of another module knows the fields of its
+        // variant.
+        let mut enums = env.enums.clone();
+        for (alias, import) in &imports {
+            for (name, info) in &import.enums {
+                enums.insert(format!("{}.{}", alias, name), info.clone());
+            }
+        }
         options.push(Options {
-            enums: env.enums,
+            enums,
             resolved: env.resolved,
             ..module_options
         });

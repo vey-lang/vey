@@ -60,7 +60,13 @@ pub(crate) fn cmd_fmt(args: &[String]) -> i32 {
             }
             println!("wrote {}", file.display());
         } else {
+            // The name of the file is said, so that the files may be told
+            // apart.
+            println!("// {}", file.display());
             print!("{}", formatted);
+            if !formatted.ends_with('\n') {
+                println!();
+            }
         }
     }
 

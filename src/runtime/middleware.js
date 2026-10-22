@@ -69,20 +69,13 @@ function veyMiddleware(ctx) {
   // The catch of the mistakes.
   //
   // It is the first middle piece of the server, so that it may catch the
-  // mistakes of the ones that come after it.
+  // mistakes of the ones that come after it, and of the route itself.
   function errorHandler(handler) {
     return function (req, res, next) {
-      try {
-        next();
-      } catch (err) {
-        if (handler) {
-          handler(err, req, res);
-          return;
-        }
-        log.error(err);
-        res.status(500);
-        res.send("Server error: " + (err && err.message ? err.message : err));
-      }
+      // The catch of the mistakes is the one of the server, so that the
+      // mistakes of the pieces and of the route are both caught.
+      ctx.catchMistakes = handler;
+      next();
     };
   }
 
@@ -105,14 +98,6 @@ function veyMiddleware(ctx) {
   ctx.compress = compress;
   ctx.errorHandler = errorHandler;
   ctx.bodyLimit = bodyLimit;
-
-  ctx.middlewares = {
-    logger: logger,
-    cors: cors,
-    compress: compress,
-    errorHandler: errorHandler,
-    bodyLimit: bodyLimit,
-  };
 
   return {
     logger: logger,

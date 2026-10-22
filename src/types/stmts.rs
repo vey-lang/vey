@@ -392,11 +392,13 @@ impl TypeChecker<'_> {
                 self.check_block(&decl.body)
             }
             Stmt::Return(decl) => {
+                let expected = self.expected_returns.last().cloned().flatten();
                 let actual = match &decl.value {
-                    Some(value) => self.infer_expr(value)?,
+                    // The value is checked against the type that is written,
+                    // so that a list of values may be a tuple.
+                    Some(value) => self.infer_expr_as(value, expected.as_ref())?,
                     None => Type::Void,
                 };
-                let expected = self.expected_returns.last().cloned().flatten();
                 if let Some(expected) = &expected {
                     if !self.check_return_value(&actual, expected) {
                         return Err(self.type_error(decl.pos, &actual, expected));
