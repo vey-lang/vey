@@ -248,16 +248,23 @@ pub fn hash(parts: &[&str]) -> u64 {
 ///
 /// The number of the compiler is the time it was made, so that a new
 /// compiler never reads the cache of the old one.
-pub fn key(bundle_sources: &[SourceFile], version: &str) -> u64 {
+pub fn key(bundle_sources: &[SourceFile], styles: &[StyleFile], version: &str) -> u64 {
     let stamp = compiler_stamp();
-    let mut parts: Vec<&str> = Vec::with_capacity(bundle_sources.len() + 3);
-    parts.push(version);
-    parts.push(&stamp);
+    let mut parts: Vec<String> = Vec::with_capacity(bundle_sources.len() * 2 + styles.len() * 2 + 3);
+    parts.push(version.to_string());
+    parts.push(stamp);
     for source in bundle_sources {
-        parts.push(&source.path);
-        parts.push(&source.content);
+        parts.push(source.path.clone());
+        parts.push(source.content.clone());
     }
-    hash(&parts)
+    // A stylesheet is a file of its own, so a change in it is a change in
+    // the project.
+    for style in styles {
+        parts.push(style.path.display().to_string());
+        parts.push(style.content.clone());
+    }
+    let borrowed: Vec<&str> = parts.iter().map(String::as_str).collect();
+    hash(&borrowed)
 }
 
 /// The time the compiler was made.
@@ -290,7 +297,7 @@ pub fn store(folder: &Path, bundle: &Bundle) {
         modules: bundle.modules.iter().map(|module| module.path.clone()).collect(),
         warnings: bundle.warnings.clone(),
     };
-    let key = key(&cached.sources, env!("CARGO_PKG_VERSION"));
+    let key = key(&cached.sources, &cached.styles, env!("CARGO_PKG_VERSION"));
     if let Err(err) = write(folder, key, &cached) {
         eprintln!("cannot write the cache: {}", err);
     }

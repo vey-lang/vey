@@ -130,6 +130,13 @@ impl Scopes {
         Some(binding)
     }
 
+    /// The name that is written, which is not a read.
+    ///
+    /// A name that is only written is not used, so the compiler says so.
+    pub(crate) fn write(&self, name: &str) -> Option<std::rc::Rc<Binding>> {
+        self.resolve(name)
+    }
+
     /// The name that a new one would hide.
     ///
     /// A name that hides another one is allowed, but the compiler says so.

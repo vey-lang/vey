@@ -99,7 +99,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         })
         .collect();
     let root = project_root(&entry);
-    let key = cache::key(&sources, env!("CARGO_PKG_VERSION"));
+    let key = cache::key(&sources, &styles, env!("CARGO_PKG_VERSION"));
     if let Some(cached) = cache::read(&root, key) {
         return Ok(Bundle {
             code: cached.code,

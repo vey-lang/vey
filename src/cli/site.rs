@@ -73,6 +73,14 @@ pub(crate) fn write_site(
             output.display()
         )));
     }
+    // The folder of the sources may not be emptied either, or the program
+    // is gone before it is built.
+    if absolute(entry).starts_with(&output) {
+        return Err(BuildError::from(format!(
+            "refusing to write the build into {}: it holds the sources",
+            output.display()
+        )));
+    }
     if output.is_file() {
         return Err(BuildError::from(format!(
             "{} is a file, not a directory",

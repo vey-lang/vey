@@ -659,7 +659,10 @@ impl Parser {
 
     /// The name of a loop, when a `break` or a `continue` names it.
     fn parse_label(&mut self) -> Result<Option<String>, VeyError> {
-        if self.tok.kind == TokKind::Ident {
+        // The name of a loop is written on the same line as the `break` or
+        // the `continue`. A word on the next line is the start of another
+        // statement.
+        if self.tok.kind == TokKind::Ident && !self.tok.newline_before {
             return Ok(Some(self.advance()?.value));
         }
         Ok(None)
@@ -795,7 +798,13 @@ impl Parser {
 
     fn parse_return(&mut self) -> Result<Stmt, VeyError> {
         let start = self.expect_kw("return")?;
-        let value = if self.is_punct("}") || self.is_punct(";") || self.tok.kind == TokKind::Eof {
+        // The value of a `return` is written on the same line. The end of a
+        // line ends a statement.
+        let value = if self.is_punct("}")
+            || self.is_punct(";")
+            || self.tok.kind == TokKind::Eof
+            || self.tok.newline_before
+        {
             None
         } else {
             Some(self.parse_statement_expression()?)

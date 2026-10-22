@@ -156,6 +156,15 @@ impl Checker<'_> {
         self.scopes.read(name)
     }
 
+    /// The name, and a note that it was read only when it is read.
+    fn read_or_write(&self, name: &str, reads: bool) -> Option<std::rc::Rc<scopes::Binding>> {
+        if reads {
+            self.scopes.read(name)
+        } else {
+            self.scopes.write(name)
+        }
+    }
+
     /// The names that are in scope, used to suggest a similar one.
     fn known_names(&self) -> Vec<&str> {
         self.scopes.known_names()
@@ -229,11 +238,11 @@ impl Checker<'_> {
                     }
                 }
                 Stmt::Fn(decl) => {
-                    self.declared_at.insert(decl.name.clone(), index);
+                    // A function is hoisted, so it may be used before it is
+                    // written.
                     self.declare(&decl.name, BindingKind::Function, decl.pos)?
                 }
                 Stmt::Component(decl) => {
-                    self.declared_at.insert(decl.name.clone(), index);
                     self.declare(&decl.name, BindingKind::Component, decl.pos)?
                 }
                 Stmt::Enum(decl) => self.declare(&decl.name, BindingKind::Const, decl.pos)?,
@@ -420,7 +429,9 @@ impl Checker<'_> {
             Stmt::Enum(_) => {}
             Stmt::Expr(decl) => self.check_expr(&decl.expr)?,
             Stmt::Assign(decl) => {
-                self.check_target(&decl.target)?;
+                // A name that is only written is not used, but a name that
+                // is added to is read as well.
+                self.check_target(&decl.target, decl.op != "=")?;
                 self.check_expr(&decl.value)?;
             }
             Stmt::Block(block, _) => self.check_block(block)?,
@@ -442,9 +453,17 @@ impl Checker<'_> {
 
     fn check_block(&mut self, block: &Block) -> Result<(), VeyError> {
         self.scopes.push();
+        self.check_statements(&block.body)?;
+        self.pop_scope();
+        Ok(())
+    }
+
+    /// The statements of a block, with a warning for the code that is never
+    /// run.
+    fn check_statements(&mut self, body: &[Stmt]) -> Result<(), VeyError> {
         // The code after a `return`, a `break` or a `continue` is never run.
         let mut ended = false;
-        for stmt in &block.body {
+        for stmt in body {
             if ended {
                 self.warn(Warning::new(
                     "the code after this is never run",
@@ -462,7 +481,6 @@ impl Checker<'_> {
                 ended = true;
             }
         }
-        self.pop_scope();
         Ok(())
     }
 
@@ -480,9 +498,9 @@ impl Checker<'_> {
                 self.declare(name, BindingKind::Param, param.pos)?;
             }
         }
-        for stmt in &body.body {
-            self.check_stmt(stmt)?;
-        }
+        // The body of a function is in the scope of its parameters, so that
+        // a name may not be written twice.
+        self.check_statements(&body.body)?;
 
         self.pop_scope();
         self.function_depth -= 1;
@@ -574,9 +592,9 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn check_target(&mut self, target: &Expr) -> Result<(), VeyError> {
+    fn check_target(&mut self, target: &Expr, reads: bool) -> Result<(), VeyError> {
         match target {
-            Expr::Ident(name, pos) => match self.read(name) {
+            Expr::Ident(name, pos) => match self.read_or_write(name, reads) {
                 Some(binding) if binding.kind.immutable() => Err(self.error(
                     *pos,
                     format!("cannot assign to {} '{}'", binding.kind.label(), name),
@@ -624,7 +642,10 @@ impl Checker<'_> {
                 // component may use it, because it runs later.
                 if self.scopes.depth() == 1 {
                     if let Some(declared) = self.declared_at.get(name) {
-                        if *declared > self.statement {
+                        // The name may not be used before it is written, and
+                        // it may not be used in the statement that writes
+                        // it either.
+                        if *declared >= self.statement {
                             return Err(self
                                 .error(*pos, format!("'{}' is used before it is declared", name)));
                         }

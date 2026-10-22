@@ -833,11 +833,13 @@ gap that is closed.
 - [x] **The condition of a `match` arm was joined with `||`,** so the
       condition of the arm was ignored and the arm held whenever its
       pattern held. (`src/codegen/exprs.rs`)
-- [ ] **The build cache does not know the stylesheets,** so a change in a
+- [x] **The build cache does not know the stylesheets,** so a change in a
       `.css` file was served from the cache and the old style was kept.
+      The stylesheets are part of the key of the cache now.
       (`src/compiler/cache.rs`, `src/compiler/mod.rs`)
-- [ ] **`vey build -o` into a folder of the project wipes the sources,**
-      because the folder is emptied before the site is written.
+- [x] **`vey build -o` into a folder of the project wipes the sources,**
+      because the folder is emptied before the site is written. A folder
+      that holds the sources is refused now.
       (`src/cli/site.rs`)
 - [ ] **The dev server does not see a page that is added to a folder of
       the pages,** because only the folder itself is watched.
@@ -1013,14 +1015,25 @@ gap that is closed.
 - [ ] **`vey fmt` writes any file it is given,** so a Markdown file or a
       stylesheet is written as if it were a program.
       (`src/cli/fmt.rs`)
-- [ ] **A value that is used in its own initializer is not caught,** so
+- [x] **A value that is used in its own initializer is not caught,** so
       the program passes the check and fails at runtime.
       (`src/check/mod.rs`)
-- [ ] **The code after a `return` is not reported at the top of a
+- [x] **The code after a `return` is not reported at the top of a
       function,** because the function body is walked and not the block.
       (`src/check/mod.rs`)
-- [ ] **A name that is only written is not reported as unused,** because
-      the writing of a name counts as reading it. (`src/check/mod.rs`)
+- [x] **A name that is only written is not reported as unused,** because
+      the writing of a name counts as reading it. A name that is added to
+      is read as well, so it is still used.
+      (`src/check/mod.rs`, `src/check/scopes.rs`)
+- [x] **A function could not be used before it was written,** although a
+      function is hoisted and may be used anywhere.
+      (`src/check/mod.rs`)
+- [x] **The name of a loop was taken from the next line,** so a `break`
+      or a `continue` took the word that started the next statement as the
+      name of the loop. (`src/parser/mod.rs`)
+- [x] **The value of a `return` was taken from the next line,** so the
+      statement after a `return` became the value of the `return`.
+      (`src/parser/mod.rs`)
 - [ ] **The linter compares the names of two different functions,** so a
       name that is near another one is said for the wrong reason.
       (`src/cli/lint.rs`)
