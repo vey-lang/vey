@@ -367,6 +367,97 @@ console.log(own.peek().n, runtime.store("count").peek().n);
 }
 
 #[test]
+fn http_supports_put_patch_delete_and_head() {
+    let text = run_runtime(
+        "http-methods",
+        r#"
+const calls = [];
+globalThis.fetch = (url, options) => {
+  calls.push({ method: options.method, body: options.body || null, type: options.headers["content-type"] || null });
+  return Promise.resolve({
+    status: 200,
+    statusText: "OK",
+    url,
+    headers: { get: () => "text/plain" },
+    text: () => Promise.resolve("ok")
+  });
+};
+Promise.all([
+  runtime.http.put("/put", { value: 1 }),
+  runtime.http.patch("/patch", { value: 2 }),
+  runtime.http.delete("/delete"),
+  runtime.http.head("/head")
+]).then(() => console.log(JSON.stringify(calls)));
+"#,
+    );
+    assert!(text.contains(r#""method":"PUT""#), "{text}");
+    assert!(text.contains(r#""method":"PATCH""#), "{text}");
+    assert!(text.contains(r#""method":"DELETE""#), "{text}");
+    assert!(text.contains(r#""method":"HEAD""#), "{text}");
+    assert!(text.contains(r#""body":"{\"value\":1}","type":"application/json""#), "{text}");
+    assert!(text.contains(r#""body":"{\"value\":2}","type":"application/json""#), "{text}");
+}
+
+#[test]
+fn http_timeout_keeps_working_with_an_external_abort_signal() {
+    let text = run_runtime(
+        "http-abort-timeout",
+        r#"
+const external = runtime.http.AbortController();
+globalThis.fetch = (url, options) => {
+  console.log(options.signal !== external.signal);
+  return new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  });
+};
+runtime.http.fetch("/slow", { signal: external.signal, timeout: 1000 }).catch(err => console.log(err.message));
+external.abort();
+"#,
+    );
+    assert!(text.contains("true"), "{text}");
+    assert!(text.contains("aborted"), "{text}");
+}
+
+#[test]
+fn a_store_can_update_a_nested_path_without_losing_siblings() {
+    let text = run_runtime(
+        "store-nested",
+        r#"
+const state = runtime.store({ user: { name: "Ada", age: 36 }, theme: "dark" });
+state.set("user.name", "Grace");
+console.log(JSON.stringify(state.peek()));
+"#,
+    );
+    assert!(text.contains(r#"{"user":{"name":"Grace","age":36},"theme":"dark"}"#), "{text}");
+}
+
+#[test]
+fn batch_runs_an_effect_once_and_untrack_does_not_add_a_dependency() {
+    let text = run_runtime(
+        "batch-untrack",
+        r#"
+const first = runtime.signal(0);
+const second = runtime.signal(0);
+let runs = 0;
+runtime.effect(() => {
+  runs += 1;
+  first.value;
+  runtime.untrack(() => second.value);
+});
+runtime.batch(() => {
+  first.set(1);
+  first.set(2);
+  second.set(1);
+});
+console.log(runs);
+second.set(2);
+console.log(runs);
+"#,
+    );
+    assert!(text.contains("2\n2"), "{text}");
+}
+
+#[test]
 fn an_effect_runs_when_a_value_it_reads_changes() {
     let text = run_runtime(
         "effect",

@@ -404,6 +404,16 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
                 "post",
                 builtin_optional(vec![string(), any(), any()], 2, promise(response_type())),
             ),
+            (
+                "put",
+                builtin_optional(vec![string(), any(), any()], 2, promise(response_type())),
+            ),
+            (
+                "patch",
+                builtin_optional(vec![string(), any(), any()], 2, promise(response_type())),
+            ),
+            ("delete", builtin_optional(vec![string(), any()], 1, promise(response_type()))),
+            ("head", builtin_optional(vec![string(), any()], 1, promise(response_type()))),
             ("fetch", builtin_optional(vec![string(), any()], 1, promise(response_type()))),
             ("Request", builtin_optional(vec![string(), any()], 1, any())),
             ("Response", builtin_optional(vec![any(), any()], 1, any())),
@@ -511,6 +521,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         // The values of a form, and what is wrong with them.
         "form" => Some(builtin_optional(vec![any(), any()], 0, any())),
         "effect" => Some(builtin_function(vec![any()], any())),
+        "batch" => Some(builtin_function(vec![any()], any())),
+        "untrack" => Some(builtin_function(vec![any()], any())),
         "computed" => Some(builtin_generic(
             &["T"],
             vec![builtin_function(Vec::new(), type_var("T"))],

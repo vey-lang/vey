@@ -6,6 +6,40 @@ function veyState(ctx) {
   // The effect that is running, so that the values it reads are known.
   var running = null;
 
+  // Effects normally run as soon as a signal changes. A batch gathers the
+  // effects touched by several writes and runs each one once at the end.
+  var batchDepth = 0;
+  var batched = [];
+
+  function flushBatch() {
+    while (batched.length) {
+      var list = batched;
+      batched = [];
+      for (var i = 0; i < list.length; i++) list[i]();
+    }
+  }
+
+  function batch(fn) {
+    batchDepth += 1;
+    try {
+      return fn();
+    } finally {
+      batchDepth -= 1;
+      if (batchDepth === 0) flushBatch();
+    }
+  }
+
+  // Read values without adding dependencies to the current effect.
+  function untrack(fn) {
+    var previous = running;
+    running = null;
+    try {
+      return fn();
+    } finally {
+      running = previous;
+    }
+  }
+
   // The work that is waiting to be done.
   //
   // Ten writes of ten signals do the work once, and not ten times, so
@@ -235,11 +269,25 @@ function veyState(ctx) {
     };
     // One field of the state is changed.
     store.set = function (key, value) {
-      var next = {};
+      var parts = String(key).split(".");
+      var next = Array.isArray(current) ? current.slice() : {};
       for (var name in current) {
         if (Object.prototype.hasOwnProperty.call(current, name)) next[name] = current[name];
       }
-      next[key] = value;
+      var target = next;
+      for (var p = 0; p < parts.length - 1; p++) {
+        var part = parts[p];
+        var child = target[part];
+        var copy = Array.isArray(child) ? child.slice() : {};
+        if (child && typeof child === "object") {
+          for (var childName in child) {
+            if (Object.prototype.hasOwnProperty.call(child, childName)) copy[childName] = child[childName];
+          }
+        }
+        target[part] = copy;
+        target = copy;
+      }
+      target[parts[parts.length - 1]] = value;
       return setState(next);
     };
     // The whole state is changed.
@@ -330,6 +378,10 @@ function veyState(ctx) {
     // work once.
     function scheduledRun() {
       if (stopped) return;
+      if (batchDepth > 0) {
+        if (batched.indexOf(scheduledRun) === -1) batched.push(scheduledRun);
+        return;
+      }
       if (!opts.defer) {
         run();
         return;
@@ -395,6 +447,8 @@ function veyState(ctx) {
   ctx.store = store;
   ctx.effect = effect;
   ctx.computed = computed;
+  ctx.batch = batch;
+  ctx.untrack = untrack;
   // The comparison of two values by their content, so that a part of the
   // runtime that follows the state may use it.
   ctx.deepEquals = deepEquals;
@@ -410,6 +464,8 @@ function veyState(ctx) {
     store: store,
     effect: effect,
     computed: computed,
+    batch: batch,
+    untrack: untrack,
     deepEquals: deepEquals,
   };
 }

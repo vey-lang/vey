@@ -138,18 +138,37 @@ fn run_tests(
     let mut broken = 0usize;
     let mut watched_files = files.to_vec();
     for file in files {
+        if let Some(parent) = file.parent() {
+            watched_files.push(parent.to_path_buf());
+        }
+    }
+    for file in files {
         println!("test {}", file.display());
         let bundle = match compile_project(file) {
             Ok(bundle) => bundle,
             Err(err) => {
-                watched_files.push(PathBuf::from(&err.file));
+                let error_path = PathBuf::from(&err.file);
+                if let Some(parent) = error_path.parent() {
+                    watched_files.push(parent.to_path_buf());
+                }
+                watched_files.push(error_path);
                 report(&err);
                 failed += 1;
                 continue;
             }
         };
-        watched_files.extend(bundle.modules.iter().map(|module| module.path.clone()));
-        watched_files.extend(bundle.styles.iter().map(|style| style.path.clone()));
+        for module in &bundle.modules {
+            watched_files.push(module.path.clone());
+            if let Some(parent) = module.path.parent() {
+                watched_files.push(parent.to_path_buf());
+            }
+        }
+        for style in &bundle.styles {
+            watched_files.push(style.path.clone());
+            if let Some(parent) = style.path.parent() {
+                watched_files.push(parent.to_path_buf());
+            }
+        }
 
         let temp = temp_file("vey-test", "cjs");
         if let Err(err) = fs::write(&temp, node_script(&bundle)) {

@@ -305,7 +305,7 @@ fn module_hint(parent: &Path, request: &str) -> Option<String> {
     let parent = parent.canonicalize().ok()?;
     let mut ancestor = Some(parent.as_path());
     for _ in 0..5 {
-        let base = ancestor?;
+        let Some(base) = ancestor else { break };
         let mut candidates = vec![base.join(request)];
         if request_path.extension().is_none() {
             candidates.push(base.join(format!("{}.vey", request)));

@@ -973,10 +973,11 @@ Bir bileşen `onMount(() => ...)` çağırıyorsa ve bileşen yeniden çiziliyor
 
 `title("...")` yardımcısı `doc.title`'ı yazıyor (tarayıcı `<title>` elementini kendi kuruyor); markup'taki `title { ... }` ise head elementini yönetiyor.
 
-### C13 · Keyed diff O(n²) ve "her şeyi yeniden kur" maliyeti
+### C13 · Keyed diff O(n²) ve "her şeyi yeniden kur" maliyeti 🟡 **key eşleştirme düzeltildi**
 `src/runtime/mount.js:153-181` — her yeni node için eski node'ların **tamamı** taranıyor.
-
 Ayrıca `render()` (`mount.js:299-315`) her seferinde **yeni bir DOM ağacı kuruyor** (`flatten([tree]).map(toDom)`) ve sonra karşılaştırıyor → 1000 satırlık liste, her değişiklikte 1000 element üretip karşılaştırılıyor.
+
+**Bu tur:** Eski keyed çocuklar tek geçişte `Map` benzeri bir indeksle eşleştiriliyor; key araması artık O(n), kalan maliyet yeni DOM ağacının kurulması ve gerçek LIS diff'inin eksik olmasıdır.
 
 ### C14 · Form alanı değeri **property** olarak yazılıyor, attribute olarak değil
 `src/runtime/dom.js:159-167` → `el.value = value`. SSR ile gelen `value="..."` attribute'ı hydration sonrası kayboluyor ve form gönderiminde `value` attribute'ı yeniden yazılmıyor.
@@ -1090,8 +1091,10 @@ Bir route eşleşirse `public/` dosyaları **asla** servis edilmiyor. Ayrıca:
 ### D14 · Şema doğrulama / içerik doğrulama yok
 Body, query, params için şema yok. `req.body` `any`.
 
-### D15 · `http` istemcisinde `put`/`patch`/`delete`/`head` yok
-`src/runtime/http.js:302-334` — sadece `get`/`post`.
+### D15 · `http` istemcisinde `put`/`patch`/`delete`/`head` ✅ **eklendi**
+`src/runtime/http.js` — HTTP yardımcıları artık `get`/`post` yanında `put`/`patch`/`delete`/`head` de sunuyor.
+
+**Bu tur:** `put`, `patch`, `delete` ve `head` eklendi; JSON gövdeleri `application/json` ile kodlanıyor. Ayrıca harici `AbortSignal` verildiğinde `timeout` ve `retries` artık sessizce devre dışı kalmıyor. Runtime regresyon testleri eklendi.
 Ayrıca `fetch(url, { signal, timeout: 100 })` → kullanıcı `signal` verdiğinde `timeout` **sessizce yutuluyor** (`http.js:249-259`: `if (!opts.signal && ...)`).
 `Response` sahte bir nesne: `arrayBuffer()`, `blob()`, `formData()`, `body` stream, `headers.getSetCookie()`, `statusText` eksik (`http.js:140-178`).
 
@@ -1474,7 +1477,7 @@ Aşağıdaki liste, "Vey olgun bir dil olsun" hedefi için **eklenmesi gerekenle
 
 | # | Özellik | API önerisi | Öncelik |
 |---|---|---|---|
-| C-1 | **Toplama (batching)** | `state.batch(fn() { ... })` veya otomatik mikro-görev | 🔴 |
+| C-1 | ~~**Toplama (batching)**~~ ✅ `batch` + `untrack` eklendi | `state.batch(fn() { ... })` veya otomatik mikro-görev | 🔴 |
 | C-2 | ~~**Eşitlik politikası**~~ ✅ yapıldı | `signal(v, { equals: (a, b) => a.id === b.id })`, `{ equals: "deep" }` | 🔴 |
 | C-3 | ~~**Context**~~ ✅ var | `provide("theme", theme)` / `inject("theme")` | 🟡 |
 | C-4 | **Memo** — ⚠️ mimari engel (bölüm 6, C4) | `memo(Component)` | 🟡 |
@@ -1881,13 +1884,13 @@ Bu altı madde, dili "deneyebilir bir şey" olmaktan "güvenilir bir şey" olmay
 ### 14.1 Frontend — ileri seviye için eklenecekler
 
 #### F-A. Reaktivite çekirdeği (core reactivity)
-1. **Batching / toplama** — `batch(fn)` ile birden çok `set` tek render tetiklesin. Şu an her `set` ayrı render. Kanıt: `src/runtime/state.js` (signal.set doğrudan notify). Eklenecek: `batch`, `untrack`.
+1. ~~**Batching / toplama**~~ ✅ — `batch(fn)` birden çok `set` çağrısını tek effect çalışmasına topluyor; `untrack(fn)` okunan değeri mevcut effect'e bağımlılık olarak eklemiyor. Regresyon testi: `tests/runtime.rs::batch_runs_an_effect_once_and_untrack_does_not_add_a_dependency`.
 2. **Memo** — `memo(fn)` = cached computed with equality. `computed` var ama cache invalidation şeffaf değil. Kanıt: `state.js` computed.
 3. **Equality politikası** — `{ equals: "deep" | fn }` var (C-2 kapandı), ama **deep equality varsayılan değil**; nesne signal'larında her set render tetikler. Eklenecek: varsayılan shallow/deep seçeneği.
 4. **Effect cleanup** — `effect(fn)` cleanup fonksiyonu döndürebilsin (React useEffect tarzı). Şu an yok. Kanıt: `state.js`.
 5. **Async effect / resource** — `resource(fn)` ile async veri yükleme + loading/error state. Yok.
 6. **Context provider scope** — `provide`/`inject` var ama **tip güvenli değil** ve **nested provider override** test edilmemiş. Kanıt: `dom.js` provide/inject.
-7. **Store patch** — `store.set(key, value)` var; `store.update(fn)` var. Eksik: **nested path update** (`store.set("a.b", x)`). 
+7. ~~**Store patch**~~ ✅ — `store.set("a.b", x)` iç içe nesneyi yapısal kopyalayarak güncelliyor ve kardeş alanları koruyor. Regresyon testi: `tests/runtime.rs::a_store_can_update_a_nested_path_without_losing_siblings`.
 
 #### F-B. Bileşen modeli
 8. **Async bileşen / Suspense** — `async component` ve `<Suspense fallback=...>` yok. Kanıt: README'de yok, runtime'da yok.
@@ -1898,7 +1901,7 @@ Bu altı madde, dili "deneyebilir bir şey" olmaktan "güvenilir bir şey" olmay
 13. **HOC / higher-order components** — Vey'de yok; `let Box = Card` var (ad ile bileşen) ama genel HOC kalıbı yok.
 
 #### F-C. Rendering / diff
-14. **Keyed diff performansı** — O(n²) LIS yerine Map tabanlı O(n). Kanıt: `mount.js` diff.
+14. 🟡 **Keyed diff performansı** — key eşleştirme Map tabanlı O(n) oldu; LIS ve iki fazlı sanal ağaç hâlâ eksik. Kanıt: `mount.js` diff.
 15. **Scroll/odak koruma** — C-13 kapandı (odak+scroll hatırlanıyor). Eksik: **liste yeniden sıralamada animasyon** (FLIP).
 16. **SSR → hydration** — `html()` var ama **hydration** (mevcut DOM'u devralma) yok; tarayıcıda yeniden render ediliyor. Kanıt: `mount.js`, `dom.js`.
 17. **Head yönetimi** — `title()` var; `head` etiketi var. Eksik: **dinamik meta/link yönetimi** (react-helmet tarzı) ve **SSR head**.
@@ -2056,4 +2059,3 @@ Bu altı madde, dili "deneyebilir bir şey" olmaktan "güvenilir bir şey" olmay
 Vey 0.7.0 itibarıyla **"deneyebilir" bir temelden "güvenilir" bir temele** geçti: 19 P0 kapatıldı, 266 test geçiyor, frontend reaktivitesi temel seviyede çalışıyor, backend production'a yakın. Bu turun tespit ettiği eksikler **derinlik ve genişlik** eksikleri: batching/memo/Suspense/hydration (frontend), HTTPS/streaming/async IO/session store (backend), async tip güvenliği ve modern tip özellikleri (tip sistemi), LSP/formatter/linter/test runner (araç zinciri).
 
 **Önerilen sıradaki adım:** Faz 1'i bitir (async dönüş tipi + `unknown`/`never` + contextual typing), çünkü tip sistemi güçlenmeden frontend/backend'deki gelişmiş özellikler tip güvenli kullanılamaz. Ardından Faz 2 (batching + hydration) ve Faz 3 (HTTPS + streaming + async IO).
-

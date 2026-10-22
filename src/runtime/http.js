@@ -42,6 +42,27 @@ function veyHttp(ctx) {
     });
   }
 
+  // A request with an optional JSON body. Form values and binary values are
+  // handed to fetch unchanged, just as they are for POST.
+  function methodRequest(method, url, body, options) {
+    var opts = Object.assign({}, options || {});
+    var headers = Object.assign({}, plainHeaders(opts.headers) || {});
+    if (body !== undefined && body !== null) {
+      if (typeof body === "string") {
+        headers["content-type"] = headers["content-type"] || "application/json";
+        opts.body = body;
+      } else if (isFormBody(body)) {
+        opts.body = body;
+      } else {
+        headers["content-type"] = headers["content-type"] || "application/json";
+        opts.body = JSON.stringify(body);
+      }
+    }
+    opts.method = method;
+    opts.headers = headers;
+    return request(url, opts);
+  }
+
   // The headers of a request or of an answer.
   function Headers(init) {
     var store = {};
@@ -249,10 +270,19 @@ function veyHttp(ctx) {
     var controller = null;
     var timer = null;
 
-    // A request that may be ended needs a signal of its own.
-    if (!opts.signal && (timeout > 0 || retries > 0)) {
+    // A request with a timeout or retries needs a signal of its own. When the
+    // caller already supplied one, forward its abort to the internal
+    // controller instead of silently disabling timeout/retry handling.
+    var externalSignal = opts.signal;
+    if (timeout > 0 || retries > 0) {
       controller = AbortController();
       opts.signal = controller.signal;
+      if (externalSignal && typeof externalSignal.addEventListener === "function") {
+        externalSignal.addEventListener("abort", function () {
+          controller.abort(externalSignal.reason);
+        });
+        if (externalSignal.aborted) controller.abort(externalSignal.reason);
+      }
     }
     if (timeout > 0 && controller) {
       timer = hostSetTimeout(function () { controller.abort(); }, timeout);
@@ -304,23 +334,19 @@ function veyHttp(ctx) {
       return request(url, options);
     },
     post: function (url, body, options) {
-      // Copy the caller's options so that the request never mutates them.
-      var opts = Object.assign({}, options || {});
-      var headers = Object.assign({}, plainHeaders(opts.headers) || {});
-      if (typeof body === "string") {
-        headers["content-type"] = headers["content-type"] || "application/json";
-        opts.body = body;
-      } else if (isFormBody(body)) {
-        // A form or a file is written by the browser, which knows the marks
-        // of the body itself.
-        opts.body = body;
-      } else {
-        headers["content-type"] = headers["content-type"] || "application/json";
-        opts.body = JSON.stringify(body);
-      }
-      opts.method = "POST";
-      opts.headers = headers;
-      return request(url, opts);
+      return methodRequest("POST", url, body, options);
+    },
+    put: function (url, body, options) {
+      return methodRequest("PUT", url, body, options);
+    },
+    patch: function (url, body, options) {
+      return methodRequest("PATCH", url, body, options);
+    },
+    delete: function (url, options) {
+      return methodRequest("DELETE", url, undefined, options);
+    },
+    head: function (url, options) {
+      return methodRequest("HEAD", url, undefined, options);
     },
     // A request with the time it may take and the times it may be tried
     // again.

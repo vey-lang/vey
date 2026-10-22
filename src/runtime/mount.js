@@ -163,19 +163,22 @@ function veyMount(ctx) {
     var old = childrenOf(parent);
     var used = [];
     var pairs = [];
+    var keyed = Object.create(null);
+
+    // Build the old-key index once. The previous nested scan made a keyed
+    // list of n items do n² key comparisons on every render.
+    for (var oldIndex = 0; oldIndex < old.length; oldIndex++) {
+      var oldKey = keyOf(old[oldIndex]);
+      if (oldKey !== null && keyed[oldKey] === undefined) keyed[oldKey] = oldIndex;
+    }
 
     for (var i = 0; i < nodes.length; i++) {
       var neu = nodes[i];
       var key = keyOf(neu);
       var match = -1;
       if (key !== null) {
-        for (var j = 0; j < old.length; j++) {
-          if (used[j]) continue;
-          if (keyOf(old[j]) === key) {
-            match = j;
-            break;
-          }
-        }
+        var keyedMatch = keyed[key];
+        if (keyedMatch !== undefined && !used[keyedMatch]) match = keyedMatch;
       } else {
         // Without a name an item stays where it is.
         match = i;
