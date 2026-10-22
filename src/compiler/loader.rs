@@ -1,11 +1,12 @@
 //! The loading of the modules of a program.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::Stmt;
 use crate::compiler::{Module, StyleFile};
+use crate::lexer::{Lexer, TokKind};
 use crate::parser::Parser;
 use crate::suggest::edit_distance;
 use crate::VeyError;
@@ -182,9 +183,108 @@ pub(crate) fn load_module(
         deps,
         packages,
         exports,
+        unused: HashSet::new(),
     });
 
     Ok(id)
+}
+
+/// Mark the exported functions that nothing in the program reads.
+///
+/// A module writes every function it exports, but a program that reads one
+/// of them has no use for the others. A function is in use when another
+/// module reads it by the alias of the module, or when its own module names
+/// it again. A module that is handed around as a value keeps all of its
+/// names, because anything of it may be read.
+pub(crate) fn mark_unused(modules: &mut [Module], entry: usize) {
+    let words: Vec<Vec<String>> = modules
+        .iter()
+        .map(|module| words(&module.source))
+        .collect();
+
+    // The names that another module reads, and the modules that are given
+    // away as a value.
+    let mut read: Vec<HashSet<String>> = vec![HashSet::new(); modules.len()];
+    let mut given_away = vec![false; modules.len()];
+    for module in modules.iter() {
+        let source = &words[module.id];
+        for (alias, dep) in &module.deps {
+            for (at, word) in source.iter().enumerate() {
+                if word != alias {
+                    continue;
+                }
+                // The alias itself is declared with `as`, and a property
+                // named like the alias is not the module.
+                if source.get(at.wrapping_sub(1)).map(String::as_str) == Some("as") {
+                    continue;
+                }
+                if source.get(at + 1).map(String::as_str) == Some(".") {
+                    if let Some(name) = source.get(at + 2) {
+                        read[*dep].insert(name.clone());
+                    }
+                } else {
+                    given_away[*dep] = true;
+                }
+            }
+        }
+    }
+
+    for module in modules.iter_mut() {
+        let mut used = read[module.id].clone();
+        if module.id == entry || given_away[module.id] {
+            used.extend(module.exports.iter().cloned());
+        }
+        // A name that the module writes more than once, its declaration and
+        // a use of it, is in use inside the module.
+        for name in &module.exports {
+            if !used.contains(name)
+                && words[module.id].iter().filter(|word| *word == name).count() > 1
+            {
+                used.insert(name.clone());
+            }
+        }
+        for stmt in &module.ast.body {
+            let Stmt::Fn(decl) = stmt else {
+                continue;
+            };
+            if decl.exported && !used.contains(&decl.name) {
+                module.unused.insert(decl.name.clone());
+            }
+        }
+    }
+}
+
+/// The values of the tokens of a source, without the texts and the numbers.
+///
+/// A name that only appears in a text is not a use of it.
+fn words(source: &str) -> Vec<String> {
+    let mut lexer = Lexer::new(source, "");
+    let mut out = Vec::new();
+    loop {
+        let Ok(token) = lexer.next_token() else {
+            return Vec::new();
+        };
+        if token.kind == TokKind::Eof {
+            break;
+        }
+        if token.kind == TokKind::Str {
+            // A text may hold an expression, and that is a use of a name
+            // like any other.
+            for part in &token.parts {
+                if let Some((source, _)) = &part.expr {
+                    out.extend(words(source));
+                }
+            }
+            continue;
+        }
+        if matches!(
+            token.kind,
+            TokKind::Ident | TokKind::Keyword | TokKind::Op | TokKind::Punct
+        ) {
+            out.push(token.value);
+        }
+    }
+    out
 }
 
 /// Suggest a correct relative import when the requested module exists in an

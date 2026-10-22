@@ -3,7 +3,7 @@
 mod cache;
 mod loader;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::Program;
@@ -24,6 +24,9 @@ pub struct Module {
     /// The packages of npm that the module uses, by their alias.
     pub packages: Vec<(String, String)>,
     pub exports: Vec<String>,
+    /// The exported functions that nothing in the program reads, so they
+    /// are not written into the bundle.
+    pub unused: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -83,6 +86,9 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
 
     let entry_id = load_module(&entry, &mut modules, &mut ids, &mut stack, &mut styles)?;
 
+    // An exported function that nothing reads is not written.
+    loader::mark_unused(&mut modules, entry_id);
+
     // The files of the project are known, so the result of the last build may
     // be taken from the cache when nothing has changed.
     let sources: Vec<SourceFile> = modules
@@ -126,6 +132,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             deps,
             packages: module.packages.clone(),
             exports: module.exports.clone(),
+            unused: module.unused.clone(),
             source: index,
             enums: std::collections::HashMap::new(),
             resolved: std::collections::HashMap::new(),

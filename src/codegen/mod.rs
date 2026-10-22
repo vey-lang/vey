@@ -24,6 +24,8 @@ pub struct Options {
     /// The packages of npm that the program uses, by their alias.
     pub packages: Vec<(String, String)>,
     pub exports: Vec<String>,
+    /// The exported functions that nothing reads, so they are not written.
+    pub unused: HashSet<String>,
     /// The file of the program among the files of the bundle.
     ///
     /// The mark of every piece of code says which file it came from, so that
@@ -44,6 +46,7 @@ impl Options {
             deps: Vec::new(),
             packages: Vec::new(),
             exports: Vec::new(),
+            unused: HashSet::new(),
             source: 0,
             enums: std::collections::HashMap::new(),
             resolved: std::collections::HashMap::new(),
@@ -69,6 +72,7 @@ pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError
         packages: opts.packages.clone(),
         module: opts.module,
         exports: opts.exports.clone(),
+        unused: opts.unused.clone(),
         enums: opts.enums.clone(),
         resolved: opts.resolved.clone(),
     };
@@ -94,6 +98,7 @@ struct Codegen {
     packages: Vec<(String, String)>,
     module: bool,
     exports: Vec<String>,
+    unused: HashSet<String>,
     enums: std::collections::HashMap<String, EnumInfo>,
     /// The calls whose arguments are given by name, and the order of the
     /// arguments.
@@ -175,11 +180,15 @@ impl Codegen {
             .body
             .iter()
             .filter(|stmt| !matches!(stmt, Stmt::Use(_)))
+            .filter(|stmt| self.is_written(stmt))
             .cloned()
             .collect();
         self.gen_body(&Block { body: rest })?;
         if self.module {
             for name in self.exports.clone() {
+                if self.unused.contains(&name) {
+                    continue;
+                }
                 self.emit(&format!(
                     "Object.defineProperty(__exports, {}, {{ get: () => _{} , enumerable: true }});",
                     js_string(&name),
@@ -189,6 +198,17 @@ impl Codegen {
             self.emit("return __exports;");
         }
         Ok(())
+    }
+
+    /// Whether a declaration is written into the bundle.
+    ///
+    /// An exported function that nothing in the program reads is left out,
+    /// so that a module that has many of them does not weigh on every page.
+    fn is_written(&self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Fn(decl) if decl.exported => !self.unused.contains(&decl.name),
+            _ => true,
+        }
     }
 
     fn capture<F>(&mut self, body: F) -> Result<String, VeyError>

@@ -822,8 +822,14 @@ gap that is closed.
       (`src/compiler/mod.rs`)
 - [x] **`pub let { a } = x` exports nothing, without a word.**
       (`src/parser/mod.rs`)
-- [ ] **Nothing is shaken out of the bundle:** every export of every module
-      is written, whether it is used or not. (`src/compiler/loader.rs`)
+- [x] **Nothing is shaken out of the bundle:** every export of every module
+      is written, whether it is used or not. An exported function that
+      nothing reads is now left out: a function is in use when another
+      module reads it through the alias of the module (`m.name`, also in a
+      text and in the markup), when its own module writes its name again,
+      or when the module itself is handed around as a value. The exports of
+      the entry module always stay. (`src/compiler/loader.rs`,
+      `src/codegen/mod.rs`)
 
 ### 14.2 The type checker
 

@@ -182,6 +182,81 @@ bind("#app", App())
 }
 
 #[test]
+fn an_export_that_nothing_reads_is_not_written() {
+    let dir = temp_dir("shake");
+    fs::write(
+        dir.join("lib.vey"),
+        r#"
+export fn used() -> string { return "used-code" }
+export fn unused() -> string { return "unused-code" }
+export fn helper() -> string { return "helper-code" }
+export fn wrapper() -> string { return helper() }
+"#,
+    )
+    .unwrap();
+    let app = dir.join("app.vey");
+    fs::write(
+        &app,
+        r#"
+use "./lib.vey" as lib
+print(lib.used())
+print(lib.wrapper())
+"#,
+    )
+    .unwrap();
+
+    let script = common::build_script(&app);
+    let text = fs::read_to_string(&script).unwrap();
+    assert!(text.contains("used-code"), "the used export is not written");
+    assert!(
+        text.contains("helper-code"),
+        "the export that another export uses is not written"
+    );
+    assert!(
+        !text.contains("unused-code"),
+        "the export that nothing reads is written"
+    );
+
+    let output = Command::new("node").arg(&script).output().unwrap();
+    let _ = fs::remove_file(&script);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("used-code"), "{text}");
+    assert!(text.contains("helper-code"), "{text}");
+}
+
+#[test]
+fn a_module_that_is_handed_around_keeps_its_exports() {
+    let dir = temp_dir("shake-value");
+    fs::write(
+        dir.join("lib.vey"),
+        r#"
+export fn used() -> string { return "used-code" }
+export fn other() -> string { return "other-code" }
+"#,
+    )
+    .unwrap();
+    let app = dir.join("app.vey");
+    fs::write(
+        &app,
+        r#"
+use "./lib.vey" as lib
+let m: any = lib
+print(m.used())
+"#,
+    )
+    .unwrap();
+
+    let script = common::build_script(&app);
+    let text = fs::read_to_string(&script).unwrap();
+    assert!(
+        text.contains("other-code"),
+        "an export of a module that is handed around is missing"
+    );
+    let _ = fs::remove_file(&script);
+}
+
+#[test]
 fn resolves_modules_in_other_folders() {
     let dir = temp_dir("external-modules");
     let shared = dir.join("shared");
