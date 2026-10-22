@@ -840,17 +840,22 @@ function veyServer(ctx) {
       var res = makeResponse(response);
       var method = request.method;
 
-      // File helpers read asynchronously so serving a file does not block the
-      // event loop. They use the same response object, preserving status and
-      // headers set by middleware before the callback completes.
+      // File helpers stream asynchronously so serving a large file does not
+      // block the event loop or keep the whole body in memory.
       res.sendFile = function (file, options) {
         var settings = options || {};
-        fs.readFile(String(file), function (err, data) {
+        var filename = String(file);
+        fs.stat(filename, function (err, info) {
           if (err) {
             if (!res.isFinished()) {
               res.status(err.code === "ENOENT" ? 404 : 500);
               res.send(err.code === "ENOENT" ? "Not found" : "Cannot read file");
             }
+            return;
+          }
+          if (!info.isFile()) {
+            res.status(404);
+            res.send("Not found");
             return;
           }
           if (settings.headers) {
@@ -861,7 +866,20 @@ function veyServer(ctx) {
             }
           }
           if (settings.type) res.contentType(settings.type);
-          res.send(data);
+          res.set("Content-Length", String(info.size));
+          if (method === "HEAD") {
+            res.end();
+            return;
+          }
+          var stream = fs.createReadStream(filename);
+          stream.on("data", function (chunk) { res.write(chunk); });
+          stream.on("end", function () { res.end(); });
+          stream.on("error", function () {
+            if (!res.isFinished()) {
+              res.status(500);
+              res.end();
+            }
+          });
         });
         return res;
       };

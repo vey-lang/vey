@@ -1024,8 +1024,8 @@ Bu yüzden `onMount(...)`, `onDestroy(...)`, `print(...)` gibi **yan etki** ifad
 
 `res.send("merhaba")` → `Content-Type: text/html` ilan ediyor (`shared.js:209-223`) → JSON döndürmek isteyen bir program `res.json()` kullanmak zorunda (var, iyi).
 
-### D2 · Streaming yanıt imkânsız
-Gövde string / Buffer / nesne olmalı. `fs.readStream` var ama `node.js:208-215` **gerçek stream değil**: tüm dosyayı `chunks` dizisinde biriktirip tek metne katlıyor. Büyük dosya indirme/yükleme için kullanılamaz.
+### D2 · Streaming yanıt imkânsız 🟡 **dosya yanıtı düzeltildi**
+`res.write()` artık Buffer değerlerini bozmadan aktarabiliyor; `res.sendFile()` gerçek `fs.createReadStream()` kullanıyor ve gövdeyi bellekte biriktirmiyor. Genel kullanıcı stream API'si ve upload streaming hâlâ eksik.
 
 ### D3 · HTTPS / HTTP/2 yok
 `src/runtime/server.js:124` yalnızca `node:http`. `grep -rn "http2" src/` → 0 sonuç.✅ `trustProxy` ve zaman aşımları artık okunuyor (`server.js:146-151,683-691`); `host`, `cert`/`key`, `maxRequestsPerSocket` hâlâ yok.

@@ -404,7 +404,7 @@ function veyShared(ctx) {
           state.sent = true;
           response.writeHead(state.status, state.headers);
         }
-        response.write(String(text));
+        response.write(isBuffer(text) ? text : String(text));
         return res;
       },
       // Write the status line and headers without ending the answer.
