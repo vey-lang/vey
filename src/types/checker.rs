@@ -6,11 +6,11 @@ use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::is_builtin_type;
 use crate::types::core::{
-    rest_element_type, union, Alias, EnumFieldInfo, EnumInfo, EnumVariantInfo, FunctionType,
-    ImplInfo, InterfaceInfo, ObjectField, ResolvedCalls, Type,
+    rest_element_type, Alias, EnumFieldInfo, EnumInfo, EnumVariantInfo, FunctionType, ImplInfo,
+    InterfaceInfo, ResolvedCalls, Type,
 };
 use crate::types::helpers::name_alias;
-use crate::types::rules::assignable;
+use crate::types::rules::{assignable_with, Opening};
 use crate::VeyError;
 
 /// Whether every path through the block leaves the function or the loop.
@@ -740,81 +740,16 @@ impl TypeChecker<'_> {
             .find_map(|scope| scope.get(name).cloned())
     }
 
-    /// Open a type that refers to itself.
-    ///
-    /// A type that cannot be written out, such as the end of a list of
-    /// links, is opened up to the shape of its alias. The opening has a
-    /// depth, so that a type that refers to itself does not open for ever.
-    pub(crate) fn expand(&self, ty: &Type, depth: usize) -> Type {
-        if depth == 0 {
-            return ty.clone();
-        }
-        match ty {
-            Type::Recursion(name) => match self.alias_types.get(name) {
-                Some(shape) => self.expand(shape, depth - 1),
-                None => ty.clone(),
-            },
-            Type::Array(inner) => Type::Array(Box::new(self.expand(inner, depth))),
-            Type::Tuple(items) => {
-                Type::Tuple(items.iter().map(|item| self.expand(item, depth)).collect())
-            }
-            Type::Dict(key, value) => Type::Dict(
-                Box::new(self.expand(key, depth)),
-                Box::new(self.expand(value, depth)),
-            ),
-            Type::Promise(inner) => Type::Promise(Box::new(self.expand(inner, depth))),
-            Type::Result(ok, err) => Type::Result(
-                Box::new(self.expand(ok, depth)),
-                Box::new(self.expand(err, depth)),
-            ),
-            Type::Object(fields) => Type::Object(
-                fields
-                    .iter()
-                    .map(|field| ObjectField {
-                        name: field.name.clone(),
-                        ty: self.expand(&field.ty, depth),
-                        optional: field.optional,
-                    })
-                    .collect(),
-            ),
-            Type::Named(name, fields) => Type::Named(
-                name.clone(),
-                fields
-                    .iter()
-                    .map(|field| ObjectField {
-                        name: field.name.clone(),
-                        ty: self.expand(&field.ty, depth),
-                        optional: field.optional,
-                    })
-                    .collect(),
-            ),
-            Type::Interface(name, fields) => Type::Interface(
-                name.clone(),
-                fields
-                    .iter()
-                    .map(|field| ObjectField {
-                        name: field.name.clone(),
-                        ty: self.expand(&field.ty, depth),
-                        optional: field.optional,
-                    })
-                    .collect(),
-            ),
-            Type::Union(items) => union(
-                items
-                    .iter()
-                    .map(|item| self.expand(item, depth))
-                    .collect(),
-            ),
-            other => other.clone(),
-        }
-    }
-
     /// Whether a value of one type may be used where another is expected.
     ///
     /// The types that refer to themselves are opened up first, so that the
     /// end of a list of links is checked like the rest of it.
     pub(crate) fn fits(&self, source: &Type, target: &Type) -> bool {
-        assignable(&self.expand(source, 6), &self.expand(target, 6))
+        // A type that refers to itself is opened where the check reaches
+        // it, and not into a copy of itself: a shape of six fields would
+        // otherwise become six copies of six copies, six times over.
+        let mut opening = Opening::new(&self.alias_types);
+        assignable_with(source, target, &mut opening)
     }
     pub(crate) fn param_type(&self, param: &Param) -> Result<Type, VeyError> {
         let ty = match &param.ty {

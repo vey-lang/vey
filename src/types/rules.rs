@@ -65,7 +65,77 @@ pub(crate) fn orderable(ty: &Type) -> bool {
     }
 }
 
+/// The state of a check that opens the recursive aliases it meets.
+///
+/// A type that refers to itself cannot be written out, so it is opened one
+/// step at a time, only where the check reaches it. A pair of types that
+/// the check is already inside of says nothing new when it comes again, so
+/// it is taken to fit: the check then goes round the type instead of for
+/// ever.
+#[derive(Default)]
+pub(crate) struct Opening<'a> {
+    /// The shape of every alias of the program, when they may be opened.
+    aliases: Option<&'a HashMap<String, Type>>,
+    /// The pairs of types that the check is inside of.
+    assumed: Vec<(Type, Type)>,
+}
+
+impl<'a> Opening<'a> {
+    /// An opening that may use the shapes of the aliases of the program.
+    pub(crate) fn new(aliases: &'a HashMap<String, Type>) -> Self {
+        Self {
+            aliases: Some(aliases),
+            assumed: Vec::new(),
+        }
+    }
+
+    /// The shape of an alias, when it is one that may be opened.
+    fn shape(&self, ty: &Type) -> Option<&'a Type> {
+        let Type::Recursion(name) = ty else {
+            return None;
+        };
+        self.aliases?.get(name)
+    }
+}
+
 pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
+    assignable_in(source, target, &mut Opening::default())
+}
+
+/// Whether a value of one type fits another, opening the aliases that the
+/// check meets on its way.
+pub(crate) fn assignable_with(source: &Type, target: &Type, opening: &mut Opening) -> bool {
+    assignable_in(source, target, opening)
+}
+
+fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
+    // A type that refers to itself is opened one step at a time, and the
+    // pair is remembered while it is being checked. A pair that comes again
+    // is the same question as before, so it is taken to fit.
+    if matches!(source, Type::Recursion(_)) || matches!(target, Type::Recursion(_)) {
+        let open_source = opening.shape(source);
+        let open_target = opening.shape(target);
+        // Without a shape the open part is taken to fit anything, as it has
+        // no written form.
+        if (matches!(source, Type::Recursion(_)) && open_source.is_none())
+            || (matches!(target, Type::Recursion(_)) && open_target.is_none())
+        {
+            return true;
+        }
+        let pair = (source.clone(), target.clone());
+        if opening.assumed.contains(&pair) {
+            return true;
+        }
+        opening.assumed.push(pair);
+        let result = assignable_in(
+            open_source.unwrap_or(source),
+            open_target.unwrap_or(target),
+            opening,
+        );
+        opening.assumed.pop();
+        return result;
+    }
+
     // The open part of a recursive alias is checked loosely, because it
     // cannot be written out.
     if matches!(source, Type::Any | Type::Recursion(_))
@@ -82,50 +152,79 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
 
     if let Type::Union(sources) = source {
         if let Type::Union(targets) = target {
-            return sources
-                .iter()
-                .all(|item| targets.iter().any(|target| assignable(item, target)));
+            return sources.iter().all(|item| {
+                targets
+                    .iter()
+                    .any(|target| assignable_in(item, target, opening))
+            });
         }
-        return sources.iter().all(|item| assignable(item, target));
+        return sources
+            .iter()
+            .all(|item| assignable_in(item, target, opening));
     }
 
     if let Type::Union(targets) = target {
-        return targets.iter().any(|item| assignable(source, item));
+        return targets
+            .iter()
+            .any(|item| assignable_in(source, item, opening));
     }
 
     match (source, target) {
         // A type parameter is a name for a type that is not known yet, so it
         // takes anything and is taken by anything.
         (Type::Var(_), _) | (_, Type::Var(_)) => true,
-        (Type::Array(source), Type::Array(target)) => assignable(source, target),
+        (Type::Array(source), Type::Array(target)) => assignable_in(source, target, opening),
         (Type::Tuple(source), Type::Tuple(target)) => {
             source.len() == target.len()
                 && source
                     .iter()
                     .zip(target.iter())
-                    .all(|(source, target)| assignable(source, target))
+                    .all(|(source, target)| assignable_in(source, target, opening))
         }
         // A list of any length fits a tuple of the same shape.
         (Type::Array(source), Type::Tuple(target)) => {
-            target.iter().all(|item| assignable(source, item))
+            target
+                .iter()
+                .all(|item| assignable_in(source, item, opening))
         }
         (Type::Tuple(source), Type::Array(target)) => {
-            source.iter().all(|item| assignable(item, target))
+            source
+                .iter()
+                .all(|item| assignable_in(item, target, opening))
         }
         (Type::Dict(source_key, source_value), Type::Dict(target_key, target_value)) => {
-            assignable(source_key, target_key) && assignable(source_value, target_value)
+            assignable_in(source_key, target_key, opening)
+                && assignable_in(source_value, target_value, opening)
         }
-        (Type::Object(source), Type::Object(target)) => object_assignable_exact(source, target),
-        (Type::Named(_, source), Type::Object(target)) => object_assignable(source, target),
-        (Type::Object(source), Type::Named(_, target)) => object_assignable_exact(source, target),
-        (Type::Named(_, source), Type::Named(_, target)) => object_assignable(source, target),
+        (Type::Object(source), Type::Object(target)) => {
+            object_assignable_exact_in(source, target, opening)
+        }
+        (Type::Named(_, source), Type::Object(target)) => {
+            object_assignable_in(source, target, opening)
+        }
+        (Type::Object(source), Type::Named(_, target)) => {
+            object_assignable_exact_in(source, target, opening)
+        }
+        (Type::Named(_, source), Type::Named(_, target)) => {
+            object_assignable_in(source, target, opening)
+        }
         // An interface is a promise, not a shape: a value may have more
         // than it asks for.
-        (Type::Interface(_, source), Type::Object(target)) => object_assignable(source, target),
-        (Type::Object(source), Type::Interface(_, target)) => object_assignable(source, target),
-        (Type::Named(_, source), Type::Interface(_, target)) => object_assignable(source, target),
-        (Type::Interface(_, source), Type::Named(_, target)) => object_assignable(source, target),
-        (Type::Interface(_, source), Type::Interface(_, target)) => object_assignable(source, target),
+        (Type::Interface(_, source), Type::Object(target)) => {
+            object_assignable_in(source, target, opening)
+        }
+        (Type::Object(source), Type::Interface(_, target)) => {
+            object_assignable_in(source, target, opening)
+        }
+        (Type::Named(_, source), Type::Interface(_, target)) => {
+            object_assignable_in(source, target, opening)
+        }
+        (Type::Interface(_, source), Type::Named(_, target)) => {
+            object_assignable_in(source, target, opening)
+        }
+        (Type::Interface(_, source), Type::Interface(_, target)) => {
+            object_assignable_in(source, target, opening)
+        }
         // A value of an unknown shape may be anything that is an object.
         // A list, a dictionary, an enum, a promise and a function are
         // objects as well: they are not a number, a text, a bool or nothing.
@@ -141,10 +240,13 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
         (Type::Function(_), Type::AnyObject) => true,
         (Type::Promise(_), Type::AnyObject) => true,
         (Type::Result(_, _), Type::AnyObject) => true,
-        (Type::Function(source), Type::Function(target)) => function_assignable(source, target),
-        (Type::Promise(source), Type::Promise(target)) => assignable(source, target),
+        (Type::Function(source), Type::Function(target)) => {
+            function_assignable_in(source, target, opening)
+        }
+        (Type::Promise(source), Type::Promise(target)) => assignable_in(source, target, opening),
         (Type::Result(source_ok, source_err), Type::Result(target_ok, target_err)) => {
-            assignable(source_ok, target_ok) && assignable(source_err, target_err)
+            assignable_in(source_ok, target_ok, opening)
+                && assignable_in(source_err, target_err, opening)
         }
         (Type::Enum(e1, v1), Type::Enum(e2, v2)) => e1 == e2 && v1 == v2,
         (Type::Enum(e, _), Type::EnumUnion(e2)) => e == e2,
@@ -154,7 +256,11 @@ pub(crate) fn assignable(source: &Type, target: &Type) -> bool {
     }
 }
 
-pub(crate) fn object_assignable(source: &[ObjectField], target: &[ObjectField]) -> bool {
+fn object_assignable_in(
+    source: &[ObjectField],
+    target: &[ObjectField],
+    opening: &mut Opening,
+) -> bool {
     for target_field in target {
         match source
             .iter()
@@ -164,7 +270,7 @@ pub(crate) fn object_assignable(source: &[ObjectField], target: &[ObjectField]) 
                 if source_field.optional && !target_field.optional {
                     return false;
                 }
-                if !assignable(&source_field.ty, &target_field.ty) {
+                if !assignable_in(&source_field.ty, &target_field.ty, opening) {
                     return false;
                 }
             }
@@ -179,8 +285,12 @@ pub(crate) fn object_assignable(source: &[ObjectField], target: &[ObjectField]) 
 ///
 /// A field that the target does not have is a mistake, because the value
 /// would be read as something it is not.
-pub(crate) fn object_assignable_exact(source: &[ObjectField], target: &[ObjectField]) -> bool {
-    if !object_assignable(source, target) {
+fn object_assignable_exact_in(
+    source: &[ObjectField],
+    target: &[ObjectField],
+    opening: &mut Opening,
+) -> bool {
+    if !object_assignable_in(source, target, opening) {
         return false;
     }
     for source_field in source {
@@ -194,11 +304,15 @@ pub(crate) fn object_assignable_exact(source: &[ObjectField], target: &[ObjectFi
     true
 }
 
-pub(crate) fn function_assignable(source: &FunctionType, target: &FunctionType) -> bool {
+fn function_assignable_in(
+    source: &FunctionType,
+    target: &FunctionType,
+    opening: &mut Opening,
+) -> bool {
     if function_has_vars(source) {
         if let Some(instantiated) = instantiate_function(source, target) {
             if !function_has_vars(&instantiated) {
-                return function_assignable(&instantiated, target);
+                return function_assignable_in(&instantiated, target, opening);
             }
         }
         return false;
@@ -221,11 +335,11 @@ pub(crate) fn function_assignable(source: &FunctionType, target: &FunctionType) 
     // JavaScript ignores the extra ones, so the source stays usable.
 
     for (source_param, target_param) in source.params.iter().zip(target.params.iter()) {
-        if !assignable(target_param, source_param) {
+        if !assignable_in(target_param, source_param, opening) {
             return false;
         }
     }
-    assignable(&source.ret, &target.ret)
+    assignable_in(&source.ret, &target.ret, opening)
 }
 
 pub(crate) fn function_has_vars(function: &FunctionType) -> bool {

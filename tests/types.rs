@@ -183,6 +183,55 @@ fn show(user: User) {
 }
 
 #[test]
+fn a_wrong_value_inside_a_recursive_type_is_found() {
+    let error = check_err(
+        "recursive-wrong",
+        r#"
+type Tree = { value: number, children: [Tree] }
+let bad: Tree = { value: 1, children: [{ value: "no", children: [] }] }
+"#,
+    );
+    assert!(error.contains("expected Tree"), "{error}");
+
+    // The value is wrong deep inside, and the type is opened as far as the
+    // check goes.
+    let error = check_err(
+        "recursive-wrong-deep",
+        r#"
+type Tree = { value: number, children: [Tree] }
+let bad: Tree = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [{ value: 4, children: [{ value: 5, children: [{ value: 6, children: [{ value: "no", children: [] }] }] }] }] }] }] }
+"#,
+    );
+    assert!(error.contains("expected Tree"), "{error}");
+}
+
+#[test]
+fn a_recursive_type_is_opened_where_the_check_needs_it() {
+    // A type with eight fields that refer to itself used to be opened six
+    // times over, which took seconds. It is now opened where the check
+    // reaches it.
+    let start = std::time::Instant::now();
+    check_ok(
+        "recursive-wide",
+        r#"
+type Wide = { a: Wide | null, b: Wide | null, c: Wide | null, d: Wide | null, e: Wide | null, f: Wide | null, g: Wide | null, h: Wide | null }
+fn take(w: Wide) -> number { return 0 }
+fn make() -> Wide {
+  let w: Wide = { a: null, b: null, c: null, d: null, e: null, f: null, g: null, h: null }
+  return w
+}
+print(take(make()))
+"#,
+    );
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 2,
+        "the check of a recursive type took {:?}",
+        elapsed
+    );
+}
+
+#[test]
 fn a_function_may_not_fall_off_the_end() {
     let error = check_err(
         "fall-off-end",

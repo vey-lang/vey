@@ -898,9 +898,15 @@ gap that is closed.
       (`src/types/rules.rs`)
 - [x] **A parameter that comes after a parameter with a value is taken as
       optional.** (`src/types/checker.rs`)
-- [ ] **The opening of a recursive type grows with the number of its
-      fields,** so a type with six of them is opened six times over.
-      (`src/types/checker.rs`)
+- [x] **The opening of a recursive type grows with the number of its
+      fields,** so a type with six of them is opened six times over. The
+      type is now opened where the check reaches it, and a pair of types
+      that the check is already inside of is taken to fit, so a type that
+      refers to itself does not open for ever. A type with eight fields
+      that refer to themselves is checked in thousandth of the time, and a
+      wrong value that is deep inside a recursive type is now found, which
+      the six steps of the opening had let pass.
+      (`src/types/checker.rs`, `src/types/rules.rs`)
 - [x] **The name of an import wins over a local name of its own.**
       (`src/types/exprs.rs`)
 - [x] **A narrowing inside a closure changes the type of the variable of
