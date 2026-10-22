@@ -8,8 +8,8 @@ use crate::VeyError;
 impl Parser {
     pub(crate) fn parse_pattern(&mut self) -> Result<Pattern, VeyError> {
         if self.tok.kind == TokKind::Ident && self.tok.value == "_" {
-            self.advance()?;
-            return Ok(Pattern::Wildcard);
+            let pos = self.advance()?.pos;
+            return Ok(Pattern::Wildcard { pos });
         }
 
         if self.tok.kind == TokKind::Ident {

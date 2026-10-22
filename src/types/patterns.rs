@@ -136,7 +136,7 @@ impl TypeChecker<'_> {
                 self.infer_expr(start)?;
                 self.infer_expr(end)?;
             }
-            Pattern::Wildcard => {}
+            Pattern::Wildcard { .. } => {}
             Pattern::Binding { .. } => {}
             Pattern::Enum { .. } => {}
             Pattern::List(items, _) => {

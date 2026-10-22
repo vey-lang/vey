@@ -658,12 +658,6 @@ impl Parser {
         }
 
         let pos = self.advance()?.pos;
-        if self.is_punct(")") {
-            self.advance()?;
-            self.expect_op("=>")?;
-            let body = self.parse_arrow_body()?;
-            return Ok(Expr::Arrow(Vec::new(), Vec::new(), body, None, pos));
-        }
 
         let mut exprs = vec![self.parse_expression()?];
         while self.is_punct(",") {

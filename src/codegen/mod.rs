@@ -476,18 +476,38 @@ impl Codegen {
                 if let Some((start, end)) = range {
                     let start = self.gen_expr(start)?;
                     let end = self.gen_expr(end)?;
-                    let step = self.gen_expr(decl.step.as_ref().expect("the step"))?;
+                    let step_expr = decl.step.as_ref().expect("the step");
+                    let step = self.gen_expr(step_expr)?;
+                    // A loop that counts down is written the other way round.
+                    let down = is_negative(step_expr);
+                    let test = if down { ">=" } else { "<" };
+                    // The counter is a name of its own, so that a pattern
+                    // may take it apart.
+                    let counter = format!("__veyI{}", self.temp);
+                    self.temp += 1;
                     self.emit(&format!(
-                        "{}for (let {} = {}; {} < {}; {} += {}) {{",
-                        label, pattern, start, pattern, end, pattern, step
+                        "{}for (let {} = {}; {} {} {}; {} += {}) {{",
+                        label, counter, start, counter, test, end, counter, step
                     ));
-                } else {
-                    let iter = self.gen_expr(&decl.iter)?;
-                    self.emit(&format!(
-                        "{}for (let {} of V.iterate({})) {{",
-                        label, pattern, iter
-                    ));
+                    self.indent += 1;
+                    self.push_scope();
+                    for (name, _) in decl.pattern.bindings() {
+                        self.declare(name);
+                    }
+                    self.emit(&format!("const {} = {};", pattern, counter));
+                    // The body of the loop has a block of its own, so that the
+                    // pieces of code that run when it is left belong to it.
+                    self.gen_block(&decl.body)?;
+                    self.pop_scope();
+                    self.indent -= 1;
+                    self.emit("}");
+                    return Ok(());
                 }
+                let iter = self.gen_expr(&decl.iter)?;
+                self.emit(&format!(
+                    "{}for (let {} of V.iterate({})) {{",
+                    label, pattern, iter
+                ));
                 self.indent += 1;
                 self.push_scope();
                 for (name, _) in decl.pattern.bindings() {
@@ -890,5 +910,20 @@ impl Codegen {
             }
         }
         Ok(parts.join(", "))
+    }
+}
+
+/// Whether a number is below zero.
+///
+/// A loop that counts down is written the other way round.
+fn is_negative(expr: &Expr) -> bool {
+    match expr {
+        Expr::Number(value, _) => *value < 0.0,
+        // The minus is in front of the number, so the number is above zero.
+        Expr::Unary(op, inner, _) if op == "-" => match &**inner {
+            Expr::Number(value, _) => *value > 0.0,
+            _ => false,
+        },
+        _ => false,
     }
 }

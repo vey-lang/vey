@@ -70,7 +70,7 @@ impl Codegen {
                 let mut value_names = Vec::new();
                 for pattern in &arm.patterns {
                     match pattern {
-                        Pattern::Wildcard => {}
+                        Pattern::Wildcard { .. } => {}
                         Pattern::Binding { name, .. } => value_names.push(name.clone()),
                         other => {
                             let (condition, _) = codegen.gen_pattern(other, &temp)?;

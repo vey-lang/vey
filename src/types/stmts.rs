@@ -572,7 +572,7 @@ impl TypeChecker<'_> {
             }
             Pattern::Literal(_)
             | Pattern::Range(_, _)
-            | Pattern::Wildcard
+            | Pattern::Wildcard { .. }
             | Pattern::Prefix(_, _) => {}
         }
     }

@@ -124,11 +124,11 @@ pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
 pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Defer(_) => true,
-        Stmt::Throw(decl) => expr_has_defer(&decl.value),
-        Stmt::Var(decl) => decl.init.as_ref().map(expr_has_defer).unwrap_or(false),
+        Stmt::Throw(decl) => false,
+        Stmt::Var(decl) => decl.init.as_ref().map(|_| false).unwrap_or(false),
         Stmt::Fn(_) | Stmt::Component(_) => false,
         Stmt::If(decl) => {
-            expr_has_defer(&decl.test)
+            false
                 || block_has_defer(&decl.then_block)
                 || decl
                     .else_branch
@@ -137,7 +137,7 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
                     .unwrap_or(false)
         }
         Stmt::IfLet(decl) => {
-            expr_has_defer(&decl.value)
+            false
                 || block_has_defer(&decl.then_block)
                 || decl
                     .else_branch
@@ -145,12 +145,12 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
                     .map(|s| stmt_has_defer(s))
                     .unwrap_or(false)
         }
-        Stmt::While(decl) => expr_has_defer(&decl.test) || block_has_defer(&decl.body),
-        Stmt::WhileLet(decl) => expr_has_defer(&decl.value) || block_has_defer(&decl.body),
-        Stmt::LetElse(decl) => expr_has_defer(&decl.value) || block_has_defer(&decl.otherwise),
-        Stmt::For(decl) => expr_has_defer(&decl.iter) || block_has_defer(&decl.body),
-        Stmt::Repeat(decl) => expr_has_defer(&decl.count) || block_has_defer(&decl.body),
-        Stmt::Return(decl) => decl.value.as_ref().map(expr_has_defer).unwrap_or(false),
+        Stmt::While(decl) => false || block_has_defer(&decl.body),
+        Stmt::WhileLet(decl) => false || block_has_defer(&decl.body),
+        Stmt::LetElse(decl) => false || block_has_defer(&decl.otherwise),
+        Stmt::For(decl) => false || block_has_defer(&decl.body),
+        Stmt::Repeat(decl) => false || block_has_defer(&decl.body),
+        Stmt::Return(decl) => decl.value.as_ref().map(|_| false).unwrap_or(false),
         Stmt::Break(_, _)
         | Stmt::Continue(_, _)
         | Stmt::Use(_)
@@ -164,8 +164,8 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
                 || decl.catch.as_ref().is_some_and(block_has_defer)
                 || decl.finally.as_ref().is_some_and(block_has_defer)
         }
-        Stmt::Expr(decl) => expr_has_defer(&decl.expr),
-        Stmt::Assign(decl) => expr_has_defer(&decl.target) || expr_has_defer(&decl.value),
+        Stmt::Expr(decl) => false,
+        Stmt::Assign(decl) => false,
         Stmt::Block(block, _) => block_has_defer(block),
     }
 }
@@ -227,11 +227,6 @@ pub(crate) fn expr_has_await(expr: &Expr) -> bool {
 /// Whether an expression yields a value.
 pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
     walk(expr, &|expr| matches!(expr, Expr::Yield(_, _)))
-}
-
-/// Whether an expression defers a piece of code.
-pub(crate) fn expr_has_defer(expr: &Expr) -> bool {
-    walk(expr, &|_| false)
 }
 
 /// Whether an expression hands a failure on.

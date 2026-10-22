@@ -164,7 +164,7 @@ impl Codegen {
                 "true".to_string(),
                 vec![(name.clone(), subject.to_string())],
             )),
-            Pattern::Wildcard => Ok(("true".to_string(), Vec::new())),
+            Pattern::Wildcard { .. } => Ok(("true".to_string(), Vec::new())),
             Pattern::Literal(expr) => {
                 let value = self.gen_expr(expr)?;
                 Ok((format!("{} === {}", subject, value), Vec::new()))
@@ -220,7 +220,7 @@ impl Codegen {
                         Pattern::Binding { name, .. } => {
                             taken.push((name.clone(), format!("{}[{}]", subject, index)));
                         }
-                        Pattern::Wildcard => {}
+                        Pattern::Wildcard { .. } => {}
                         Pattern::Literal(expr) => {
                             let value = self.gen_expr(expr)?;
                             conditions.push(format!("{}[{}] === {}", subject, index, value));
@@ -243,7 +243,7 @@ impl Codegen {
                     let value = format!("{}[{}]", subject, js_string(key));
                     match pattern {
                         Pattern::Binding { name, .. } => taken.push((name.clone(), value)),
-                        Pattern::Wildcard => {}
+                        Pattern::Wildcard { .. } => {}
                         Pattern::Literal(expr) => {
                             let text = self.gen_expr(expr)?;
                             conditions.push(format!("{} === {}", value, text));
@@ -419,7 +419,7 @@ impl Codegen {
                     && arm
                         .patterns
                         .iter()
-                        .any(|pattern| matches!(pattern, Pattern::Wildcard))
+                        .any(|pattern| matches!(pattern, Pattern::Wildcard { .. }))
                 {
                     codegen.emit(&format!("return {};", body));
                     has_default = true;
@@ -437,7 +437,7 @@ impl Codegen {
                 for pattern in &arm.patterns {
                     match pattern {
                         // A name always holds, it only takes the value.
-                        Pattern::Wildcard => {}
+                        Pattern::Wildcard { .. } => {}
                         Pattern::Binding { name, .. } => value_names.push(name.clone()),
                         other => {
                             let (condition, taken) = codegen.gen_pattern(other, &temp)?;

@@ -353,7 +353,7 @@ impl TypeChecker<'_> {
                                     covered.insert(format!("{}.{}", enum_name, variant));
                                 }
                             }
-                            Pattern::Wildcard => {
+                            Pattern::Wildcard { .. } => {
                                 if arm.guard.is_none() {
                                     has_wildcard = true;
                                 }

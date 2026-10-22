@@ -212,8 +212,9 @@ impl Checker<'_> {
             }
         }
         // The names of the top level are known before the body is checked, so
-        // that a function may be used before it is declared. A value is not
-        // hoisted, so where it is declared matters.
+        // that a function may be used inside another one. A value is not
+        // hoisted, so where it is declared matters: a name of the top level
+        // may not be used before it is written.
         for (index, stmt) in program.body.iter().enumerate() {
             match stmt {
                 Stmt::Use(decl) => {
@@ -748,7 +749,7 @@ impl Checker<'_> {
                 self.check_expr(start)?;
                 self.check_expr(end)?;
             }
-            Pattern::Wildcard => {}
+            Pattern::Wildcard { .. } => {}
             Pattern::Binding { .. } => {}
             Pattern::Enum { .. } => {}
             Pattern::List(items, _) => {

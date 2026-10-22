@@ -783,7 +783,7 @@ gap that is closed.
       counted as an argument. (`src/types/exprs.rs`, `src/codegen/exprs.rs`)
 - [ ] **A `match` on an enum of another module binds the wrong field,** so
       the value of the field is `undefined`. (`src/codegen/exprs.rs`)
-- [ ] **A `for ... by` with a destructuring pattern writes JavaScript that
+- [x] **A `for ... by` with a destructuring pattern writes JavaScript that
       cannot be parsed,** and a negative step never ends.
       (`src/codegen/mod.rs`)
 - [ ] **A broken interpolation becomes literal text** instead of an error.
@@ -797,21 +797,21 @@ gap that is closed.
       uses exist.** (`src/codegen/markup.rs`)
 - [ ] **A `defer` at the top level of a file is taken,** although the error
       that says it is not allowed can never fire. (`src/codegen/mod.rs`)
-- [ ] **The wildcard pattern has no place,** so an error in it is reported
+- [x] **The wildcard pattern has no place,** so an error in it is reported
       at the top of the file. (`src/ast/expr.rs`, `src/parser/patterns.rs`)
 - [ ] **Two copies of "does this piece of code yield?" disagree,** so a
       function that yields inside a `throw` is typed as a generator and
       written as an ordinary one. (`src/codegen/awaits.rs`,
       `src/types/helpers.rs`)
-- [ ] **The helper that looks for a `defer` inside an expression always
+- [x] **The helper that looks for a `defer` inside an expression always
       says no,** so the next person who writes one gets nothing.
       (`src/codegen/awaits.rs`)
 - [ ] **The checker says a type of another module may be implemented, but
       only the types of the program itself are known.** (`src/types/checker.rs`)
-- [ ] **The comment about the order of the names is old:** the names of the
+- [x] **The comment about the order of the names is old:** the names of the
       functions are now checked like the names of the values.
       (`src/check/mod.rs`)
-- [ ] **The branch that reads `() => ...` can never be reached.**
+- [x] **The branch that reads `() => ...` can never be reached.**
       (`src/parser/exprs.rs`)
 - [x] **A `?` at the top level of a module ends the program without a
       word.** (`src/codegen/mod.rs`)

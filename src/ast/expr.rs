@@ -22,7 +22,9 @@ pub struct MatchArm {
 pub enum Pattern {
     Literal(Expr),
     Range(Expr, Expr),
-    Wildcard,
+    Wildcard {
+        pos: Pos,
+    },
     /// A name that takes the value of the match.
     Binding {
         name: String,
@@ -48,7 +50,7 @@ impl Pattern {
         match self {
             Self::Literal(expr) => expr.pos(),
             Self::Range(start, _) => start.pos(),
-            Self::Wildcard => Pos::new(0, 0),
+            Self::Wildcard { pos } => *pos,
             Self::Binding { pos, .. } => *pos,
             Self::Enum { pos, .. } => *pos,
             Self::List(_, pos) => *pos,
