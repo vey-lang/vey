@@ -780,7 +780,11 @@ impl TypeChecker<'_> {
             .map(|param| param.name().unwrap_or("").to_string())
             .collect();
         let rest = params.last().map(|param| param.rest).unwrap_or(false);
-        let checked = ret_annotated || params.iter().any(|param| param.ty.is_some());
+        // A function whose parameters were guessed is checked like one that
+        // writes its types, so that the same code is checked in both forms.
+        let checked = ret_annotated
+            || params.iter().any(|param| param.ty.is_some())
+            || inferred.iter().any(|ty| !matches!(ty, Type::Any));
         let mut constraints = Vec::new();
         for param in type_params {
             if let Some(expr) = &param.constraint {

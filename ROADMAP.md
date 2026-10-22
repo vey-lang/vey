@@ -866,7 +866,7 @@ gap that is closed.
 - [ ] **A function written as an expression ignores the types that were
       guessed,** so the same code is checked in one form and not in the
       other. (`src/types/checker.rs`, `src/types/stmts.rs`)
-- [ ] **A type argument that is given by hand is dropped when the type
+- [x] **A type argument that is given by hand is dropped when the type
       parameter is not used,** so the constraint of the parameter is never
       checked. (`src/types/exprs.rs`)
 - [x] **The substitutions throw away the names of the parameters,** so a
@@ -879,7 +879,7 @@ gap that is closed.
       (`src/types/checker.rs`, `src/types/resolve.rs`)
 - [x] **The methods of an `impl` block are not known to the other
       modules.** (`src/types/checker.rs`, `src/types/exprs.rs`)
-- [ ] **The types that are guessed for a parameter are put together
+- [x] **The types that are guessed for a parameter are put together
       instead of being held to,** so a parameter that is used in two ways
       takes the union of the two. (`src/types/stmts.rs`)
 - [x] **`??` does not take `undefined` out of the type.**
@@ -990,7 +990,7 @@ gap that is closed.
       that have to be written together, and it has already drifted.
       (`src/builtins.rs`, `src/types/builtins.rs`, `README.md`,
       `src/cli/lsp.rs`)
-- [ ] **`bind()` and `mount()` are two ways to put a page on the screen,**
+- [x] **`bind()` and `mount()` are two ways to put a page on the screen,**
       and only one of them is known to the router. (`src/runtime/dom.js`,
       `src/runtime/mount.js`, `src/runtime/router.js`)
 - [x] **`http.get` refuses with a plain error** where `fetch` refuses with

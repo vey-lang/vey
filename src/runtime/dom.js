@@ -175,12 +175,18 @@ function veyDom(ctx) {
     };
   }
 
+  // `bind` is the short way to put a page on the screen. It goes through
+  // `mount`, so that the routes of the browser and the changes of a signal
+  // know the page as well.
   function bind(target, node) {
     if (!doc) {
       throw veyError(
         "bind() is only available in the browser. Open the page with `vey dev` " +
           "or build it with `vey web`."
       );
+    }
+    if (typeof ctx.mount === "function") {
+      return ctx.mount(target, node).element;
     }
     var el = typeof target === "string" ? doc.querySelector(target) : target;
     if (!el) throw new Error("element not found: " + target);

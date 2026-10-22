@@ -658,11 +658,9 @@ impl TypeChecker<'_> {
         match scope.get_mut(name) {
             Some(current) => {
                 // The type that is there is the one of the first use, and
-                // the later ones have to fit it.
+                // the later uses have to fit it, so they do not widen it.
                 if matches!(current, Type::Any) {
                     *current = wanted;
-                } else {
-                    *current = union(vec![current.clone(), wanted]);
                 }
             }
             None => {
