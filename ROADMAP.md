@@ -869,10 +869,10 @@ gap that is closed.
 - [ ] **A type argument that is given by hand is dropped when the type
       parameter is not used,** so the constraint of the parameter is never
       checked. (`src/types/exprs.rs`)
-- [ ] **The substitutions throw away the names of the parameters,** so a
+- [x] **The substitutions throw away the names of the parameters,** so a
       generic function cannot take its arguments by name.
       (`src/types/rules.rs`)
-- [ ] **An interface is missing from the substitution, the unification and
+- [x] **An interface is missing from the substitution, the unification and
       the erasure.** (`src/types/rules.rs`)
 - [x] **The type parameters of an interface are parsed and then thrown
       away,** so an interface with a type parameter does not work.

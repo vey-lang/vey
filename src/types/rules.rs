@@ -311,6 +311,17 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
                 })
                 .collect(),
         ),
+        Type::Interface(name, fields) => Type::Interface(
+            name.clone(),
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: erase_type_vars(&field.ty),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
         Type::Function(function) => Type::Function(FunctionType {
             params: function.params.iter().map(erase_type_vars).collect(),
             required: function.required,
@@ -323,7 +334,7 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
                 .map(|(name, constraint)| (name.clone(), erase_type_vars(constraint)))
                 .collect(),
             type_params: function.type_params.clone(),
-            param_names: Vec::new(),
+            param_names: function.param_names.clone(),
         }),
         Type::Union(items) => union(items.iter().map(erase_type_vars).collect()),
         other => other.clone(),
@@ -374,6 +385,17 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 })
                 .collect(),
         ),
+        Type::Interface(name, fields) => Type::Interface(
+            name.clone(),
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: substitute_bound(&field.ty, subst),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
         Type::Function(function) => Type::Function(FunctionType {
             params: function
                 .params
@@ -390,7 +412,7 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 .map(|(name, constraint)| (name.clone(), substitute_bound(constraint, subst)))
                 .collect(),
             type_params: function.type_params.clone(),
-            param_names: Vec::new(),
+            param_names: function.param_names.clone(),
         }),
         Type::Union(items) => union(
             items
@@ -608,7 +630,12 @@ pub(crate) fn unify_types(
         (Type::Object(actual), Type::Object(expected))
         | (Type::Named(_, actual), Type::Object(expected))
         | (Type::Object(actual), Type::Named(_, expected))
-        | (Type::Named(_, actual), Type::Named(_, expected)) => {
+        | (Type::Named(_, actual), Type::Named(_, expected))
+        | (Type::Interface(_, actual), Type::Object(expected))
+        | (Type::Object(actual), Type::Interface(_, expected))
+        | (Type::Named(_, actual), Type::Interface(_, expected))
+        | (Type::Interface(_, actual), Type::Named(_, expected))
+        | (Type::Interface(_, actual), Type::Interface(_, expected)) => {
             for expected_field in expected {
                 match actual
                     .iter()
@@ -707,6 +734,17 @@ pub(crate) fn substitute_with(
                 })
                 .collect(),
         ),
+        Type::Interface(name, fields) => Type::Interface(
+            name.clone(),
+            fields
+                .iter()
+                .map(|field| ObjectField {
+                    name: field.name.clone(),
+                    ty: substitute_with(&field.ty, subst, seen),
+                    optional: field.optional,
+                })
+                .collect(),
+        ),
         Type::Function(function) => Type::Function(FunctionType {
             params: function
                 .params
@@ -723,7 +761,7 @@ pub(crate) fn substitute_with(
                 .map(|(name, constraint)| (name.clone(), substitute_with(constraint, subst, seen)))
                 .collect(),
             type_params: function.type_params.clone(),
-            param_names: Vec::new(),
+            param_names: function.param_names.clone(),
         }),
         Type::Union(items) => union(
             items
