@@ -1041,6 +1041,18 @@ route("/users/{id}", fn(params) {
 navigate("/users/7")
 ```
 
+The value of a field may be a signal. The field shows the value of the
+signal, and the signal takes the value of the field when the visitor
+writes in it.
+
+```vey
+let name = signal("Ada")
+
+component App() {
+  input value=name placeholder="your name" { }
+}
+```
+
 A node may say hello when it comes and goodbye when it goes. The work of
 `enter` is done after the node is in the page, and the work of `leave` is
 done before the node is taken away. When the work of `leave` gives a

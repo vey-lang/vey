@@ -42,6 +42,34 @@ function veyDom(ctx) {
     return { __vey: true, tag: tag, props: attrs, children: kids };
   }
 
+  // Whether a value is a signal, so that it may be tied to a field.
+  function isSignal(value) {
+    return !!value
+      && typeof value === "object"
+      && typeof value.subscribe === "function"
+      && typeof value.set === "function";
+  }
+
+  // Tie the value of a field to a signal.
+  //
+  // The field shows the value of the signal, and the signal takes the
+  // value of the field when it is written.
+  function bindValue(el, signal) {
+    if (!isSignal(signal)) return false;
+    var shown = signal.value === undefined || signal.value === null ? "" : String(signal.value);
+    if (el.value !== shown) el.value = shown;
+    signal.subscribe(function (value) {
+      var next = value === undefined || value === null ? "" : String(value);
+      if (el.value !== next) el.value = next;
+    });
+    function take() {
+      signal.set(el.value);
+    }
+    el.addEventListener("input", take);
+    el.addEventListener("change", take);
+    return true;
+  }
+
   // The classes of a node, as they are written in the attribute.
   //
   // A list of classes is joined with a space, as the class of an element
@@ -106,8 +134,15 @@ function veyDom(ctx) {
         }
         continue;
       }
-      if (key === "value" || key === "checked") {
-        el[key] = value;
+      if (key === "value") {
+        // The value of a field may follow a signal, and the signal may
+        // follow the field.
+        if (bindValue(el, value)) continue;
+        el.value = value;
+        continue;
+      }
+      if (key === "checked") {
+        el.checked = value;
         continue;
       }
       // The work that is done when a node comes and when it goes.
@@ -185,6 +220,11 @@ function veyDom(ctx) {
         var css = "";
         for (var name in styles) css += cssPropertyName(name) + ": " + styles[name] + "; ";
         attrs += " style=\"" + escapeHtml(css) + "\"";
+        continue;
+      }
+      if (key === "value" && isSignal(value)) {
+        var shown = value.value === undefined || value.value === null ? "" : String(value.value);
+        attrs += " value=\"" + escapeHtml(shown) + "\"";
         continue;
       }
       if (value === true) {

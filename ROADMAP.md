@@ -1241,9 +1241,11 @@ code that writes a page, and by writing pages that wanted more.
 
 ### 15.3 The forms
 
-- [ ] **The value of a field is not tied to the state.** The runtime copies
+- [x] **The value of a field is not tied to the state.** The runtime copies
       the value of the field into the page, but the state does not follow
-      what the visitor writes. (`src/runtime/mount.js`, `src/runtime/state.js`)
+      what the visitor writes. The value of a field may be a signal now:
+      the field shows the value of the signal, and the signal takes the
+      value of the field. (`src/runtime/dom.js`)
 - [ ] **There are no helpers for a form.** The values of the form, its
       validity and its sending are written by hand.
       (`src/runtime/`)

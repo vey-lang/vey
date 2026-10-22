@@ -54,6 +54,11 @@ bind("#app", App())
 
     let harness = dir.join("dom-test.cjs");
     fs::write(&harness, include_str!("fixtures/dom-test.cjs")).unwrap();
+    fs::write(
+        dir.join("dom-fake.cjs"),
+        include_str!("fixtures/dom-fake.cjs"),
+    )
+    .unwrap();
 
     let output = Command::new("node")
         .arg(&harness)
@@ -108,6 +113,11 @@ setTimeout(fn() {
 
     let harness = dir.join("dom-signal-test.cjs");
     fs::write(&harness, include_str!("fixtures/dom-signal-test.cjs")).unwrap();
+    fs::write(
+        dir.join("dom-fake.cjs"),
+        include_str!("fixtures/dom-fake.cjs"),
+    )
+    .unwrap();
 
     let output = Command::new("node")
         .arg(&harness)
@@ -167,6 +177,11 @@ setTimeout(fn() {
 
     let harness = dir.join("dom-leave-test.cjs");
     fs::write(&harness, include_str!("fixtures/dom-leave-test.cjs")).unwrap();
+    fs::write(
+        dir.join("dom-fake.cjs"),
+        include_str!("fixtures/dom-fake.cjs"),
+    )
+    .unwrap();
 
     let output = Command::new("node")
         .arg(&harness)
@@ -181,4 +196,57 @@ setTimeout(fn() {
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("DOM_LEAVE_TEST_OK"), "{text}");
     assert!(text.contains("GOODBYE"), "{text}");
+}
+
+#[test]
+fn the_value_of_a_field_and_the_state_are_one() {
+    let dir = temp_dir();
+    let app = dir.join("app.vey");
+    fs::write(
+        &app,
+        r##"
+let name = signal("Ada")
+
+component App() {
+  input value=name { }
+}
+
+mount("#app", App)
+"##,
+    )
+    .unwrap();
+
+    let bundle = dir.join("app.cjs");
+    let build = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("build")
+        .arg(&app)
+        .arg("-o")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let harness = dir.join("dom-field-test.cjs");
+    fs::write(&harness, include_str!("fixtures/dom-field-test.cjs")).unwrap();
+    fs::write(
+        dir.join("dom-fake.cjs"),
+        include_str!("fixtures/dom-fake.cjs"),
+    )
+    .unwrap();
+
+    let output = Command::new("node")
+        .arg(&harness)
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("DOM_FIELD_TEST_OK"));
 }
