@@ -56,7 +56,7 @@ impl TypeChecker<'_> {
             match stmt {
                 Stmt::Use(decl) => {
                     if !decl.path.ends_with(".css") {
-                        self.declare(&decl.alias, Type::Any);
+                        self.declare_alias(&decl.alias);
                     }
                 }
                 Stmt::Var(decl) => {
@@ -137,7 +137,12 @@ impl TypeChecker<'_> {
             }
         }
 
-        self.check_pattern_defaults(&decl.pattern)?;
+        // The value that a name has by default is checked against the type
+        // that is written.
+        match &annotation {
+            Some(expected) => self.check_pattern_defaults_against(&decl.pattern, expected)?,
+            None => self.check_pattern_defaults(&decl.pattern)?,
+        }
 
         if let Some(expected) = annotation {
             self.declare_pattern_typed(&decl.pattern, &expected);
@@ -350,6 +355,12 @@ impl TypeChecker<'_> {
                 Ok(())
             }
             Stmt::For(decl) => {
+                if let Some(step) = &decl.step {
+                    let step_ty = self.infer_expr(step)?;
+                    if !matches!(step_ty, Type::Any) && !assignable(&step_ty, &Type::Number) {
+                        return Err(self.type_error(step.pos(), &step_ty, &Type::Number));
+                    }
+                }
                 let iter_ty = self.infer_expr(&decl.iter)?;
                 // Only a list can be walked through.
                 self.check_iterable(&iter_ty, decl.pos)?;

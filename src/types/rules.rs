@@ -194,6 +194,11 @@ pub(crate) fn function_assignable(source: &FunctionType, target: &FunctionType) 
         if source.required > target.params.len() {
             return false;
         }
+        // The source has to be able to take the arguments that the target
+        // will pass.
+        if source.params.len() < target.required {
+            return false;
+        }
     }
     // A variadic target may pass more arguments than the source takes.
     // JavaScript ignores the extra ones, so the source stays usable.

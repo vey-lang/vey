@@ -161,22 +161,37 @@ impl TypeChecker<'_> {
         &mut self,
         pattern: &BindingPattern,
     ) -> Result<(), VeyError> {
+        self.check_pattern_defaults_against(pattern, &Type::Any)
+    }
+
+    /// The value that a name has by default is checked against the type of
+    /// the name.
+    pub(crate) fn check_pattern_defaults_against(
+        &mut self,
+        pattern: &BindingPattern,
+        ty: &Type,
+    ) -> Result<(), VeyError> {
         match pattern {
             BindingPattern::Name { default, .. } => {
                 if let Some(default) = default {
-                    self.infer_expr(default)?;
+                    let actual = self.infer_expr(default)?;
+                    if !matches!(actual, Type::Any) && !self.fits(&actual, ty) {
+                        return Err(self.type_error(default.pos(), &actual, ty));
+                    }
                 }
                 Ok(())
             }
             BindingPattern::Array { items, .. } => {
+                let element = element_type(ty);
                 for item in items {
-                    self.check_pattern_defaults(item)?;
+                    self.check_pattern_defaults_against(item, &element)?;
                 }
                 Ok(())
             }
             BindingPattern::Object { fields, .. } => {
                 for field in fields {
-                    self.check_pattern_defaults(&field.pattern)?;
+                    let field_ty = project_field(ty, &field.key);
+                    self.check_pattern_defaults_against(&field.pattern, &field_ty)?;
                 }
                 Ok(())
             }

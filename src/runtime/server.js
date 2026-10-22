@@ -701,7 +701,13 @@ function veyServer(ctx) {
           var address = serverInstance.address();
           var port = address && address.port ? address.port : actualPort;
           actualPort = port;
-          print("Vey server listening on http://localhost:" + port);
+          // The host the server listens on, so that the line that says it
+          // is listening names the right one.
+          if (address && address.address) serverHost = address.address;
+          print(
+            "Vey server listening on http://" +
+              (serverHost || "localhost") + ":" + port
+          );
           if (callback) callback();
         });
         return this;

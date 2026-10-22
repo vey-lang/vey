@@ -191,7 +191,9 @@ function veyDom(ctx) {
 
   // The title of the page, which the tab of the browser shows.
   function title(text) {
-    if (!doc) return;
+    if (!doc) {
+      throw veyError("title() is only available in the browser.");
+    }
     doc.title = String(text);
   }
 

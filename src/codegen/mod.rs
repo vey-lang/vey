@@ -105,6 +105,11 @@ impl Codegen {
         VeyError::new(message, self.file.clone(), 1, 1)
     }
 
+    /// An error that points at a place of the program.
+    fn err_at(&self, pos: Pos, message: impl Into<String>) -> VeyError {
+        VeyError::new(message, self.file.clone(), pos.line, pos.col)
+    }
+
     /// The mark that says where a piece of the code came from.
     fn mark(&self, pos: Pos) -> String {
         marker(self.source, pos)
@@ -431,9 +436,14 @@ impl Codegen {
                 self.indent -= 1;
                 self.emit("}");
                 self.push_scope();
+                let pattern = self.gen_binding_pattern(&decl.pattern)?;
+                self.emit(&format!(
+                    "const {} = __let{};",
+                    pattern,
+                    slot
+                ));
                 for (name, _) in decl.pattern.bindings() {
                     self.declare(name);
-                    self.emit(&format!("const _{} = __let{};", name, slot));
                 }
                 self.pop_scope();
             }

@@ -9,9 +9,13 @@ function veyNode(ctx) {
   var veyError = ctx.veyError;
 
   function env(name, fallback) {
+    if (!isNode) {
+      // The other helpers of Node say so, and so does this one.
+      throw veyError("env() is only available in Node.");
+    }
     // The module of Node is asked for the environment, not the ambient
     // `process`, which a bundler or a test runner may have replaced.
-    var value = isNode ? nodeModule("node:process").env[name] : undefined;
+    var value = nodeModule("node:process").env[name];
     if (value === undefined) {
       return fallback === undefined ? null : fallback;
     }

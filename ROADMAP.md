@@ -767,7 +767,7 @@ gap that is closed.
 - [x] **The constructor of an `impl` block was not exported,** so the users
       of a library could not make a value of its type. (`src/compiler/loader.rs`,
       `src/types/checker.rs`)
-- [ ] **A `let ... else` throws the destructuring away.** Every name of the
+- [x] **A `let ... else` throws the destructuring away.** Every name of the
       pattern is bound to the whole value. (`src/codegen/mod.rs`)
 - [x] **The names of a list or an object pattern of an `if let` or a
       `while let` are never declared,** so the program is refused with
@@ -882,24 +882,24 @@ gap that is closed.
 - [ ] **The types that are guessed for a parameter are put together
       instead of being held to,** so a parameter that is used in two ways
       takes the union of the two. (`src/types/stmts.rs`)
-- [ ] **`??` does not take `undefined` out of the type.**
+- [x] **`??` does not take `undefined` out of the type.**
       (`src/types/core.rs`)
-- [ ] **The condition of a ternary is not checked to be a bool.**
+- [x] **The condition of a ternary is not checked to be a bool.**
       (`src/types/exprs.rs`)
-- [ ] **`+` never fails:** a bool and a number are added without a word.
+- [x] **`+` never fails:** a bool and a number are added without a word.
       (`src/types/exprs.rs`)
-- [ ] **A function of no arguments satisfies a type of one argument.**
+- [x] **A function of no arguments satisfies a type of one argument.**
       (`src/types/rules.rs`)
 - [ ] **A parameter that comes after a parameter with a value is taken as
       optional.** (`src/types/checker.rs`)
 - [ ] **The opening of a recursive type grows with the number of its
       fields,** so a type with six of them is opened six times over.
       (`src/types/checker.rs`)
-- [ ] **The name of an import wins over a local name of its own.**
+- [x] **The name of an import wins over a local name of its own.**
       (`src/types/exprs.rs`)
 - [ ] **A narrowing inside a closure changes the type of the variable of
       the function around it.** (`src/types/checker.rs`)
-- [ ] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
+- [x] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
 - [ ] **A generator without a return type has the type `() -> [void]`.**
       (`src/types/stmts.rs`)
 - [ ] **`vey explain` gives the type `any` for a name inside a function,**
@@ -908,14 +908,14 @@ gap that is closed.
 - [ ] **`unknown` fits nothing but `any` and `object`,** so it cannot be
       used as the type of a value that is not known yet.
       (`src/types/rules.rs`)
-- [ ] **The type of the values of a dictionary is not used** for
+- [x] **The type of the values of a dictionary is not used** for
       `d["key"]`. (`src/types/exprs.rs`)
 - [ ] **The parts of a tuple are not taken apart by their place,** so every
       name of the tuple has the union of all of them.
       (`src/types/patterns.rs`)
-- [ ] **The value that a name of a `let` has by default is not checked**
+- [x] **The value that a name of a `let` has by default is not checked**
       against the type of the name. (`src/types/patterns.rs`)
-- [ ] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
+- [x] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
 - [ ] **The smaller gaps:** `undefined` is not a helper of the language,
       `symbol` and `bigint` have no members, the name of a `catch` is
       always `any`, a `while` does not narrow, a comparison of a member
@@ -945,27 +945,27 @@ gap that is closed.
       and no program can reach it. (`src/runtime/middleware.js`)
 - [ ] **Two helpers of the runtime cannot be called by a program,** and one
       of them has the name of a word of the language. (`src/runtime/core.js`)
-- [ ] **`env()` fails silently in the browser** and gives a wrong answer
+- [x] **`env()` fails silently in the browser** and gives a wrong answer
       without a word. (`src/runtime/node.js`)
-- [ ] **`title()` does nothing outside the browser,** without a word.
+- [x] **`title()` does nothing outside the browser,** without a word.
       (`src/runtime/dom.js`)
 - [ ] **The helpers that are only in Node name the module and not the
       helper,** so the reader sees "node:fs is only available in Node" for
       a call to `fs.read`. (`src/runtime/node.js`)
-- [ ] **`--force` does nothing in `vey build`,** although the help says it
+- [x] **`--force` does nothing in `vey build`,** although the help says it
       does. (`src/cli/build.rs`)
-- [ ] **A test file that is named and is not there is ignored,** and the
+- [x] **A test file that is named and is not there is ignored,** and the
       command says that there is no test and succeeds. (`src/cli/run.rs`)
 - [ ] **The folder of the tests is invisible** to `vey lint`, `vey fmt`,
       `vey docs`, `vey migrate` and `vey check`. (`src/cli/entry.rs`)
-- [ ] **The help of the command has no arm for `vey lsp`,** so it falls
+- [x] **The help of the command has no arm for `vey lsp`,** so it falls
       back to the general help. (`src/cli/output.rs`)
 - [ ] **`vey fmt` and `vey migrate` write several files one after the
       other,** without a name between them. (`src/cli/fmt.rs`,
       `src/cli/migrate.rs`)
 - [ ] **The report of an error swallows a file that cannot be read,** so
       the frame of the code is missing. (`src/cli/output.rs`)
-- [ ] **The general help does not name `--target` and `--write`.**
+- [x] **The general help does not name `--target` and `--write`.**
       (`src/cli/output.rs`)
 - [x] **The list of the tags of HTML is copied into the runtime and has
       drifted:** `title` is missing. (`src/runtime/highlight.js`,
@@ -976,7 +976,7 @@ gap that is closed.
       `src/lexer/mod.rs`)
 - [ ] **There are two highlighters of the same language,** and they colour
       it differently. (`src/cli/highlight.rs`, `src/runtime/highlight.js`)
-- [ ] **There are two escapers of HTML,** and the one of the tools does
+- [x] **There are two escapers of HTML,** and the one of the tools does
       not escape the apostrophe. (`src/runtime/shared.js`,
       `src/cli/output.rs`)
 - [ ] **There are two readers of cookies,** and they give different
@@ -996,7 +996,7 @@ gap that is closed.
 - [ ] **`http.get` refuses with a plain error** where `fetch` refuses with
       an error of the language, so the browser shows a stack.
       (`src/runtime/http.js`)
-- [ ] **The server always says that it listens on `localhost`,** even when
+- [x] **The server always says that it listens on `localhost`,** even when
       it listens on another host. (`src/runtime/server.js`)
 
 

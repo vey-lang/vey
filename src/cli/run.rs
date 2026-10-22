@@ -84,6 +84,9 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             .is_some_and(|extension| extension == "vey")
         {
             files.push(input);
+        } else {
+            eprintln!("cannot find {}", input.display());
+            return 1;
         }
     }
     files.sort();

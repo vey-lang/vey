@@ -130,6 +130,7 @@ pub(crate) fn escape_html(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 pub(crate) fn replace_extension(file: &str, extension: &str) -> String {
@@ -214,6 +215,8 @@ test options:
 
 other options:
   --template <name>               the shape of a new project: page, server or lib
+  --write                         write the files (fmt, migrate)
+  --target <dir>                  the folder the site is put in (deploy)
   -h, --help                      the help of the command
 
 example:
@@ -257,7 +260,6 @@ Build the site into .dist/, or a single file into a node script.
   -o, --out <dir>   the folder the site is written to (default: .dist)
   --title <text>    the title of the page
   --node            emit a node script instead of a site
-  --force           write the files even when they are there
   -h, --help        this message
 "#,
         "test" => r#"usage: vey test [file|dir] [--filter <text>] [--watch]
@@ -330,6 +332,15 @@ when --write is not given.
 
 Add a package of npm to the project, so that a program may use it with
 `use "npm:<package>"`.
+
+  -h, --help   this message
+"#,
+        "lsp" => r#"usage: vey lsp
+
+The language server of Vey. It speaks the protocol of the language servers
+over the standard input and the standard output, and it says what is wrong
+with the program, the type of the expression under the cursor and the names
+that may be written there.
 
   -h, --help   this message
 "#,

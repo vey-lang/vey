@@ -153,10 +153,11 @@ impl TypeChecker<'_> {
             Expr::Nullish(left, right, _) => {
                 let left = self.infer_expr(left)?;
                 let right = self.infer_expr(right)?;
-                Ok(union(vec![left.without_null(), right]))
+                Ok(union(vec![without_empty(&left), right]))
             }
-            Expr::Ternary(test, then_value, else_value, _) => {
-                self.infer_expr(test)?;
+            Expr::Ternary(test, then_value, else_value, pos) => {
+                let test_ty = self.infer_expr(test)?;
+                self.check_condition(&test_ty, *pos)?;
                 let then_ty = self.infer_expr(then_value)?;
                 let else_ty = self.infer_expr(else_value)?;
                 Ok(union(vec![then_ty, else_ty]))
@@ -446,6 +447,15 @@ impl TypeChecker<'_> {
                 // be there.
                 Ok(match ty {
                     Type::Promise(inner) => *inner,
+                    Type::Union(items) => union(
+                        items
+                            .iter()
+                            .map(|item| match item {
+                                Type::Promise(inner) => (**inner).clone(),
+                                other => other.clone(),
+                            })
+                            .collect(),
+                    ),
                     _ => Type::Any,
                 })
             }
@@ -911,10 +921,20 @@ impl TypeChecker<'_> {
                 }
                 if assignable(left, &Type::Number) && assignable(right, &Type::Number) {
                     Ok(Type::Number)
+                } else if assignable(left, &Type::String) && assignable(right, &Type::String) {
+                    Ok(Type::String)
                 } else if assignable(left, &Type::String) || assignable(right, &Type::String) {
+                    // A text and a number are put together as a text.
                     Ok(Type::String)
                 } else {
-                    Ok(Type::Any)
+                    Err(self.error(
+                        pos,
+                        format!(
+                            "operator '+' needs numbers or texts, found {} and {}",
+                            left.display(),
+                            right.display()
+                        ),
+                    ))
                 }
             }
             "-" | "*" | "/" | "%" | "**" => {
@@ -997,6 +1017,16 @@ impl TypeChecker<'_> {
         // A member of another module is looked up in the environment of that
         // module, so that its signature is checked.
         if let (MemberProp::Name(name), Expr::Ident(alias, _)) = (prop, object) {
+            // A local name of its own wins over the alias of a module.
+            if self.shadowed.contains(alias) {
+                let object_ty = self.infer_expr(object)?;
+                let ty = self.lookup_member(&object_ty, name, pos)?;
+                return Ok(if optional {
+                    union(vec![ty, Type::Null])
+                } else {
+                    ty
+                });
+            }
             if let Some(env) = self.imports.get(alias) {
                 if env.unchecked {
                     return Ok(Type::Any);
@@ -1103,6 +1133,8 @@ impl TypeChecker<'_> {
                     Type::Array(_) | Type::String => {
                         return Err(self.type_error(pos, &index_ty, &Type::Number));
                     }
+                    // Every key of a dictionary has the same type of value.
+                    Type::Dict(_, value) => (**value).clone(),
                     _ => Type::Any,
                 }
             }

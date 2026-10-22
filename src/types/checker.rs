@@ -79,6 +79,7 @@ pub fn check(
         param_scopes: Vec::new(),
         resolved: HashMap::new(),
         try_depth: 0,
+        shadowed: HashSet::new(),
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
     };
@@ -447,6 +448,8 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) resolved: ResolvedCalls,
     /// How many `try` blocks are around, so that a `?` may be caught.
     pub(crate) try_depth: usize,
+    /// The names of the modules that a name of the program hides.
+    pub(crate) shadowed: HashSet<String>,
     pub(crate) expected_returns: Vec<Option<Type>>,
     pub(crate) collected_returns: Vec<Vec<Type>>,
 }
@@ -480,6 +483,7 @@ impl TypeChecker<'_> {
             param_scopes: Vec::new(),
             resolved: HashMap::new(),
             try_depth: 0,
+            shadowed: HashSet::new(),
             expected_returns: Vec::new(),
             collected_returns: Vec::new(),
         };
@@ -551,6 +555,10 @@ impl TypeChecker<'_> {
     }
 
     pub(crate) fn declare(&mut self, name: &str, ty: Type) {
+        if self.imports.contains_key(name) {
+            // A name of the program hides the alias of a module.
+            self.shadowed.insert(name.to_string());
+        }
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), ty);
         }
@@ -565,6 +573,13 @@ impl TypeChecker<'_> {
             names.extend(scope.keys().map(|name| name.as_str()));
         }
         names
+    }
+
+    /// The alias of a module is a name of its own.
+    pub(crate) fn declare_alias(&mut self, name: &str) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), Type::Any);
+        }
     }
 
     /// Update the type of a binding in the current scope.
