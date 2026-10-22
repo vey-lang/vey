@@ -17,6 +17,7 @@ use super::helpers::{
     argument_label, literal_number, operand_type, qualified_type, set_object_field,
     type_argument_label,
 };
+use crate::suggest::did_you_mean;
 
 impl TypeChecker<'_> {
     pub(crate) fn infer_expr(&mut self, expr: &Expr) -> Result<Type, VeyError> {
@@ -836,10 +837,22 @@ impl TypeChecker<'_> {
                                     format!("'{}' is private to the module '{}'", name, alias),
                                 ));
                             } else {
-                                return Err(self.error(
+                                let mut error = self.error(
                                     pos,
                                     format!("module '{}' has no '{}'", alias, name),
-                                ));
+                                );
+                                let names: Vec<&str> = env
+                                    .values
+                                    .keys()
+                                    .chain(env.types.keys())
+                                    .chain(env.components.keys())
+                                    .chain(env.enums.keys())
+                                    .map(|name| name.as_str())
+                                    .collect();
+                                if let Some(hint) = did_you_mean(name, names) {
+                                    error = error.with_hint(hint);
+                                }
+                                return Err(error);
                             }
                         }
                     },
@@ -934,6 +947,29 @@ impl TypeChecker<'_> {
         }))
     }
 
+    /// The error for a variant that an enum does not have.
+    fn variant_error(
+        &self,
+        enum_name: &str,
+        name: &str,
+        info: &EnumInfo,
+        pos: Pos,
+    ) -> VeyError {
+        let mut error = self.error(
+            pos,
+            format!("enum '{}' has no variant '{}'", enum_name, name),
+        );
+        let names: Vec<&str> = info
+            .variants
+            .iter()
+            .map(|variant| variant.name.as_str())
+            .collect();
+        if let Some(hint) = did_you_mean(name, names) {
+            error = error.with_hint(hint);
+        }
+        error
+    }
+
     /// The type of a function of a type.
     pub(crate) fn method_type(&self, method: &ImplMethod) -> Result<Type, VeyError> {
         let mut params = Vec::new();
@@ -986,10 +1022,7 @@ impl TypeChecker<'_> {
                     .enum_info(enum_name)
                     .ok_or_else(|| self.error(pos, format!("unknown enum '{}'", enum_name)))?;
                 let variant = info.variants.iter().find(|v| v.name == name).ok_or_else(|| {
-                    self.error(
-                        pos,
-                        format!("enum '{}' has no variant '{}'", enum_name, name),
-                    )
+                    self.variant_error(enum_name, name, &info, pos)
                 })?;
                 self.variant_type(enum_name, variant)
             }
@@ -1000,10 +1033,7 @@ impl TypeChecker<'_> {
                     .enum_info(enum_name)
                     .ok_or_else(|| self.error(pos, format!("unknown enum '{}'", enum_name)))?;
                 let variant = info.variants.iter().find(|v| v.name == name).ok_or_else(|| {
-                    self.error(
-                        pos,
-                        format!("enum '{}' has no variant '{}'", enum_name, name),
-                    )
+                    self.variant_error(enum_name, name, &info, pos)
                 })?;
                 self.variant_type(enum_name, variant)
             }

@@ -261,9 +261,9 @@ impl Checker<'_> {
             }
             Stmt::LetElse(decl) => {
                 self.check_expr(&decl.value)?;
-                self.scopes.push();
+                // The name is bound in the scope around it, the way the name
+                // of a `let` is.
                 self.declare_pattern(&decl.pattern, BindingKind::Let)?;
-                self.pop_scope();
                 // The block has to leave the function, or the value is used
                 // even when it is not there.
                 if self.function_depth > 0 && !block_always_exits(&decl.otherwise) {
@@ -377,8 +377,25 @@ impl Checker<'_> {
 
     fn check_block(&mut self, block: &Block) -> Result<(), VeyError> {
         self.scopes.push();
+        // The code after a `return`, a `break` or a `continue` is never run.
+        let mut ended = false;
         for stmt in &block.body {
+            if ended {
+                self.warn(Warning::new(
+                    "the code after this is never run",
+                    self.file,
+                    stmt.pos().line,
+                    stmt.pos().col,
+                ));
+                ended = false;
+            }
             self.check_stmt(stmt)?;
+            if matches!(
+                stmt,
+                Stmt::Return(_) | Stmt::Break(_, _) | Stmt::Continue(_, _)
+            ) {
+                ended = true;
+            }
         }
         self.pop_scope();
         Ok(())
@@ -459,10 +476,33 @@ impl Checker<'_> {
                 }
                 MarkupNode::For(loop_node) => {
                     self.check_expr(&loop_node.iter)?;
+                    if let Some(key) = &loop_node.key {
+                        self.check_expr(key)?;
+                    }
                     self.scopes.push();
                     self.declare(&loop_node.name, BindingKind::Let, loop_node.iter.pos())?;
+                    if let Some(index) = &loop_node.index {
+                        self.declare(index, BindingKind::Let, loop_node.iter.pos())?;
+                    }
                     self.check_markup_nodes(&loop_node.body)?;
                     self.pop_scope();
+                }
+                MarkupNode::Match(m) => {
+                    self.check_expr(&m.subject)?;
+                    for arm in &m.arms {
+                        self.scopes.push();
+                        for pattern in &arm.patterns {
+                            self.check_pattern(pattern)?;
+                            for (name, pos) in pattern.bindings() {
+                                self.declare(&name, BindingKind::Let, pos)?;
+                            }
+                        }
+                        if let Some(guard) = &arm.guard {
+                            self.check_expr(guard)?;
+                        }
+                        self.check_markup_nodes(&arm.body)?;
+                        self.pop_scope();
+                    }
                 }
             }
         }
@@ -601,7 +641,11 @@ impl Checker<'_> {
                             Pattern::Binding { name, pos } => {
                                 self.declare(name, BindingKind::Let, *pos)?;
                             }
-                            _ => {}
+                            _ => {
+                                for (name, pos) in pattern.bindings() {
+                                    self.declare(&name, BindingKind::Let, pos)?;
+                                }
+                            }
                         }
                     }
                     // A name takes the whole value, so it cannot stand next
@@ -642,6 +686,17 @@ impl Checker<'_> {
             Pattern::Wildcard => {}
             Pattern::Binding { .. } => {}
             Pattern::Enum { .. } => {}
+            Pattern::List(items, _) => {
+                for item in items {
+                    self.check_pattern(item)?;
+                }
+            }
+            Pattern::Object(fields, _) => {
+                for (_, item) in fields {
+                    self.check_pattern(item)?;
+                }
+            }
+            Pattern::Prefix(expr, _) => self.check_expr(expr)?,
         }
         Ok(())
     }

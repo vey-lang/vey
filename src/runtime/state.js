@@ -149,6 +149,12 @@ function veyState(ctx) {
 
     function run() {
       if (stopped) return;
+      // The work of the last time is let go, before the new one begins.
+      if (typeof cleanup === "function") {
+        var done = cleanup;
+        cleanup = null;
+        done();
+      }
       // The values of the last time are let go, so that a value that is not
       // read any more does not wake the effect up.
       for (var i = 0; i < deps.length; i++) deps[i].off();

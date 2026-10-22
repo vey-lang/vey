@@ -367,6 +367,11 @@ fn a_page_that_uses_a_package_of_npm_is_reported() {
 
 #[test]
 fn the_site_of_the_language_builds() {
+    // The site of the language is not always there, so the test is only
+    // run when it is.
+    if !Path::new("examples/veylang").is_dir() {
+        return;
+    }
     let dir = temp_dir("veylang");
     let output = vey()
         .arg("build")

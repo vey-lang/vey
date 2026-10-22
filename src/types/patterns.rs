@@ -139,6 +139,19 @@ impl TypeChecker<'_> {
             Pattern::Wildcard => {}
             Pattern::Binding { .. } => {}
             Pattern::Enum { .. } => {}
+            Pattern::List(items, _) => {
+                for item in items {
+                    self.check_pattern(item)?;
+                }
+            }
+            Pattern::Object(fields, _) => {
+                for (_, item) in fields {
+                    self.check_pattern(item)?;
+                }
+            }
+            Pattern::Prefix(expr, _) => {
+                self.infer_expr(expr)?;
+            }
         }
         Ok(())
     }

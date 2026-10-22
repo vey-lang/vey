@@ -18,6 +18,10 @@ impl Parser {
                 nodes.push(MarkupNode::For(self.parse_markup_for()?));
                 continue;
             }
+            if self.is_kw("match") {
+                nodes.push(MarkupNode::Match(self.parse_markup_match()?));
+                continue;
+            }
             if self.is_element_start()? {
                 nodes.push(MarkupNode::Element(self.parse_element()?));
                 continue;
@@ -163,6 +167,7 @@ impl Parser {
             id: None,
             attrs: Vec::new(),
             args: Vec::new(),
+            slot: None,
             children: Vec::new(),
             pos: tag_token.pos,
         };
@@ -190,6 +195,17 @@ impl Parser {
                 let name = self.parse_attr_name()?;
                 self.expect_op("=")?;
                 let value = self.parse_attr_value()?;
+                // The name of the slot the element goes in.
+                if name == "slot" {
+                    if let Expr::String(parts, _) = &value {
+                        if let Some(part) = parts.first() {
+                            if part.expr.is_none() {
+                                element.slot = Some(part.text.clone());
+                                continue;
+                            }
+                        }
+                    }
+                }
                 element.attrs.push((name, value));
                 continue;
             }
@@ -284,11 +300,67 @@ impl Parser {
     pub(crate) fn parse_markup_for(&mut self) -> Result<MFor, VeyError> {
         self.expect_kw("for")?;
         let name = self.expect_ident("loop variable")?;
+        // The place of the item in the list may be wanted as well.
+        let index = if self.is_punct(",") {
+            self.advance()?;
+            Some(self.expect_ident("loop index")?)
+        } else {
+            None
+        };
         self.expect_kw("in")?;
         let iter = self.parse_expression()?;
+        // The items of the list may be told apart, so that a list may change
+        // without the page being built again.
+        let key = if self.is_kw("key") {
+            self.advance()?;
+            self.expect_op("=")?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
         self.expect_punct("{")?;
         let body = self.parse_markup_nodes()?;
         self.expect_punct("}")?;
-        Ok(MFor { name, iter, body })
+        Ok(MFor {
+            name,
+            index,
+            iter,
+            key,
+            body,
+        })
+    }
+
+    /// A `match` in the markup.
+    pub(crate) fn parse_markup_match(&mut self) -> Result<MMatch, VeyError> {
+        self.expect_kw("match")?;
+        let subject = self.parse_expression()?;
+        self.expect_punct("{")?;
+        let mut arms = Vec::new();
+        while !self.is_punct("}") {
+            if self.tok.kind == TokKind::Eof {
+                return Err(self.error("unclosed match"));
+            }
+            let mut patterns = vec![self.parse_pattern()?];
+            while self.is_op("|") {
+                self.advance()?;
+                patterns.push(self.parse_pattern()?);
+            }
+            let guard = if self.eat_kw("if")? {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+            self.expect_op("=>")?;
+            self.expect_punct("{")?;
+            let body = self.parse_markup_nodes()?;
+            self.expect_punct("}")?;
+            arms.push(MMatchArm {
+                patterns,
+                guard,
+                body,
+            });
+        }
+        self.expect_punct("}")?;
+        Ok(MMatch { subject, arms })
     }
 }

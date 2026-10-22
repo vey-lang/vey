@@ -5,6 +5,7 @@
 //! files, `site` writes static sites, `dev` serves a project while it is
 //! edited, and `scaffold` creates new projects.
 
+pub mod add;
 pub mod args;
 pub mod build;
 pub mod deploy;
@@ -25,6 +26,7 @@ pub mod run;
 pub mod scaffold;
 pub mod site;
 
+pub(crate) use add::cmd_add;
 pub(crate) use build::cmd_build;
 pub(crate) use deploy::cmd_deploy;
 pub(crate) use dev::cmd_dev;

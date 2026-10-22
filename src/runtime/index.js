@@ -31,6 +31,7 @@ function createVeyRuntime(scope, req) {
   V = Object.assign(V, veyCore(ctx));
   V = Object.assign(V, veyText(ctx));
   V = Object.assign(V, veyCollections(ctx));
+  V = Object.assign(V, veyMap(ctx));
   V = Object.assign(V, veyEnum(ctx));
   V = Object.assign(V, veyData(ctx));
   V = Object.assign(V, veyDate(ctx));

@@ -205,6 +205,10 @@ impl Parser {
             let pos = self.advance()?.pos;
             return Ok(Expr::Await(Box::new(self.parse_unary()?), pos));
         }
+        if self.is_kw("yield") {
+            let pos = self.advance()?.pos;
+            return Ok(Expr::Yield(Box::new(self.parse_unary()?), pos));
+        }
         self.parse_postfix()
     }
 
@@ -709,7 +713,9 @@ impl Parser {
                 None
             };
             self.expect_op("=>")?;
-            let body = self.parse_expression()?;
+            // The body of an arm ends with the line, so that the arm that
+            // follows is not read as part of it.
+            let body = self.parse_statement_expression()?;
             arms.push(MatchArm {
                 patterns,
                 guard,

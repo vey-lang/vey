@@ -98,6 +98,22 @@ function veyCollections(ctx) {
     return total;
   }
 
+  // The values a loop walks through.
+  //
+  // A list is walked item by item, an object by its keys and a text by its
+  // characters.
+  function iterate(value) {
+    if (value === null || value === undefined) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string") return value.split("");
+    if (typeof value === "object") {
+      // A generator is walked by the loop itself.
+      if (typeof value.next === "function") return value;
+      return Object.keys(value);
+    }
+    return [];
+  }
+
   function unique(list) {
     return Array.from(new Set(toList(list)));
   }
@@ -149,6 +165,7 @@ function veyCollections(ctx) {
   ctx.entries = entries;
   ctx.range = range;
   ctx.flatMap = flatMap;
+  ctx.iterate = iterate;
   ctx.sum = sum;
   ctx.unique = unique;
   ctx.reverse = reverse;
@@ -168,6 +185,7 @@ function veyCollections(ctx) {
     entries: entries,
     range: range,
     flatMap: flatMap,
+    iterate: iterate,
     sum: sum,
     unique: unique,
     reverse: reverse,

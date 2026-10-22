@@ -192,6 +192,64 @@ impl Codegen {
                 }
                 Ok((condition, taken))
             }
+            Pattern::List(items, _) => {
+                // A list of patterns, such as `[1, name]`.
+                let mut conditions = vec![format!("Array.isArray({})", subject)];
+                conditions.push(format!("{}.length === {}", subject, items.len()));
+                let mut taken = Vec::new();
+                for (index, item) in items.iter().enumerate() {
+                    match item {
+                        Pattern::Binding { name, .. } => {
+                            taken.push((name.clone(), format!("{}[{}]", subject, index)));
+                        }
+                        Pattern::Wildcard => {}
+                        Pattern::Literal(expr) => {
+                            let value = self.gen_expr(expr)?;
+                            conditions.push(format!("{}[{}] === {}", subject, index, value));
+                        }
+                        other => {
+                            let (condition, bindings) =
+                                self.gen_pattern(other, &format!("{}[{}]", subject, index))?;
+                            conditions.push(format!("({})", condition));
+                            taken.extend(bindings);
+                        }
+                    }
+                }
+                Ok((conditions.join(" && "), taken))
+            }
+            Pattern::Object(fields, _) => {
+                // The fields of an object, such as `{ name, age }`.
+                let mut conditions = vec![format!("{} !== null", subject)];
+                let mut taken = Vec::new();
+                for (key, pattern) in fields {
+                    let value = format!("{}[{}]", subject, js_string(key));
+                    match pattern {
+                        Pattern::Binding { name, .. } => taken.push((name.clone(), value)),
+                        Pattern::Wildcard => {}
+                        Pattern::Literal(expr) => {
+                            let text = self.gen_expr(expr)?;
+                            conditions.push(format!("{} === {}", value, text));
+                        }
+                        other => {
+                            let (condition, bindings) = self.gen_pattern(other, &value)?;
+                            conditions.push(format!("({})", condition));
+                            taken.extend(bindings);
+                        }
+                    }
+                }
+                Ok((conditions.join(" && "), taken))
+            }
+            Pattern::Prefix(expr, _) => {
+                // A text that begins with something, such as `"Vey "..`.
+                let text = self.gen_expr(expr)?;
+                Ok((
+                    format!(
+                        "typeof {} === \"string\" && {}.startsWith({})",
+                        subject, subject, text
+                    ),
+                    Vec::new(),
+                ))
+            }
         }
     }
 
@@ -344,83 +402,26 @@ impl Codegen {
 
                 // The condition of every pattern of the arm.
                 let mut conditions: Vec<String> = Vec::new();
-                // The patterns that take the fields of an enum.
+                // The patterns that take a value apart. They need a block
+                // of their own, because the values are read after the
+                // pattern is known to hold.
                 let mut blocks: Vec<(String, Vec<(String, String)>)> = Vec::new();
                 // The names that take the value of the match.
                 let mut value_names: Vec<String> = Vec::new();
                 for pattern in &arm.patterns {
                     match pattern {
-                        Pattern::Literal(expr) => {
-                            conditions.push(format!("{} === {}", temp, codegen.gen_expr(expr)?))
-                        }
-                        Pattern::Range(start, end) => conditions.push(format!(
-                            "({} >= {} && {} < {})",
-                            temp,
-                            codegen.gen_expr(start)?,
-                            temp,
-                            codegen.gen_expr(end)?
-                        )),
-                        Pattern::Enum {
-                            enum_name, variant, ..
-                        } => conditions.push(format!(
-                            "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
-                            temp,
-                            temp,
-                            js_string(local_enum_name(enum_name)),
-                            temp,
-                            js_string(variant)
-                        )),
                         // A name always holds, it only takes the value.
                         Pattern::Wildcard => {}
                         Pattern::Binding { name, .. } => value_names.push(name.clone()),
+                        other => {
+                            let (condition, taken) = codegen.gen_pattern(other, &temp)?;
+                            if taken.is_empty() {
+                                conditions.push(condition);
+                            } else {
+                                blocks.push((condition, taken));
+                            }
+                        }
                     }
-                }
-
-                // A pattern that takes the fields of an enum needs a
-                // block of its own, because the fields are read after
-                // the variant is known.
-                for pattern in &arm.patterns {
-                    let Pattern::Enum {
-                        enum_name,
-                        variant,
-                        bindings,
-                        ..
-                    } = pattern
-                    else {
-                        continue;
-                    };
-                    if bindings.is_empty() {
-                        continue;
-                    }
-                    let condition = format!(
-                        "{} != null && {}.__veyEnum === {} && {}.__veyVariant === {}",
-                        temp,
-                        temp,
-                        js_string(local_enum_name(enum_name)),
-                        temp,
-                        js_string(variant)
-                    );
-                    let variant_fields = codegen
-                        .enums
-                        .get(enum_name)
-                        .map(|info| info.field_names(variant))
-                        .unwrap_or_default();
-                    let mut positional = 0usize;
-                    let mut taken: Vec<(String, String)> = Vec::new();
-                    for binding in bindings {
-                        let field = if let Some(field) = &binding.field {
-                            field.clone()
-                        } else {
-                            let index = positional;
-                            positional += 1;
-                            variant_fields
-                                .get(index)
-                                .cloned()
-                                .unwrap_or_else(|| binding.name.clone())
-                        };
-                        taken.push((binding.name.clone(), format!("{}.{}", temp, field)));
-                    }
-                    blocks.push((condition, taken));
                 }
 
                 // The arm that holds the value of the match.

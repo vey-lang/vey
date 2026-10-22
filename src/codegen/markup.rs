@@ -32,12 +32,77 @@ impl Codegen {
             MarkupNode::For(loop_node) => {
                 let iter = self.gen_expr(&loop_node.iter)?;
                 let body = self.gen_markup_nodes(&loop_node.body)?;
+                // The items of the list may be told apart, so that a list may
+                // change without the page being built again.
+                let key = match &loop_node.key {
+                    Some(key) => {
+                        let key = self.gen_expr(key)?;
+                        format!(", {}", key)
+                    }
+                    None => String::new(),
+                };
+                // The place of the item in the list may be wanted as well.
+                let index = match &loop_node.index {
+                    Some(index) => format!(", _{}", index),
+                    None => String::new(),
+                };
                 Ok(format!(
-                    "V.flatMap({}, function(_{}) {{ return {}; }})",
-                    iter, loop_node.name, body
+                    "V.flatMap({}, function(_{}{}) {{ return {}; }}{})",
+                    iter, loop_node.name, index, body, key
                 ))
             }
+            MarkupNode::Match(m) => self.gen_markup_match(m),
         }
+    }
+
+    /// A `match` in the markup.
+    ///
+    /// The arms of the match give the markup that belongs to them, so the
+    /// whole is a function that is called at once.
+    fn gen_markup_match(&mut self, m: &MMatch) -> Result<String, VeyError> {
+        let subject = self.gen_expr(&m.subject)?;
+        let slot = self.temp;
+        self.temp += 1;
+        let temp = format!("__match{}", slot);
+        let captured = self.capture(|codegen| {
+            for arm in &m.arms {
+                let mut conditions = Vec::new();
+                let mut value_names = Vec::new();
+                for pattern in &arm.patterns {
+                    match pattern {
+                        Pattern::Wildcard => {}
+                        Pattern::Binding { name, .. } => value_names.push(name.clone()),
+                        other => {
+                            let (condition, _) = codegen.gen_pattern(other, &temp)?;
+                            conditions.push(condition);
+                        }
+                    }
+                }
+                let mut all = conditions;
+                if let Some(guard) = &arm.guard {
+                    all.push(codegen.gen_expr(guard)?);
+                }
+                let body = codegen.gen_markup_nodes(&arm.body)?;
+                codegen.emit(&format!("if ({}) {{", all.join(" || ")));
+                codegen.indent += 1;
+                for name in &value_names {
+                    codegen.emit(&format!("const _{} = {};", name, temp));
+                }
+                codegen.emit(&format!("return {};", body));
+                codegen.indent -= 1;
+                codegen.emit("}");
+            }
+            codegen.emit("return [];");
+            Ok(())
+        })?;
+        let pad = "  ".repeat(self.indent);
+        Ok(format!(
+            "(({}) => {{\n{}\n{}}})({})",
+            temp,
+            captured.trim_end_matches('\n'),
+            pad,
+            subject
+        ))
     }
 
     pub(crate) fn gen_element(&mut self, element: &Element) -> Result<String, VeyError> {
@@ -86,13 +151,30 @@ impl Codegen {
             }
         }
 
+        // The children that go in a slot of their own are given to the
+        // component as arguments of their own.
+        let mut plain: Vec<MarkupNode> = Vec::new();
+        for child in &element.children {
+            let slot = match child {
+                MarkupNode::Element(element) => element.slot.clone(),
+                _ => None,
+            };
+            match slot {
+                Some(slot) => {
+                    let children = self.gen_markup_nodes(std::slice::from_ref(child))?;
+                    entries.push(format!("{}: {}", js_key(&slot), children));
+                }
+                None => plain.push(child.clone()),
+            }
+        }
+
         let props = if entries.is_empty() {
             "null".to_string()
         } else {
             format!("{{ {} }}", entries.join(", "))
         };
 
-        let children = self.gen_markup_nodes(&element.children)?;
+        let children = self.gen_markup_nodes(&plain)?;
         if element.component && !element.args.is_empty() {
             let mut args = Vec::new();
             for arg in &element.args {

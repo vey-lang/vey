@@ -1593,3 +1593,212 @@ print(cookie.parse("a=1; b=2").b)
     assert!(text.contains("two"), "{text}");
     assert!(text.contains("a=1"), "{text}");
 }
+
+#[test]
+fn the_parts_of_a_program_that_were_missing_are_there() {
+    let dir = temp_dir("parts");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+// A map keeps the keys that are not texts.
+let seen = Map()
+seen.set(1, "one")
+seen.set(2, "two")
+print(seen.get(1))
+print(seen.size)
+
+// A set holds the values it has seen once.
+let names = Set()
+names.add("ada")
+names.add("ada")
+print(names.size)
+
+// A function that may fail, said so in its type.
+fn readValue(text: string) -> Result<number, string> {
+  if text == "" {
+    return err("the text is empty")
+  }
+  return ok(num(text))
+}
+
+fn useValue(text: string) -> Result<number, string> {
+  let value = readValue(text)?
+  return ok(value * 2)
+}
+
+let answer = useValue("21")
+print(answer.value)
+let bad = useValue("")
+print(bad.error)
+
+// A value that hands its values back one by one.
+fn counter(limit: number) -> number {
+  for i in 0..limit {
+    yield i
+  }
+}
+
+for n in counter(3) {
+  print(n)
+}
+
+// A file that is closed when the block is over.
+fn work() -> number {
+  defer print("done")
+  print("working")
+  return 1
+}
+print(work())
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("one"), "{text}");
+    assert!(text.contains("2"), "{text}");
+    assert!(text.contains("42"), "{text}");
+    assert!(text.contains("the text is empty"), "{text}");
+    assert!(text.contains("working"), "{text}");
+    assert!(text.contains("done"), "{text}");
+}
+
+#[test]
+fn a_value_that_is_taken_apart_is_bound() {
+    let dir = temp_dir("taken-apart");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let pair = [1, "two"]
+let name = "Vey is here"
+let user = { name: "ada", age: 36 }
+
+let text = match pair {
+  [1, second] => "one and " + second
+  _ => "none"
+}
+print(text)
+
+let prefix = match name {
+  "Vey ".. => "it starts with Vey"
+  _ => "something else"
+}
+print(prefix)
+
+let who = match user {
+  { name, age } => name + " is " + str(age)
+  _ => "nobody"
+}
+print(who)
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("one and two"), "{text}");
+    assert!(text.contains("it starts with Vey"), "{text}");
+    assert!(text.contains("ada is 36"), "{text}");
+}
+
+#[test]
+fn a_loop_may_have_a_step_and_may_walk_the_keys_of_an_object() {
+    let dir = temp_dir("loops");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+for i in 0..6 by 2 {
+  print(i)
+}
+
+let person = { name: "ada", age: 36 }
+for key in person {
+  print(key)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("0"), "{text}");
+    assert!(text.contains("2"), "{text}");
+    assert!(text.contains("4"), "{text}");
+    assert!(text.contains("name"), "{text}");
+    assert!(text.contains("age"), "{text}");
+}
+
+#[test]
+fn the_end_of_a_line_ends_a_statement() {
+    let dir = temp_dir("lines");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let a = 1
+-2
+print(a)
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("1"), "{text}");
+}
+
+#[test]
+fn a_type_may_have_functions_of_its_own() {
+    let dir = temp_dir("impl");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+type Config = { port: number }
+
+impl Config {
+  fn url() -> string {
+    return "http://localhost:" + str(self.port)
+  }
+}
+
+let config = Config({ port: 3000 })
+print(config.url())
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("http://localhost:3000"), "{text}");
+}
+
+#[test]
+fn a_value_may_be_thrown() {
+    let dir = temp_dir("thrown");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+try {
+  throw "a problem"
+} catch err {
+  print("caught " + err)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("caught a problem"), "{text}");
+}

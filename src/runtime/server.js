@@ -495,14 +495,15 @@ function veyServer(ctx) {
     }
 
     // The events of the server, as they come.
-    function makeStream(response, onClose) {
+    function makeStream(response, onClose, extra) {
       var open = true;
-      response.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no"
-      });
+      var headers = {};
+      for (var key in extra || {}) headers[key] = extra[key];
+      headers["Content-Type"] = "text/event-stream; charset=utf-8";
+      headers["Cache-Control"] = "no-cache";
+      headers["Connection"] = "keep-alive";
+      headers["X-Accel-Buffering"] = "no";
+      response.writeHead(200, headers);
       return {
         send: function (data) {
           if (!open) return;
@@ -575,14 +576,6 @@ function veyServer(ctx) {
       var res = makeResponse(response);
       var method = request.method;
 
-      // The question of the methods of an address is answered right away.
-      if (method === "OPTIONS") {
-        res.set("Allow", allowedMethods(url.pathname));
-        res.status(204);
-        res.end();
-        return;
-      }
-
       // A HEAD is the same as a GET, without the body of the answer.
       // The events of the server are asked for with a GET as well.
       var methods = [method];
@@ -613,13 +606,20 @@ function veyServer(ctx) {
         sessions.run(store, function () {
           runChain(pieces, 0, info, res, function () {
             if (res.isFinished()) return;
+            // The question of the methods of an address is answered.
+            if (method === "OPTIONS") {
+              res.set("Allow", allowedMethods(url.pathname));
+              res.status(204);
+              res.end();
+              return;
+            }
             if (!found) {
               notFound(request, info, res);
               return;
             }
             // The events of the server keep the answer open.
             if (found.route.method === "SSE") {
-              var stream = makeStream(response, function () { running -= 1; });
+              var stream = makeStream(response, function () { running -= 1; }, res.getHeaders());
               streams.push(stream);
               Promise.resolve(found.route.handler(info, stream)).catch(function (err) {
                 fail(info, res, err);

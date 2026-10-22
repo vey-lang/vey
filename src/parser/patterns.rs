@@ -76,6 +76,63 @@ impl Parser {
         let negative = self.eat_op("-")?;
         let token = self.tok.clone();
 
+        // A list of patterns, such as `[1, name]`.
+        if token.kind == TokKind::Punct && token.value == "[" {
+            let pos = self.advance()?.pos;
+            let mut items = Vec::new();
+            while !self.is_punct("]") {
+                items.push(self.parse_pattern()?);
+                if self.is_punct(",") {
+                    self.advance()?;
+                } else {
+                    break;
+                }
+            }
+            self.expect_punct("]")?;
+            return Ok(Pattern::List(items, pos));
+        }
+
+        // The fields of an object, such as `{ name, age }`.
+        if token.kind == TokKind::Punct && token.value == "{" {
+            let pos = self.advance()?.pos;
+            let mut fields = Vec::new();
+            while !self.is_punct("}") {
+                let key_token = self.tok.clone();
+                let key = match key_token.kind {
+                    TokKind::Ident | TokKind::Keyword => {
+                        self.advance()?;
+                        key_token.value
+                    }
+                    TokKind::Str => {
+                        self.advance()?;
+                        key_token
+                            .parts
+                            .iter()
+                            .map(|part| part.text.as_str())
+                            .collect()
+                    }
+                    _ => return Err(self.error("expected a field name")),
+                };
+                let pattern = if self.is_punct(":") {
+                    self.advance()?;
+                    self.parse_pattern()?
+                } else {
+                    Pattern::Binding {
+                        name: key.clone(),
+                        pos: key_token.pos,
+                    }
+                };
+                fields.push((key, pattern));
+                if self.is_punct(",") {
+                    self.advance()?;
+                } else {
+                    break;
+                }
+            }
+            self.expect_punct("}")?;
+            return Ok(Pattern::Object(fields, pos));
+        }
+
         if token.kind == TokKind::Number {
             self.advance()?;
             let start = Expr::Number(
@@ -114,7 +171,13 @@ impl Parser {
         match token.kind {
             TokKind::Str => {
                 self.advance()?;
-                Ok(Pattern::Literal(self.parse_string_token(&token)?))
+                let text = self.parse_string_token(&token)?;
+                // A text that begins with something, such as `"Vey "..`.
+                if self.is_op("..") {
+                    self.advance()?;
+                    return Ok(Pattern::Prefix(text, token.pos));
+                }
+                Ok(Pattern::Literal(text))
             }
             TokKind::Keyword if token.value == "true" => {
                 self.advance()?;

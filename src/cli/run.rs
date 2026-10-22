@@ -2,6 +2,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
 
 use vey::compiler::compile_project;
 
@@ -92,8 +94,34 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
         return 0;
     }
 
+    if parsed.watch {
+        // The tests are run again and again, as long as the files change.
+        loop {
+            let failed = run_tests(&files, &parsed);
+            if !wait_for_change(&files) {
+                break;
+            }
+            if failed > 0 {
+                continue;
+            }
+        }
+        return 0;
+    }
+
+    let failed = run_tests(&files, &parsed);
+    if failed == 0 {
+        println!("{} file(s) passed", files.len());
+        0
+    } else {
+        eprintln!("{} file(s) failed", failed);
+        1
+    }
+}
+
+/// Run the tests of the files, and say how many of them failed.
+fn run_tests(files: &[PathBuf], parsed: &crate::cli::args::ParsedArgs) -> usize {
     let mut failed = 0;
-    for file in &files {
+    for file in files {
         println!("test {}", file.display());
         let bundle = match compile_project(file) {
             Ok(bundle) => bundle,
@@ -117,7 +145,7 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             .arg(&temp)
             .env("VEY_TEST", "1")
             .envs(node_path(file))
-            .envs(test_filter(&parsed))
+            .envs(test_filter(parsed))
             .status();
         let _ = fs::remove_file(&temp);
 
@@ -131,13 +159,48 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
             }
         }
     }
+    failed
+}
 
-    if failed == 0 {
-        println!("{} file(s) passed", files.len());
-        0
-    } else {
-        eprintln!("{} file(s) failed", failed);
-        1
+/// Wait until one of the files changes.
+///
+/// The files are looked at now and then, and the wait ends as soon as one
+/// of them is not the same as it was.
+fn wait_for_change(files: &[PathBuf]) -> bool {
+    let previous: Vec<(PathBuf, u64, u64)> = files
+        .iter()
+        .map(|path| {
+            let metadata = fs::metadata(path).ok();
+            let modified = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos() as u64)
+                .unwrap_or(0);
+            let size = metadata.as_ref().map(|metadata| metadata.len()).unwrap_or(0);
+            (path.clone(), modified, size)
+        })
+        .collect();
+
+    loop {
+        thread::sleep(Duration::from_millis(300));
+        let current: Vec<(PathBuf, u64, u64)> = files
+            .iter()
+            .map(|path| {
+                let metadata = fs::metadata(path).ok();
+                let modified = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos() as u64)
+                    .unwrap_or(0);
+                let size = metadata.as_ref().map(|metadata| metadata.len()).unwrap_or(0);
+                (path.clone(), modified, size)
+            })
+            .collect();
+        if current != previous {
+            return true;
+        }
     }
 }
 

@@ -434,14 +434,38 @@ impl Codegen {
                 self.emit(&format!("{}.push(() => ({}));", name, value));
             }
             Stmt::For(decl) => {
-                let iter = self.gen_expr(&decl.iter)?;
-                let pattern = self.gen_binding_pattern(&decl.pattern)?;
                 let label = decl
                     .label
                     .as_ref()
                     .map(|name| format!("{}: ", name))
                     .unwrap_or_default();
-                self.emit(&format!("{}for (let {} of {}) {{", label, pattern, iter));
+                // A loop over a range walks it with a counter, so that it may
+                // have a step.
+                let range = match &decl.step {
+                    Some(_) => match &decl.iter {
+                        Expr::Range(start, end, _) => Some((start, end)),
+                        _ => {
+                            return Err(self.err("a loop with a step must walk a range"))
+                        }
+                    },
+                    None => None,
+                };
+                let pattern = self.gen_binding_pattern(&decl.pattern)?;
+                if let Some((start, end)) = range {
+                    let start = self.gen_expr(start)?;
+                    let end = self.gen_expr(end)?;
+                    let step = self.gen_expr(decl.step.as_ref().expect("the step"))?;
+                    self.emit(&format!(
+                        "{}for (let {} = {}; {} < {}; {} += {}) {{",
+                        label, pattern, start, pattern, end, pattern, step
+                    ));
+                } else {
+                    let iter = self.gen_expr(&decl.iter)?;
+                    self.emit(&format!(
+                        "{}for (let {} of V.iterate({})) {{",
+                        label, pattern, iter
+                    ));
+                }
                 self.indent += 1;
                 self.push_scope();
                 for (name, _) in decl.pattern.bindings() {

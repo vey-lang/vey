@@ -1,3 +1,4 @@
 /target
 *.cjs
 .DS_Store
+/.vey

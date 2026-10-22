@@ -129,6 +129,8 @@ pub fn is_keyword(word: &str) -> bool {
             | "pub"
             | "priv"
             | "throw"
+            | "yield"
+            | "defer"
     )
 }
 

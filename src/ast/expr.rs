@@ -34,6 +34,12 @@ pub enum Pattern {
         bindings: Vec<EnumBinding>,
         pos: Pos,
     },
+    /// A list of patterns, such as `[1, name]`.
+    List(Vec<Pattern>, Pos),
+    /// The fields of an object, such as `{ name, age }`.
+    Object(Vec<(String, Pattern)>, Pos),
+    /// A text that begins with something, such as `"Vey "..`.
+    Prefix(Expr, Pos),
 }
 
 impl Pattern {
@@ -45,6 +51,38 @@ impl Pattern {
             Self::Wildcard => Pos::new(0, 0),
             Self::Binding { pos, .. } => *pos,
             Self::Enum { pos, .. } => *pos,
+            Self::List(_, pos) => *pos,
+            Self::Object(_, pos) => *pos,
+            Self::Prefix(_, pos) => *pos,
+        }
+    }
+
+    /// The names that the pattern takes apart.
+    pub fn bindings(&self) -> Vec<(String, Pos)> {
+        let mut out = Vec::new();
+        self.collect_bindings(&mut out);
+        out
+    }
+
+    fn collect_bindings(&self, out: &mut Vec<(String, Pos)>) {
+        match self {
+            Self::Binding { name, pos } => out.push((name.clone(), *pos)),
+            Self::Enum { bindings, .. } => {
+                for binding in bindings {
+                    out.push((binding.name.clone(), binding.pos));
+                }
+            }
+            Self::List(items, _) => {
+                for item in items {
+                    item.collect_bindings(out);
+                }
+            }
+            Self::Object(fields, _) => {
+                for (_, pattern) in fields {
+                    pattern.collect_bindings(out);
+                }
+            }
+            _ => {}
         }
     }
 }

@@ -161,6 +161,8 @@ pub struct ForStmt {
     pub body: Block,
     /// The name of the loop, so that a `break` may name it.
     pub label: Option<String>,
+    /// The step of the loop, when it walks a range.
+    pub step: Option<Expr>,
     pub pos: Pos,
 }
 

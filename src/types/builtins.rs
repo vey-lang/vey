@@ -286,8 +286,166 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("extname", builtin_function(vec![string()], string())),
             ("resolve", builtin_rest(string(), string())),
         ])),
+        "Map" => Some(builtin_optional(vec![any()], 0, map_type())),
+        "Set" => Some(builtin_optional(vec![any()], 0, set_type())),
+        // The library of the browser and of the server.
+        "regex" => Some(builtin_function(vec![string(), string()], any())),
+        "intl" => Some(builtin_object(vec![
+            (
+                "formatNumber",
+                builtin_optional(vec![number(), string()], 1, string()),
+            ),
+            (
+                "formatDate",
+                builtin_optional(vec![any(), any()], 1, string()),
+            ),
+            (
+                "formatTime",
+                builtin_optional(vec![any(), string()], 1, string()),
+            ),
+            (
+                "dayName",
+                builtin_optional(vec![number(), string()], 1, string()),
+            ),
+            (
+                "monthName",
+                builtin_optional(vec![number(), string()], 1, string()),
+            ),
+            (
+                "relativeTime",
+                builtin_optional(vec![number(), string(), string()], 2, string()),
+            ),
+        ])),
+        "bytes" => Some(builtin_object(vec![
+            (
+                "from",
+                builtin_optional(vec![string(), string()], 1, list(number())),
+            ),
+            ("toBase64", builtin_function(vec![list(number())], string())),
+            ("fromBase64", builtin_function(vec![string()], list(number()))),
+            ("concat", builtin_function(vec![list(any())], list(number()))),
+            ("length", builtin_function(vec![list(number())], number())),
+            ("hex", builtin_function(vec![list(number())], string())),
+            ("text", builtin_function(vec![list(number())], string())),
+        ])),
+        "deepCopy" => Some(builtin_function(vec![any()], any())),
+        "signal" => Some(builtin_function(vec![any()], any())),
+        "store" => Some(builtin_optional(vec![any()], 0, any())),
+        "effect" => Some(builtin_function(vec![any()], any())),
+        "mount" => Some(builtin_function(vec![any(), any()], any())),
+        "route" => Some(builtin_function(vec![string(), any()], any())),
+        "navigate" => Some(builtin_function(vec![string()], any())),
+        "currentRoute" => Some(builtin_function(vec![], any())),
+        "routeParams" => Some(builtin_function(vec![], any())),
+        "on" => Some(builtin_function(vec![any(), string(), any()], any())),
+        "delegate" => Some(builtin_function(
+            vec![any(), string(), string(), any()],
+            any(),
+        )),
+        "onMount" | "onDestroy" => Some(builtin_function(vec![any()], any())),
+        "ref" => Some(builtin_function(vec![], any())),
+        "setTimeout" | "setInterval" => Some(builtin_optional(
+            vec![any(), number()],
+            1,
+            any(),
+        )),
+        "clearTimeout" | "clearInterval" | "cancelAnimationFrame" => {
+            Some(builtin_function(vec![any()], Type::Void))
+        }
+        "requestAnimationFrame" => Some(builtin_function(vec![any()], number())),
+        "fetch" => Some(builtin_optional(vec![string(), any()], 1, promise())),
+        "Request" => Some(builtin_optional(vec![string(), any()], 1, any())),
+        "Response" => Some(builtin_optional(vec![any(), any()], 1, any())),
+        "Headers" => Some(builtin_optional(vec![any()], 0, any())),
+        "AbortController" => Some(builtin_function(vec![], any())),
+        "storage" | "sessionStorage" => Some(builtin_object(vec![
+            ("get", builtin_function(vec![string()], any())),
+            ("set", builtin_function(vec![string(), any()], Type::Void)),
+            ("remove", builtin_function(vec![string()], Type::Void)),
+            ("clear", builtin_function(vec![], Type::Void)),
+            ("keys", builtin_function(vec![], list(string()))),
+        ])),
+        "history" => Some(builtin_object(vec![
+            ("push", builtin_function(vec![any(), string(), string()], Type::Void)),
+            (
+                "replace",
+                builtin_function(vec![any(), string(), string()], Type::Void),
+            ),
+            ("back", builtin_function(vec![], Type::Void)),
+            ("forward", builtin_function(vec![], Type::Void)),
+            ("go", builtin_function(vec![number()], Type::Void)),
+            ("state", builtin_function(vec![], any())),
+        ])),
+        "Blob" | "File" => Some(builtin_optional(vec![any(), string()], 1, any())),
+        "FileReader" => Some(builtin_function(vec![], any())),
+        "FormData" => Some(builtin_function(vec![], any())),
+        "WebSocket" => Some(builtin_optional(vec![string(), any()], 1, any())),
+        "EventSource" => Some(builtin_optional(vec![string(), any()], 1, any())),
+        "matchMedia" => Some(builtin_function(vec![string()], any())),
+        "IntersectionObserver" | "ResizeObserver" => {
+            Some(builtin_optional(vec![any(), any()], 1, any()))
+        }
+        "crypto" => Some(builtin_object(vec![
+            ("randomBytes", builtin_function(vec![number()], list(number()))),
+            ("sign", builtin_function(vec![any(), string()], string())),
+            (
+                "verify",
+                builtin_function(vec![any(), string(), string()], bool_ty()),
+            ),
+            ("keyPair", builtin_function(vec![], any())),
+        ])),
+        "zlib" => Some(builtin_object(vec![
+            ("gzip", builtin_function(vec![any()], list(number()))),
+            ("gunzip", builtin_function(vec![any()], string())),
+            ("deflate", builtin_function(vec![any()], list(number()))),
+            ("inflate", builtin_function(vec![any()], string())),
+        ])),
+        "logger" | "cors" | "compress" | "errorHandler" => {
+            Some(builtin_optional(vec![any()], 0, any()))
+        }
+        "bodyLimit" => Some(builtin_function(vec![number()], any())),
+        "session" => Some(builtin_object(vec![
+            ("start", builtin_function(vec![], string())),
+            ("get", builtin_function(vec![string()], any())),
+            ("set", builtin_function(vec![string(), any()], any())),
+            ("end", builtin_function(vec![], Type::Void)),
+            ("id", builtin_function(vec![], any())),
+        ])),
         _ => None,
     }
+}
+
+/// The type of a map of the runtime.
+fn map_type() -> Type {
+    let any = Type::Any;
+    let list = Type::Array(Box::new(Type::Any));
+    builtin_object(vec![
+        ("get", builtin_function(vec![any.clone()], any.clone())),
+        ("set", builtin_function(vec![any.clone(), any.clone()], any.clone())),
+        ("has", builtin_function(vec![any.clone()], Type::Bool)),
+        ("delete", builtin_function(vec![any.clone()], Type::Bool)),
+        ("clear", builtin_function(vec![], any.clone())),
+        ("keys", builtin_function(vec![], list.clone())),
+        ("values", builtin_function(vec![], list.clone())),
+        ("entries", builtin_function(vec![], list)),
+        ("forEach", builtin_function(vec![any.clone()], Type::Void)),
+        ("size", Type::Number),
+    ])
+}
+
+/// The type of a set of the runtime.
+fn set_type() -> Type {
+    let any = Type::Any;
+    let list = Type::Array(Box::new(Type::Any));
+    builtin_object(vec![
+        ("add", builtin_function(vec![any.clone()], any.clone())),
+        ("has", builtin_function(vec![any.clone()], Type::Bool)),
+        ("delete", builtin_function(vec![any.clone()], Type::Bool)),
+        ("clear", builtin_function(vec![], any.clone())),
+        ("values", builtin_function(vec![], list)),
+        ("forEach", builtin_function(vec![any], Type::Void)),
+        ("size", Type::Number),
+    ])
 }
 
 pub(crate) fn is_builtin_type(name: &str) -> bool {

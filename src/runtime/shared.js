@@ -294,6 +294,10 @@ function veyShared(ctx) {
         var key = headerKey(state.headers, name);
         return key === null ? null : state.headers[key];
       },
+      // The marks of the answer, as they are written now.
+      getHeaders: function () {
+        return state.headers;
+      },
       remove: function (name) {
         var key = headerKey(state.headers, name);
         if (key !== null) delete state.headers[key];

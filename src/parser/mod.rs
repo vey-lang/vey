@@ -29,8 +29,6 @@ pub struct Parser {
     private_names: Vec<String>,
     /// Whether the expression that is read is the whole of a statement.
     statement_expr: bool,
-    /// How deep the parser is in the expressions of the statement.
-    expr_depth: usize,
 }
 
 /// How deeply code may be nested before the parser gives up.
@@ -55,7 +53,6 @@ impl Parser {
             depth: 0,
             private_names: Vec::new(),
             statement_expr: false,
-            expr_depth: 0,
         })
     }
 
@@ -386,7 +383,7 @@ impl Parser {
             None
         };
         let init = if self.eat_op("=")? {
-            Some(self.parse_expression()?)
+            Some(self.parse_statement_expression()?)
         } else {
             None
         };
@@ -746,6 +743,13 @@ impl Parser {
         };
         self.expect_kw("in")?;
         let iter = self.parse_expression()?;
+        // A loop over a range may have a step, as in `for i in 0..10 by 2`.
+        let step = if self.tok.kind == TokKind::Ident && self.tok.value == "by" {
+            self.advance()?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
         let body = self.parse_block()?;
         Ok(Stmt::For(ForStmt {
             pattern,
@@ -753,6 +757,7 @@ impl Parser {
             iter,
             body,
             label,
+            step,
             pos: start.pos,
         }))
     }
@@ -773,10 +778,7 @@ impl Parser {
         let value = if self.is_punct("}") || self.is_punct(";") || self.tok.kind == TokKind::Eof {
             None
         } else {
-            self.statement_expr = true;
-            let value = self.parse_expression();
-            self.statement_expr = false;
-            Some(value?)
+            Some(self.parse_statement_expression()?)
         };
         Ok(Stmt::Return(ReturnStmt {
             value,
@@ -1017,9 +1019,7 @@ impl Parser {
         }))
     }
     fn parse_expr_or_assign(&mut self) -> Result<Stmt, VeyError> {
-        self.statement_expr = true;
-        let expr = self.parse_expression()?;
-        self.statement_expr = false;
+        let expr = self.parse_statement_expression()?;
         let pos = expr.pos();
         if self.tok.kind == TokKind::Op && ASSIGN_OPS.contains(&self.tok.value.as_str()) {
             if !matches!(expr, Expr::Ident(..) | Expr::Member(..)) {
@@ -1038,10 +1038,29 @@ impl Parser {
     }
 
     pub fn parse_expression(&mut self) -> Result<Expr, VeyError> {
+        // An expression that is not the whole of a statement may go on for
+        // several lines.
+        let outer = self.statement_expr;
+        self.statement_expr = false;
+        let result = self.parse_expression_inner();
+        self.statement_expr = outer;
+        result
+    }
+
+    /// The expression of a statement.
+    ///
+    /// The end of a line ends a statement, so the expression of a statement
+    /// ends with the line it is written on.
+    pub(crate) fn parse_statement_expression(&mut self) -> Result<Expr, VeyError> {
+        self.statement_expr = true;
+        let result = self.parse_expression_inner();
+        self.statement_expr = false;
+        result
+    }
+
+    fn parse_expression_inner(&mut self) -> Result<Expr, VeyError> {
         self.enter()?;
-        self.expr_depth += 1;
         let result = self.parse_pipe();
-        self.expr_depth -= 1;
         self.leave();
         result
     }
@@ -1053,7 +1072,7 @@ impl Parser {
     /// A line that begins with a dot goes on, because that is a chain of
     /// members and there is no other way to write it.
     pub(crate) fn line_ends_statement(&self) -> bool {
-        if !self.statement_expr || self.expr_depth != 1 {
+        if !self.statement_expr {
             return false;
         }
         if !self.tok.newline_before {

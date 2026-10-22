@@ -221,6 +221,33 @@ main.vey:2:7: unknown variable 'nam'
   hint: did you mean 'name'?
 ```
 
+The compiler also gives warnings, which do not stop a build: a name that is
+written and never read, a name that hides another one, and a name that is
+close to another one.
+
+## The tools
+
+| Command | What it does |
+| --- | --- |
+| `vey fmt` | write the files in the usual shape |
+| `vey lint` | report the smells of a program |
+| `vey repl` | try the language in a prompt |
+| `vey explain <file>:<line>:<column>` | say the type of an expression |
+| `vey docs` | write the documentation of a program |
+| `vey migrate` | bring a program to this version of the language |
+| `vey deploy` | build the site and say where it is |
+| `vey lsp` | the language server |
+| `vey add <package>` | add a package of npm to the project |
+
+Every command has a help of its own:
+
+```sh
+vey build --help
+```
+
+The build is cached in `.vey/`, so a project that did not change is built
+again in no time. The modules of a project are written in parallel.
+
 ## Language
 
 ```vey
@@ -252,6 +279,130 @@ print("value {name}") // the value of `name`
 ```
 
 A function that uses `await` is async on its own; there is no `async` keyword.
+
+### The shapes of a program
+
+A map keeps the keys that are not texts, and a set holds the values it has
+seen once:
+
+```vey
+let seen = Map()
+seen.set(1, "one")
+seen.set(2, "two")
+print(seen.get(1))
+
+let names = Set()
+names.add("Ada")
+names.add("Ada")
+print(names.size)
+```
+<!-- check -->
+
+A function that may fail says so in its type, and `?` hands the failure on:
+
+```vey
+fn readNumber(text: string) -> Result<number, string> {
+  if text == "" {
+    return err("the text is empty")
+  }
+  return ok(num(text))
+}
+
+fn double(text: string) -> Result<number, string> {
+  // The `?` gives the failure of the call back to the caller.
+  let value = readNumber(text)?
+  return ok(value * 2)
+}
+
+print(double("21").value)
+```
+<!-- check -->
+
+A function that hands its values back one by one is a generator, and a loop
+may walk it:
+
+```vey
+fn lines(words: [string]) -> string {
+  for word in words {
+    yield word
+  }
+}
+
+for line in lines(["one", "two"]) {
+  print(line)
+}
+```
+<!-- check -->
+
+A piece of code that runs when the block is over is written with `defer`:
+
+```vey
+fn work() -> string {
+  // The piece of code runs when the function is left.
+  defer print("the work is over")
+  return "the work is done"
+}
+
+print(work())
+```
+<!-- check -->
+
+A type may have functions of its own, and they are given with `impl`:
+
+```vey
+type Config = { port: number }
+
+impl Config {
+  fn url() -> string {
+    return "http://localhost:" + str(self.port)
+  }
+}
+
+let config = Config({ port: 3000 })
+print(config.url())
+```
+<!-- check -->
+
+A value may be taken apart with `if let`, `while let` and `let else`:
+
+```vey
+let names = ["Ada", "Grace"]
+
+if let name = names[0] {
+  print(name)
+}
+
+fn first(names: [string]) -> string {
+  // The value has to be there, or the block runs.
+  let found = names[0] else {
+    return "there is no name"
+  }
+  return found
+}
+
+print(first(["Ada"]))
+```
+<!-- check -->
+
+A name may be public or private, so that a library keeps its helpers to
+itself:
+
+```vey
+pub fn open() -> string { return "open" }
+priv fn helper() -> number { return 1 }
+```
+
+A file may say which version of the language it was written for, and the
+doc comments of a file are the documentation of it:
+
+```vey
+// vey: 0.7
+
+/// The greeting of a name.
+export fn greet(name: string) -> string {
+  return "Hello, " + name
+}
+```
 
 ### Values
 
@@ -1010,6 +1161,60 @@ has a limit, and `stop()` waits for the requests that are running.
 | `assertNotContains(text, part, message)` | throw when the text holds the part |
 | `assertThrows(fn, message)` | throw when the code does not throw |
 | `assertMatch(text, pattern, message)` | throw when the text does not match the pattern |
+| `regex` | a pattern of a text, with its own match, replace and split |
+| `intl` | the numbers, the dates and the names of a language |
+| `bytes` | the bytes of a text, in base64 or in hexadecimal |
+| `deepCopy` | a copy of a value that holds nothing of it |
+| `signal` | a value that tells when it changes |
+| `store` | a state that is shared by its name |
+| `effect` | the work that follows a change of a value |
+| `mount` | put a page in a node, and change it in place |
+| `route` | a page of the browser, with its own path |
+| `navigate` | go to another page of the browser |
+| `currentRoute` | the page of the browser that is shown |
+| `routeParams` | the names of the path of the page |
+| `on` | listen to an event of a node |
+| `delegate` | listen to an event of the children of a node |
+| `onMount` | the work that runs when a page is shown |
+| `onDestroy` | the work that runs when a page is taken away |
+| `ref` | a name for a node of the page |
+| `setTimeout` | run a piece of code after a while |
+| `clearTimeout` | stop a piece of code that was waiting |
+| `setInterval` | run a piece of code again and again |
+| `clearInterval` | stop a piece of code that ran again and again |
+| `requestAnimationFrame` | run a piece of code when the page is drawn |
+| `cancelAnimationFrame` | stop a piece of code that waited for the page |
+| `fetch` | ask a server for something |
+| `Request` | a request that is sent |
+| `Response` | the answer of a server |
+| `Headers` | the names of a request or of an answer |
+| `AbortController` | a way to end a request |
+| `storage` | the storage of the browser, that stays |
+| `sessionStorage` | the storage of the browser, that goes with the tab |
+| `history` | the pages the browser has been at |
+| `Blob` | a piece of binary data |
+| `File` | a file that a visitor chooses |
+| `FileReader` | read a file into the memory |
+| `FormData` | the parts of a form that is sent |
+| `WebSocket` | a connection that stays open |
+| `EventSource` | the events of a server, as they come |
+| `matchMedia` | the size of the screen of the visitor |
+| `IntersectionObserver` | watch what is on the screen |
+| `ResizeObserver` | watch the size of a node |
+| `crypto` | the random numbers, the signatures and the keys of Node |
+| `zlib` | the compression of Node |
+| `logger` | a middle piece that writes down the requests |
+| `cors` | a middle piece that lets other sites call the server |
+| `compress` | a middle piece that makes the answers smaller |
+| `errorHandler` | a middle piece that catches the mistakes |
+| `bodyLimit` | a middle piece that says how big a request may be |
+| `session` | the sessions of the server |
+| `Map` | a map whose keys are not texts |
+| `Set` | a set of the values it has seen once |
+| `ok` | the answer of a function that worked |
+| `err` | the answer of a function that failed |
+| `todo` | throw, because the work is not finished |
+| `unimplemented` | throw, because the work is not written |
 | `ok(value)` | the answer of a function that worked |
 | `err(error)` | the answer of a function that failed |
 | `todo(message)` | throw, because the work is not finished |
@@ -1024,6 +1229,7 @@ has a limit, and `stop()` waits for the requests that are running.
 | `process.cwd()`, `process.argv()`, `process.platform()`, `process.exit(code)` | the process, Node only |
 | `uuid()` / `random(min, max)` / `clamp(value, min, max)` | identifiers and numbers |
 | `sum(list)` / `unique(list)` / `reverse(list)` | list helpers |
+| `Map()` / `Set()` | a map of many entries, and a set of them |
 | `keys(object)`, `values(object)`, `entries(object)` | the parts of an object |
 | `omit(object, keys)` | the object without the keys |
 | `base64.encode(value)` / `base64.decode(value)` | base64 |
@@ -1152,6 +1358,7 @@ src/sourcemap/       the source map
   vlq.rs             the encoding of the map
 src/cli/             the commands
   json.rs            the reading and the writing of JSON
+  add.rs             adding a package of npm to a project
   args.rs            command line parsing
   run.rs             run, test and check
   build.rs           the build of the site

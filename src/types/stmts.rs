@@ -6,12 +6,13 @@ use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::core::{element_type, rest_element_type, union, FunctionType, Type};
 use crate::types::rules::{assignable, has_type_var, substitute_bound, unify_types};
+use crate::suggest::did_you_mean;
 use crate::VeyError;
 
 use super::checker::{ComponentParam, TypeChecker};
 use super::helpers::{
-    argument_label, block_always_exits, block_always_returns, block_assigns_name, extra_field,
-    markup_assigns_name, name_alias, stmt_assigns_name,
+    argument_label, block_always_exits, block_always_returns, block_assigns_name, block_has_yield,
+    extra_field, markup_assigns_name, name_alias, stmt_assigns_name,
 };
 
 impl TypeChecker<'_> {
@@ -176,6 +177,14 @@ impl TypeChecker<'_> {
                         .is_some_and(|ty| !matches!(ty, Type::Any))
             });
         }
+        // A function that hands its values back one by one gives a list of
+        // them, so that a loop may walk it.
+        if block_has_yield(&decl.body) {
+            if let Type::Function(function) = &mut ty {
+                let element = (*function.ret).clone();
+                function.ret = Box::new(Type::Array(Box::new(element)));
+            }
+        }
         // A type parameter that was settled by a returned value is not
         // generic any more, so the function has that type from then on.
         let bindings = self.type_param_bindings.last().cloned().unwrap_or_default();
@@ -324,9 +333,9 @@ impl TypeChecker<'_> {
             }
             Stmt::LetElse(decl) => {
                 let value_ty = self.infer_expr(&decl.value)?;
-                self.push_scope();
+                // The name is bound in the scope around it, the way the name
+                // of a `let` is.
                 self.declare_pattern_typed(&decl.pattern, &value_ty);
-                self.pop_scope();
                 self.check_block(&decl.otherwise)
             }
             Stmt::Defer(decl) => {
@@ -624,12 +633,15 @@ impl TypeChecker<'_> {
         }
 
         if let Some(expected) = &expected {
-            if collected.is_empty() && !assignable(&Type::Void, expected) {
+            // A function that hands its values back one by one does not
+            // return, so it does not have to return on every path.
+            let generator = block_has_yield(body);
+            if collected.is_empty() && !assignable(&Type::Void, expected) && !generator {
                 return Err(self.error(pos, format!("function must return {}", expected.display())));
             }
             // A function that has a return type may not fall off the end,
             // because it would hand back nothing.
-            if !assignable(&Type::Void, expected) && !block_always_returns(body) {
+            if !assignable(&Type::Void, expected) && !block_always_returns(body) && !generator {
                 return Err(self.error(
                     pos,
                     format!("function must return {} on every path", expected.display()),
@@ -710,10 +722,19 @@ impl TypeChecker<'_> {
                             }
                             None => {
                                 if !self.components.contains_key(&element.tag) {
-                                    return Err(self.error(
+                                    let mut error = self.error(
                                         element.pos,
                                         format!("unknown component '{}'", element.tag),
-                                    ));
+                                    );
+                                    let names: Vec<&str> = self
+                                        .components
+                                        .keys()
+                                        .map(|name| name.as_str())
+                                        .collect();
+                                    if let Some(hint) = did_you_mean(&element.tag, names) {
+                                        error = error.with_hint(hint);
+                                    }
+                                    return Err(error);
                                 }
                                 self.components.get(&element.tag).cloned()
                             }
@@ -806,11 +827,31 @@ impl TypeChecker<'_> {
                 MarkupNode::For(loop_node) => {
                     let iter_ty = self.infer_expr(&loop_node.iter)?;
                     self.check_iterable(&iter_ty, loop_node.iter.pos())?;
+                    if let Some(key) = &loop_node.key {
+                        self.infer_expr(key)?;
+                    }
                     let item_ty = element_type(&iter_ty);
                     self.push_scope();
                     self.declare(&loop_node.name, item_ty);
+                    if let Some(index) = &loop_node.index {
+                        self.declare(index, Type::Number);
+                    }
                     self.check_markup(&loop_node.body)?;
                     self.pop_scope();
+                }
+                MarkupNode::Match(m) => {
+                    self.infer_expr(&m.subject)?;
+                    for arm in &m.arms {
+                        self.push_scope();
+                        for pattern in &arm.patterns {
+                            self.check_pattern(pattern)?;
+                        }
+                        if let Some(guard) = &arm.guard {
+                            self.infer_expr(guard)?;
+                        }
+                        self.check_markup(&arm.body)?;
+                        self.pop_scope();
+                    }
                 }
             }
         }

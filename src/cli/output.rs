@@ -169,6 +169,7 @@ usage:
   vey migrate [file|dir]           bring the program to this version
   vey deploy [entry|dir]           build the site and say where it is
   vey lsp                         the language server
+  vey add <package>               add a package of npm to the project
   vey version                     print version
   vey help                        show this message
 
@@ -299,6 +300,13 @@ when --write is not given.
 
   --write   write the files
   -h, --help  this message
+"#,
+        "add" => r#"usage: vey add <package>
+
+Add a package of npm to the project, so that a program may use it with
+`use "npm:<package>"`.
+
+  -h, --help   this message
 "#,
         "deploy" => r#"usage: vey deploy [entry|dir] [--target <dir>]
 
