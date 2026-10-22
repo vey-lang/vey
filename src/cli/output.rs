@@ -35,8 +35,31 @@ pub(crate) fn browser_script(bundle: &Bundle) -> String {
 }
 
 pub(crate) fn html_document(bundle: &Bundle, title: &str, favicon: bool) -> String {
-    let script = browser_script(bundle);
-    let styles = bundle
+    let script = format!("<script>\n{}\n</script>", browser_script(bundle));
+    html_page(title, favicon, &styles_of(bundle), &script)
+}
+
+/// The page of a site, with the script in a file of its own.
+///
+/// The file is written next to the page, so that the browser keeps it and
+/// the page of the site stays small.
+pub(crate) fn html_document_with_script(
+    bundle: &Bundle,
+    title: &str,
+    favicon: bool,
+    script: &str,
+) -> String {
+    html_page(
+        title,
+        favicon,
+        &styles_of(bundle),
+        &format!("<script src=\"{}\" defer></script>", script),
+    )
+}
+
+/// The styles of a bundle, as they are written in the page.
+fn styles_of(bundle: &Bundle) -> String {
+    bundle
         .styles
         .iter()
         .map(|style| {
@@ -49,19 +72,21 @@ pub(crate) fn html_document(bundle: &Bundle, title: &str, favicon: bool) -> Stri
         })
         .collect::<Vec<_>>()
         .join("\n\n")
-        .replace("</style", "<\\/style");
+        .replace("</style", "<\\/style")
+}
+
+/// The page of a site.
+fn html_page(title: &str, favicon: bool, styles: &str, script: &str) -> String {
     format!(
         r#"{head}
 <body>
 <div id="app"></div>
 <noscript><p style="font:14px system-ui,sans-serif;padding:16px">This Vey page needs JavaScript to run.</p></noscript>
-<script>
 {script}
-</script>
 </body>
 </html>
 "#,
-        head = html_head(title, &styles, favicon),
+        head = html_head(title, styles, favicon),
         script = script
     )
 }

@@ -7,7 +7,7 @@ use vey::compiler::{compile_project, Bundle};
 
 use crate::cli::entry::{collect_vey_files, default_title, project_root};
 use crate::cli::error::BuildError;
-use crate::cli::output::{escape_html, html_document};
+use crate::cli::output::{browser_script, escape_html, html_document, html_document_with_script};
 
 pub(crate) struct SiteReport {
     /// The pages that were written.
@@ -81,7 +81,7 @@ pub(crate) fn write_site(
     }
 
     let mut watch = Vec::new();
-    let site = site_files(entry, title, &mut watch)?;
+    let site = site_files(entry, title, &mut watch, true)?;
     let (files, failed) = (site.files, site.failed);
     if output.exists() {
         fs::remove_dir_all(&output).map_err(|err| {
@@ -131,6 +131,7 @@ pub(crate) fn site_files(
     entry: &Path,
     title: Option<&str>,
     watch: &mut Vec<PathBuf>,
+    split: bool,
 ) -> Result<SiteOutput, BuildError> {
     let root = project_root(entry);
     let page_title = title
@@ -139,10 +140,26 @@ pub(crate) fn site_files(
 
     let bundle = compile_for_site(entry, watch)?;
     let favicon = root.join("public/favicon.svg").is_file();
+    // The files that are written after the pages, so that a page always
+    // wins over a file of the same name.
+    let mut files_later: Vec<(String, Vec<u8>)> = Vec::new();
     let not_found_body = match not_found_page(entry, &root) {
         Some(not_found) => {
             let bundle = compile_for_site(&not_found, watch)?;
-            html_document(&bundle, &format!("{} · 404", page_title), favicon)
+            if split {
+                files_later.push((
+                    "404.js".to_string(),
+                    browser_script(&bundle).into_bytes(),
+                ));
+                html_document_with_script(
+                    &bundle,
+                    &format!("{} · 404", page_title),
+                    favicon,
+                    "404.js",
+                )
+            } else {
+                html_document(&bundle, &format!("{} · 404", page_title), favicon)
+            }
         }
         None => default_404_page(&page_title),
     };
@@ -155,17 +172,34 @@ pub(crate) fn site_files(
         let root = absolute(&root);
         copy_public(&public, "", &mut files, &root)?;
     }
-    files.insert(
-        "index.html".to_string(),
-        html_document(&bundle, &page_title, favicon).into_bytes(),
-    );
+    if split {
+        // The script of a page is written in a file of its own, so that the
+        // browser keeps it and the page of the site stays small.
+        files.insert("index.js".to_string(), browser_script(&bundle).into_bytes());
+        files.insert(
+            "index.html".to_string(),
+            html_document_with_script(&bundle, &page_title, favicon, "index.js").into_bytes(),
+        );
+    } else {
+        files.insert(
+            "index.html".to_string(),
+            html_document(&bundle, &page_title, favicon).into_bytes(),
+        );
+    }
     files.insert("404.html".to_string(), not_found_body.into_bytes());
 
     // Every other page of the project becomes a page of the site. A page
     // that cannot be built does not stop the others.
     let mut failed = Vec::new();
-    for (name, page) in other_pages(entry, &bundle, watch, &mut failed) {
+    for (name, page, script) in other_pages(entry, &bundle, watch, &mut failed, split) {
         files.insert(name, page.into_bytes());
+        if split {
+            files.insert(script.0, script.1);
+        }
+    }
+
+    for (name, bytes) in files_later {
+        files.insert(name, bytes);
     }
 
     Ok(SiteOutput { files, failed })
@@ -181,7 +215,8 @@ pub(crate) fn other_pages(
     bundle: &Bundle,
     watch: &mut Vec<PathBuf>,
     failed: &mut Vec<(String, BuildError)>,
-) -> Vec<(String, String)> {
+    split: bool,
+) -> Vec<(String, String, (String, Vec<u8>))> {
     let folder = match entry.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
         _ => PathBuf::from("."),
@@ -252,12 +287,25 @@ pub(crate) fn other_pages(
             continue;
         }
         let page_title = format!("{} · {}", title, page_title_of(&file));
-        let body = html_document(&page, &page_title, false);
-        pages.push((name.clone(), body.clone()));
+        // The script of the page is written in a file of its own, next to
+        // the page, so that the browser keeps it.
+        let script_name = format!("{}.js", name.trim_end_matches(".html"));
+        let script_src = script_name
+            .rsplit('/')
+            .next()
+            .unwrap_or(&script_name)
+            .to_string();
+        let body = if split {
+            html_document_with_script(&page, &page_title, false, &script_src)
+        } else {
+            html_document(&page, &page_title, false)
+        };
+        let script = (script_name, browser_script(&page).into_bytes());
+        pages.push((name.clone(), body.clone(), script.clone()));
         // The page is also written under the name of its source, so that a
         // link may point at the file the page was written in.
         if let Some(source_name) = name.strip_suffix(".html") {
-            pages.push((format!("{}.vey", source_name), body));
+            pages.push((format!("{}.vey", source_name), body, script));
         }
     }
     pages

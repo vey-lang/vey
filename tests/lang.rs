@@ -176,8 +176,9 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(project.join(".dist/index.html")).unwrap();
-    assert!(html.contains("Nested entry"), "{}", html);
+    // The content of a page is in the script of the page.
+    let script = fs::read_to_string(project.join(".dist/index.js")).unwrap();
+    assert!(script.contains("Nested entry"), "{}", script);
 }
 
 #[test]
@@ -220,8 +221,8 @@ bind("#app", App())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let html = fs::read_to_string(output_path.join("index.html")).unwrap();
-    assert!(html.contains("From elsewhere"), "{}", html);
+    let script = fs::read_to_string(output_path.join("index.js")).unwrap();
+    assert!(script.contains("From elsewhere"), "{}", script);
 }
 
 #[test]
@@ -556,8 +557,11 @@ bind("#app", App())
 
     let html = fs::read_to_string(output_path.join("index.html")).unwrap();
     assert!(html.contains("<div id=\"app\"></div>"));
-    assert!(html.contains("createVeyRuntime"));
-    assert!(html.contains("V.h"));
+    // The script of the page is in a file of its own.
+    assert!(html.contains("index.js"));
+    let script = fs::read_to_string(output_path.join("index.js")).unwrap();
+    assert!(script.contains("createVeyRuntime"));
+    assert!(script.contains("V.h"));
 }
 
 #[test]
@@ -651,10 +655,11 @@ bind("#app", Missing())
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
 
-    let index = fs::read_to_string(dir.join("site/index.html")).unwrap();
+    // The content of a page is in the script of the page.
+    let index = fs::read_to_string(dir.join("site/index.js")).unwrap();
     assert!(index.contains("Home page"), "{}", index);
     assert!(!index.contains("PUBLIC INDEX"), "{}", index);
-    let missing = fs::read_to_string(dir.join("site/404.html")).unwrap();
+    let missing = fs::read_to_string(dir.join("site/404.js")).unwrap();
     assert!(missing.contains("Not found here"), "{}", missing);
     assert!(!missing.contains("PUBLIC 404"), "{}", missing);
     assert!(dir.join("site/robots.txt").is_file());
@@ -697,9 +702,11 @@ fn new_project_builds_and_curate_is_gone() {
         .unwrap();
     assert!(build.status.success(), "{}", stderr(&build));
     assert!(!project.join("main.vey").exists());
-    let index = fs::read_to_string(project.join(".dist/index.html")).unwrap();
+    // The content of a page is in the script of the page.
+    let index = fs::read_to_string(project.join(".dist/index.js")).unwrap();
     assert!(index.contains("Welcome to Vey"), "{}", index);
-    assert!(index.contains("favicon.svg"), "{}", index);
+    let page = fs::read_to_string(project.join(".dist/index.html")).unwrap();
+    assert!(page.contains("favicon.svg"), "{}", page);
     for removed in ["Clicked", "See features", "What you get", "Built from"] {
         assert!(
             !index.contains(removed),

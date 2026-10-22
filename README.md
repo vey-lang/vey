@@ -69,9 +69,13 @@ vey build -o site  # -> site/
 ```
 .dist/
   index.html
+  index.js        # the script of the page
   404.html
   robots.txt      # from public/
 ```
+
+The script of a page is written in a file of its own, so that the browser
+keeps it and the page of the site stays small.
 
 The page title comes from the project directory, or from `--title "My site"`.
 If there is no `404.vey`, Vey writes a styled default 404 page.

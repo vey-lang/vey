@@ -185,7 +185,7 @@ pub(crate) fn refresh_dev(
     state: &Arc<Mutex<DevState>>,
 ) -> Result<usize, BuildError> {
     let mut watch = Vec::new();
-    let result = site_files(entry, Some(title), &mut watch);
+    let result = site_files(entry, Some(title), &mut watch, false);
     let mut guard = lock(state);
     guard.version += 1;
     match result {

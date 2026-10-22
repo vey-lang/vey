@@ -320,9 +320,12 @@ fn a_page_may_not_take_the_place_of_the_home_of_the_site() {
     let error = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(error.contains("would take the place"), "{error}");
 
-    // The home of the site is still the page of the entry.
-    let home = std::fs::read_to_string(dir.join("out/index.html")).unwrap();
+    // The home of the site is still the page of the entry. Its script is in
+    // a file of its own.
+    let home = std::fs::read_to_string(dir.join("out/index.js")).unwrap();
     assert!(home.contains("Hi"), "{home}");
+    let page = std::fs::read_to_string(dir.join("out/index.html")).unwrap();
+    assert!(page.contains("index.js"), "{page}");
 }
 
 #[test]

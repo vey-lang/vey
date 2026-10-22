@@ -565,7 +565,7 @@ of a web framework is missing.
       (`src/cli/args.rs:40`, `src/cli/scaffold.rs:36`).
 - [x] **The help does not name `--force`, the `--host` of `dev`, or the
       entry of `run` and `dev`** (`src/cli/output.rs:142-175`).
-- [ ] **The bundle is one file with everything.** There is no shaking of the
+- [x] **The bundle is one file with everything.** There is no shaking of the
       trees, no minifier and no split of the code that is only used on one
       page (`src/compiler/mod.rs:120-172`).
 - [x] **There is no migration of the old programs.** When the language
