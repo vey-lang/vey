@@ -403,6 +403,26 @@ function veyShared(ctx) {
         response.write(String(text));
         return res;
       },
+      // Write the status line and headers without ending the answer.
+      writeHead: function (code, headers) {
+        if (state.finished || state.sent) return res;
+        state.status = Number(code);
+        if (headers) copyHeaders(state.headers, headers);
+        state.streaming = true;
+        state.sent = true;
+        response.writeHead(state.status, state.headers);
+        return res;
+      },
+      // Send headers now, leaving the body for a later write or end call.
+      flushHeaders: function () {
+        if (state.finished || state.sent) return res;
+        state.sent = true;
+        if (typeof response.flushHeaders === "function") {
+          response.writeHead(state.status, state.headers);
+          response.flushHeaders();
+        }
+        return res;
+      },
       json: function (value) {
         if (!hasHeader(state.headers, "content-type")) {
           state.headers["Content-Type"] = "application/json; charset=utf-8";
@@ -484,6 +504,11 @@ function veyShared(ctx) {
         return state.finished;
       }
     };
+    res.locals = {};
+    Object.defineProperty(res, "headersSent", {
+      enumerable: true,
+      get: function () { return state.sent; }
+    });
     return res;
   }
 

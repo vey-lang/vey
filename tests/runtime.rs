@@ -1101,6 +1101,38 @@ app.start(() => {
 }
 
 #[test]
+fn response_can_write_headers_and_keep_request_locals() {
+    let text = run_runtime(
+        "response-headers",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.get("/", (req, res) => {
+  res.locals.answer = "hello";
+  res.writeHead(201, { "X-Answer": res.locals.answer });
+  res.write(res.locals.answer);
+  res.end();
+});
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/", (res) => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      console.log(JSON.stringify({ status: res.statusCode, header: res.headers["x-answer"], body }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":201,"header":"hello","body":"hello"}"#)
+    );
+}
+
+#[test]
 fn static_files_do_not_follow_symlinks_outside_the_root() {
     let text = run_runtime(
         "static-symlink",
