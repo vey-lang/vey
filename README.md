@@ -990,6 +990,19 @@ effect(fn() {
 count.set(1)
 ```
 
+A value that follows other values is a `computed`. It is called again when
+one of the values it read has changed.
+
+```vey
+let first = signal(1)
+let second = signal(2)
+let total = computed(fn() { return first.value + second.value })
+
+print(total.value)
+first.set(10)
+print(total.value)
+```
+
 `mount(selector, node)` writes a page and changes it in place, so that a list
 may grow, shrink and be put in another order. An item of a list may carry a
 `key`, which is how the page knows that it is the same item.
