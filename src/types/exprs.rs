@@ -499,7 +499,13 @@ impl TypeChecker<'_> {
                     other => other,
                 })
             }
-            Expr::Yield(inner, _) => self.infer_expr(inner),
+            Expr::Yield(inner, _) => {
+                // The type of the value is kept, so that the type of a
+                // generator that was not written is known.
+                let ty = self.infer_expr(inner)?;
+                self.yielded.push(ty.clone());
+                Ok(ty)
+            }
             Expr::As(inner, ty, pos) => {
                 // A cast is only possible between types that are near one
                 // another.

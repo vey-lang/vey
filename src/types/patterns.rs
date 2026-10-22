@@ -214,7 +214,21 @@ impl TypeChecker<'_> {
         match pattern {
             BindingPattern::Name { name, .. } => self.set_binding(name, ty.clone()),
             BindingPattern::Array { items, rest, .. } => {
-                let item_ty = element_type(ty);
+                // A tuple gives every name the type of its own place.
+                let item_ty = match ty {
+                    Type::Tuple(parts) => {
+                        for (index, item) in items.iter().enumerate() {
+                            let part = parts.get(index).cloned().unwrap_or(Type::Any);
+                            self.declare_pattern_typed(item, &part);
+                        }
+                        if let Some(rest) = rest {
+                            let remainder = parts.iter().skip(items.len()).cloned().collect();
+                            self.set_binding(rest, Type::Tuple(remainder));
+                        }
+                        return;
+                    }
+                    other => element_type(other),
+                };
                 for item in items {
                     self.declare_pattern_typed(item, &item_ty);
                 }

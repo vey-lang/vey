@@ -164,8 +164,12 @@ impl TypeChecker<'_> {
 
     pub(crate) fn check_fn_decl_inner(&mut self, decl: &FnDecl) -> Result<(), VeyError> {
         let mut ty = self.function_type_for_decl(decl)?;
-        let (inferred, param_types) =
-            self.check_function(&decl.params, &decl.body, decl.ret.as_ref(), decl.pos)?;
+        // The values that this function yields belong to it, not to the
+        // function around it.
+        let outer = std::mem::take(&mut self.yielded);
+        let checked = self.check_function(&decl.params, &decl.body, decl.ret.as_ref(), decl.pos);
+        let yielded = std::mem::replace(&mut self.yielded, outer);
+        let (inferred, param_types) = checked?;
         // The types of the parameters that were not written are the ones that
         // the way they are used asks for.
         if let Type::Function(function) = &mut ty {
@@ -189,7 +193,16 @@ impl TypeChecker<'_> {
         // them, so that a loop may walk it.
         if block_has_yield(&decl.body) {
             if let Type::Function(function) = &mut ty {
-                let element = (*function.ret).clone();
+                // The type that was written is the type of one value; a
+                // generator that was not written yields the values that the
+                // body yields.
+                let element = if decl.ret.is_some() {
+                    (*function.ret).clone()
+                } else if yielded.is_empty() {
+                    Type::Void
+                } else {
+                    union(yielded)
+                };
                 function.ret = Box::new(Type::Array(Box::new(element)));
             }
         }
@@ -602,9 +615,21 @@ impl TypeChecker<'_> {
                 }
             }
             Pattern::List(items, _) => {
-                let element = element_type(ty);
-                for item in items {
-                    self.declare_pattern_names(item, &element);
+                // A tuple gives every name the type of its own place, and a
+                // list gives every name the type of its items.
+                match ty {
+                    Type::Tuple(parts) => {
+                        for (index, item) in items.iter().enumerate() {
+                            let part = parts.get(index).cloned().unwrap_or(Type::Any);
+                            self.declare_pattern_names(item, &part);
+                        }
+                    }
+                    other => {
+                        let element = element_type(other);
+                        for item in items {
+                            self.declare_pattern_names(item, &element);
+                        }
+                    }
                 }
             }
             Pattern::Object(fields, _) => {

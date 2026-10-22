@@ -78,17 +78,34 @@ impl Codegen {
                         }
                     }
                 }
-                let mut all = conditions;
-                if let Some(guard) = &arm.guard {
-                    all.push(codegen.gen_expr(guard)?);
-                }
-                let body = codegen.gen_markup_nodes(&arm.body)?;
-                codegen.emit(&format!("if ({}) {{", all.join(" || ")));
+                // A pattern that only names the value matches everything.
+                let test = if conditions.is_empty() {
+                    "true".to_string()
+                } else {
+                    conditions.join(" || ")
+                };
+                codegen.emit(&format!("if ({}) {{", test));
                 codegen.indent += 1;
+                // The names are there before the guard reads them.
                 for name in &value_names {
                     codegen.emit(&format!("const _{} = {};", name, temp));
                 }
+                // A guard that says no lets the next arm try.
+                let inner = match &arm.guard {
+                    Some(guard) => format!("if ({}) {{", codegen.gen_expr(guard)?),
+                    None => String::new(),
+                };
+                let nested = arm.guard.is_some();
+                if nested {
+                    codegen.emit(&inner);
+                    codegen.indent += 1;
+                }
+                let body = codegen.gen_markup_nodes(&arm.body)?;
                 codegen.emit(&format!("return {};", body));
+                if nested {
+                    codegen.indent -= 1;
+                    codegen.emit("}");
+                }
                 codegen.indent -= 1;
                 codegen.emit("}");
             }

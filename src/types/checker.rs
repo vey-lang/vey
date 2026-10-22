@@ -82,6 +82,7 @@ pub fn check(
         shadowed: HashSet::new(),
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
+        yielded: Vec::new(),
     };
     checker.check_program(program)?;
     // build the module's exported type environment
@@ -452,6 +453,9 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) shadowed: HashSet<String>,
     pub(crate) expected_returns: Vec<Option<Type>>,
     pub(crate) collected_returns: Vec<Vec<Type>>,
+    /// The types of the values that a generator hands back one by one, so
+    /// that the type of a generator that was not written is known.
+    pub(crate) yielded: Vec<Type>,
 }
 
 impl TypeChecker<'_> {
@@ -512,6 +516,7 @@ impl TypeChecker<'_> {
             param_scopes: Vec::new(),
             resolved: HashMap::new(),
             try_depth: 0,
+            yielded: Vec::new(),
             shadowed: HashSet::new(),
             expected_returns: Vec::new(),
             collected_returns: Vec::new(),

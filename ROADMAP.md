@@ -793,7 +793,7 @@ gap that is closed.
 - [x] **The `vey explain` walker skips the casts, the functions and the
       markup,** so it answers "there is no expression at that place".
       (`src/types/explain.rs`)
-- [ ] **The guard of a `match` in the markup is tried before the names it
+- [x] **The guard of a `match` in the markup is tried before the names it
       uses exist.** (`src/codegen/markup.rs`)
 - [x] **A `defer` at the top level of a file is taken,** although the error
       that says it is not allowed can never fire. (`src/codegen/mod.rs`)
@@ -900,7 +900,7 @@ gap that is closed.
 - [ ] **A narrowing inside a closure changes the type of the variable of
       the function around it.** (`src/types/checker.rs`)
 - [x] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
-- [ ] **A generator without a return type has the type `() -> [void]`.**
+- [x] **A generator without a return type has the type `() -> [void]`.**
       (`src/types/stmts.rs`)
 - [x] **`vey explain` gives the type `any` for a name inside a function,**
       because the checker of the explanation does not walk into the
@@ -910,7 +910,7 @@ gap that is closed.
       (`src/types/rules.rs`)
 - [x] **The type of the values of a dictionary is not used** for
       `d["key"]`. (`src/types/exprs.rs`)
-- [ ] **The parts of a tuple are not taken apart by their place,** so every
+- [x] **The parts of a tuple are not taken apart by their place,** so every
       name of the tuple has the union of all of them.
       (`src/types/patterns.rs`)
 - [x] **The value that a name of a `let` has by default is not checked**
