@@ -124,7 +124,7 @@ pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
 pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Defer(_) => true,
-        Stmt::Throw(decl) => false,
+        Stmt::Throw(_) => false,
         Stmt::Var(decl) => decl.init.as_ref().map(|_| false).unwrap_or(false),
         Stmt::Fn(_) | Stmt::Component(_) => false,
         Stmt::If(decl) => {
@@ -164,8 +164,8 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
                 || decl.catch.as_ref().is_some_and(block_has_defer)
                 || decl.finally.as_ref().is_some_and(block_has_defer)
         }
-        Stmt::Expr(decl) => false,
-        Stmt::Assign(decl) => false,
+        Stmt::Expr(_) => false,
+        Stmt::Assign(_) => false,
         Stmt::Block(block, _) => block_has_defer(block),
     }
 }

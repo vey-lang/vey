@@ -106,6 +106,7 @@ impl Codegen {
     }
 
     /// An error that points at a place of the program.
+    #[allow(dead_code)]
     fn err_at(&self, pos: Pos, message: impl Into<String>) -> VeyError {
         VeyError::new(message, self.file.clone(), pos.line, pos.col)
     }
