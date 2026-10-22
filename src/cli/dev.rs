@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
-use crate::cli::entry::{collect_files, default_title, entry_from, project_root};
+use crate::cli::entry::{collect_files, collect_folders, default_title, entry_from, project_root};
 use crate::cli::error::BuildError;
 use crate::cli::output::{html_document, print_command_help};
 use crate::cli::site::{default_404_page, site_files};
@@ -559,10 +559,20 @@ pub(crate) fn dev_snapshot(
 
     let mut paths: Vec<PathBuf> = vec![entry.to_path_buf()];
     // The folder of the pages is watched as well, so that a page that is
-    // added or taken away is noticed.
+    // added or taken away is noticed. The folders in it are watched too, so
+    // that a page that is added in one of them is noticed.
     let pages = lock(state).pages.clone();
-    if pages.is_dir() && !paths.contains(&pages) {
-        paths.push(pages);
+    if pages.is_dir() {
+        if !paths.contains(&pages) {
+            paths.push(pages.clone());
+        }
+        let mut folders = Vec::new();
+        collect_folders(&pages, &mut folders);
+        for folder in folders {
+            if !paths.contains(&folder) {
+                paths.push(folder);
+            }
+        }
     }
     // The files of the project that the build reads.
     for path in &watch {

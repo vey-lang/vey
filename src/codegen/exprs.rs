@@ -3,7 +3,7 @@
 use crate::ast::*;
 use crate::VeyError;
 
-use super::awaits::{block_has_await, block_has_yield, expr_has_await};
+use super::awaits::{block_has_await, block_has_yield, expr_has_await, expr_has_yield};
 use super::js::{format_number, js_key, js_string};
 use super::Codegen;
 
@@ -242,7 +242,12 @@ impl Codegen {
                 for (key, pattern) in fields {
                     let value = format!("{}[{}]", subject, js_string(key));
                     match pattern {
-                        Pattern::Binding { name, .. } => taken.push((name.clone(), value)),
+                        Pattern::Binding { name, .. } => {
+                            // The field has to be there, or the pattern does
+                            // not hold.
+                            conditions.push(format!("{} !== undefined", value));
+                            taken.push((name.clone(), value));
+                        }
                         Pattern::Wildcard { .. } => {}
                         Pattern::Literal(expr) => {
                             let text = self.gen_expr(expr)?;
@@ -328,6 +333,14 @@ impl Codegen {
                 let value = self.gen_expr(expr)?;
                 let async_kw = if expr_has_await(expr) { "async " } else { "" };
                 self.pop_scope();
+                if expr_has_yield(expr) {
+                    // A `yield` may only be in a generator, and an arrow
+                    // cannot be one.
+                    return Ok(format!(
+                        "({}function*({}) {{ return {}; }})",
+                        async_kw, param_text, value
+                    ));
+                }
                 Ok(format!("({}({}) => {})", async_kw, param_text, value))
             }
             ArrowBody::Block(block) => {
@@ -518,6 +531,17 @@ impl Codegen {
         } else {
             ""
         };
+        // A `yield` may only be in a generator, and an arrow cannot be one.
+        if arms.iter().any(|arm| expr_has_yield(&arm.body)) {
+            return Ok(format!(
+                "({}function*({}) {{\n{}\n{}}})({})",
+                async_kw,
+                temp,
+                captured.trim_end_matches('\n'),
+                pad,
+                subject
+            ));
+        }
         Ok(format!(
             "({}({}) => {{\n{}\n{}}})({})",
             async_kw,

@@ -355,6 +355,9 @@ impl TypeChecker<'_> {
             Stmt::IfLet(decl) => {
                 let value_ty = self.infer_expr(&decl.value)?;
                 self.push_scope();
+                // The pattern of an enum has to hold, or the branch is
+                // never run.
+                self.check_enum_pattern(&decl.pattern, &value_ty)?;
                 self.declare_pattern_names(&decl.pattern, &value_ty);
                 self.check_block(&decl.then_block)?;
                 self.pop_scope();
@@ -371,6 +374,7 @@ impl TypeChecker<'_> {
             Stmt::WhileLet(decl) => {
                 let value_ty = self.infer_expr(&decl.value)?;
                 self.push_scope();
+                self.check_enum_pattern(&decl.pattern, &value_ty)?;
                 self.declare_pattern_names(&decl.pattern, &value_ty);
                 for inner in &decl.body.body {
                     self.check_stmt(inner)?;

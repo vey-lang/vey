@@ -118,8 +118,9 @@ function veyDom(ctx) {
     if (value.__vey) {
       var el = doc.createElement(value.tag);
       applyProps(el, value.props || {});
-      for (var j = 0; j < value.children.length; j++) {
-        el.appendChild(toDom(value.children[j]));
+      var children = value.children || [];
+      for (var j = 0; j < children.length; j++) {
+        el.appendChild(toDom(children[j]));
       }
       return el;
     }
@@ -164,7 +165,8 @@ function veyDom(ctx) {
 
     if (VOID_TAGS[node.tag]) return "<" + node.tag + attrs + ">";
     var children = "";
-    for (var j = 0; j < node.children.length; j++) children += html(node.children[j]);
+    var inner = node.children || [];
+    for (var j = 0; j < inner.length; j++) children += html(inner[j]);
     return "<" + node.tag + attrs + ">" + children + "</" + node.tag + ">";
   }
 

@@ -225,6 +225,32 @@ pub(crate) fn collect_tool_files(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// The folders of a directory, and of the folders in them.
+///
+/// A folder is watched as well, so that a file that is added in it is
+/// noticed.
+pub(crate) fn collect_folders(directory: &Path, folders: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if !kind.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || is_build_dir(&name) {
+            continue;
+        }
+        folders.push(path.clone());
+        collect_folders(&path, folders);
+    }
+}
+
 pub(crate) fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;

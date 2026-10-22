@@ -103,7 +103,8 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     println!("  cd {}", name);
     match template {
         Template::Page | Template::Server => println!("  vey dev"),
-        Template::Lib => println!("  vey check"),
+        // A library has no page, so the file of it is named.
+        Template::Lib => println!("  vey check src/lib.vey"),
     }
     0
 }

@@ -31,10 +31,28 @@ impl Parser {
     pub(crate) fn parse_optional_type(&mut self) -> Result<TypeExpr, VeyError> {
         let mut ty = self.parse_primary_type()?;
         while self.is_op("?") {
+            if !self.optional_type_ahead() {
+                break;
+            }
             let pos = self.advance()?.pos;
             ty = TypeExpr::Optional(Box::new(ty), pos);
         }
         Ok(ty)
+    }
+
+    /// Whether the `?` after a type is the mark of a type that may be
+    /// nothing.
+    ///
+    /// The `?` of a ternary is not one: it is followed by the value that is
+    /// taken when the test holds.
+    fn optional_type_ahead(&mut self) -> bool {
+        let Ok(next) = self.peek() else {
+            return false;
+        };
+        matches!(
+            next.value.as_str(),
+            "=" | "," | ")" | "]" | "}" | "{" | "|" | ";" | ">"
+        ) || next.newline_before
     }
 
     pub(crate) fn parse_primary_type(&mut self) -> Result<TypeExpr, VeyError> {

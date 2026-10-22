@@ -289,11 +289,11 @@ impl Lexer {
         };
 
         if c.is_ascii_digit() || (c == '.' && self.at(1).is_some_and(|c| c.is_ascii_digit())) {
-            return Ok(self.read_number(start, pos));
+            return self.read_number(start, pos);
         }
 
         if c == '"' || c == '\'' || c == '`' {
-            return self.read_string(start, pos, c);
+            return self.read_string(start, pos, c, newline_before);
         }
 
         if c.is_alphabetic() || c == '_' || c == '$' {
@@ -358,7 +358,7 @@ impl Lexer {
         Err(self.err(format!("unexpected character '{}'", c)))
     }
 
-    fn read_number(&mut self, start: usize, pos: Pos) -> Token {
+    fn read_number(&mut self, start: usize, pos: Pos) -> Result<Token, VeyError> {
         let newline_before = self.newline;
         let mut raw = String::new();
 
@@ -387,7 +387,7 @@ impl Lexer {
                         self.bump();
                     }
                     if digits.is_empty() {
-                        return Token {
+                        return Ok(Token {
                             kind: TokKind::Number,
                             value: "0".to_string(),
                             number: 0.0,
@@ -396,12 +396,22 @@ impl Lexer {
                             start,
                             end: self.pos,
                             newline_before,
-                        };
+                        });
                     }
-                    let number = u64::from_str_radix(&digits, radix)
-                        .map(|value| value as f64)
-                        .unwrap_or(0.0);
-                    return Token {
+                    let number = match u64::from_str_radix(&digits, radix) {
+                        Ok(value) => value as f64,
+                        Err(_) => {
+                            // A number that does not fit in 64 bits is
+                            // written as a float, so that it is not zero.
+                            let mut value = 0.0f64;
+                            for c in digits.chars() {
+                                let digit = c.to_digit(radix as u32).unwrap_or(0) as f64;
+                                value = value * radix as f64 + digit;
+                            }
+                            value
+                        }
+                    };
+                    return Ok(Token {
                         kind: TokKind::Number,
                         value: digits,
                         number,
@@ -410,7 +420,7 @@ impl Lexer {
                         start,
                         end: self.pos,
                         newline_before,
-                    };
+                    });
                 }
             }
         }
@@ -481,8 +491,16 @@ impl Lexer {
                 }
             }
         }
-        let number = raw.parse().unwrap_or(0.0);
-        Token {
+        let number = match raw.parse::<f64>() {
+            Ok(number) if number.is_finite() => number,
+            Ok(_) => {
+                return Err(self.err(format!("the number '{}' is too big", raw)));
+            }
+            Err(_) => {
+                return Err(self.err(format!("'{}' is not a number", raw)));
+            }
+        };
+        Ok(Token {
             kind: TokKind::Number,
             value: raw.clone(),
             number,
@@ -491,6 +509,6 @@ impl Lexer {
             start,
             end: self.pos,
             newline_before,
-        }
+        })
     }
 }

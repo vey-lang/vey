@@ -850,12 +850,16 @@ gap that is closed.
       apart,** so the arm of one of them takes the value of the other. The
       name of an enum has the number of its module in front of it now.
       (`src/codegen/exprs.rs`, `src/codegen/mod.rs`, `src/runtime/enum.js`)
-- [ ] **A `yield` in the body of an arrow or of a `match` arm is written
+- [x] **A `yield` in the body of an arrow or of a `match` arm is written
       into a function that is not a generator,** so the bundle is not valid
-      JavaScript. (`src/codegen/exprs.rs`)
-- [ ] **A number that is too big is written as `inf`,** which is not
-      JavaScript. (`src/codegen/js.rs`)
-- [ ] **The `match` of the markup throws the names that its patterns bind
+      JavaScript. An arrow with a `yield` is a generator now, and a `match`
+      that has a `yield` in it is refused, because the arms of a match are
+      written in a function of their own.
+      (`src/codegen/exprs.rs`, `src/types/exprs.rs`)
+- [x] **A number that is too big is written as `inf`,** which is not
+      JavaScript. The number is refused now.
+      (`src/codegen/js.rs`, `src/lexer/mod.rs`)
+- [x] **The `match` of the markup throws the names that its patterns bind
       away,** so the bundle names something that was never written.
       (`src/codegen/markup.rs`)
 - [x] **The build cache does not know the stylesheets,** so a change in a
@@ -866,15 +870,6 @@ gap that is closed.
       because the folder is emptied before the site is written. A folder
       that holds the sources is refused now.
       (`src/cli/site.rs`)
-- [ ] **The dev server does not see a page that is added to a folder of
-      the pages,** because only the folder itself is watched.
-      (`src/cli/dev.rs`)
-- [ ] **`vey new --template lib` recommends `vey check`,** and the check
-      cannot find the project, because the template has no `main.vey`.
-      (`src/cli/scaffold.rs`, `src/cli/entry.rs`)
-- [ ] **`vey add` says that the package was added to `package.json`,** and
-      the manifest is left as it was when it has no `dependencies` yet.
-      (`src/cli/add.rs`)
 
 ### 14.2 The type checker
 
@@ -1058,28 +1053,46 @@ gap that is closed.
 - [x] **The `match` of the markup refuses a comma between its arms,** so
       the same text is a mistake in the markup and not in an expression.
       (`src/parser/markup.rs`)
-- [ ] **A number in another base that does not fit in 64 bits is
-      silently zero.** (`src/lexer/mod.rs`)
-- [ ] **A `?` that hands a failure on is read as a ternary** when a `:`
-      is written later in the same block. (`src/parser/exprs.rs`)
-- [ ] **The token of a text always says that no line ended before it,** so
+- [x] **A number in another base that does not fit in 64 bits is
+      silently zero.** The number is written as a float now.
+      (`src/lexer/mod.rs`)
+- [x] **A `?` that hands a failure on is read as a ternary** when a `:`
+      is written later in the same block. A word that starts a statement
+      ends the search now. (`src/parser/exprs.rs`)
+- [x] **The token of a text always says that no line ended before it,** so
       the rule "the end of a line ends a statement" does not hold for a
       line that starts with a text. (`src/lexer/strings.rs`)
-- [ ] **The parser of the types takes the `?` of a ternary,** so a
-      ternary after an `is` or an `as` is a mistake.
+- [x] **The parser of the types takes the `?` of a ternary,** so a
+      ternary after an `is` or an `as` is a mistake. The `?` of a type is
+      only taken when the type ends there.
       (`src/parser/types.rs`)
-- [ ] **A pattern of an object holds for every value that is not
-      nothing,** because the field of it is never checked.
-      (`src/codegen/exprs.rs`)
-- [ ] **The `if let` and the `while let` do not check the enum of a
+- [x] **A pattern of an object holds for every value that is not
+      nothing,** because the field of it is never checked. The field has to
+      be there now. (`src/codegen/exprs.rs`)
+- [x] **The `if let` and the `while let` do not check the enum of a
       pattern,** so a pattern that can never hold is accepted.
-      (`src/types/stmts.rs`)
-- [ ] **The markup has no depth guard,** so a markup that is nested a few
+      (`src/types/stmts.rs`, `src/types/exprs.rs`)
+- [x] **The markup has no depth guard,** so a markup that is nested a few
       hundred deep takes the compiler down. (`src/parser/markup.rs`)
-- [ ] **A range with a step to the other way walks nothing,** when the
-      range itself counts up. (`src/codegen/mod.rs`)
-- [ ] **`html` falls over on a value that only looks like a node of the
+- [x] **A range with a step to the other way walks nothing,** when the
+      range itself counts up. A range that counts down begins at its end
+      now. (`src/codegen/mod.rs`)
+- [x] **`html` falls over on a value that only looks like a node of the
       markup.** (`src/runtime/dom.js`)
+- [x] **The dev server does not see a page that is added to a folder of
+      the pages,** because only the folder itself is watched. The folders
+      in it are watched now.
+      (`src/cli/dev.rs`, `src/cli/entry.rs`)
+- [x] **The linter compares the names of two different functions,** so a
+      name that is near another one is said for the wrong reason. The names
+      of a function are its own now. (`src/cli/lint.rs`)
+- [x] **`vey add` says that the package was added to `package.json`,** and
+      the manifest is left as it was when it has no `dependencies` yet. The
+      dependencies are added now. (`src/cli/add.rs`)
+- [x] **`vey new --template lib` recommends `vey check`,** and the check
+      cannot find the project, because the template has no `main.vey`. The
+      file of the library is named now.
+      (`src/cli/scaffold.rs`, `src/cli/entry.rs`)
 - [x] **`vey fmt` eats the spaces of a text that spans lines,** so the
       program means something else after it is written. The lines of a
       text are now kept as they are. (`src/cli/fmt.rs`)
@@ -1105,9 +1118,6 @@ gap that is closed.
 - [x] **The value of a `return` was taken from the next line,** so the
       statement after a `return` became the value of the `return`.
       (`src/parser/mod.rs`)
-- [ ] **The linter compares the names of two different functions,** so a
-      name that is near another one is said for the wrong reason.
-      (`src/cli/lint.rs`)
 - [x] **The types of the helper objects did not have the members that the
       runtime has,** so `http.fetch`, `fs.readStream`, `process.spawn`,
       `text.encode` and `Map().toList()` were type errors although the

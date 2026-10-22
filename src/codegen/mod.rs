@@ -495,13 +495,24 @@ impl Codegen {
                     None => None,
                 };
                 let pattern = self.gen_binding_pattern(&decl.pattern)?;
-                if let Some((start, end)) = range {
-                    let start = self.gen_expr(start)?;
-                    let end = self.gen_expr(end)?;
+                if let Some((start_expr, end_expr)) = range {
+                    let mut start = self.gen_expr(start_expr)?;
+                    let mut end = self.gen_expr(end_expr)?;
                     let step_expr = decl.step.as_ref().expect("the step");
                     let step = self.gen_expr(step_expr)?;
                     // A loop that counts down is written the other way round.
                     let down = is_negative(step_expr);
+                    // A range that counts down begins at its end, so that
+                    // the range may be written the way it is read.
+                    if down {
+                        if let (Some(from), Some(to)) =
+                            (number_value(start_expr), number_value(end_expr))
+                        {
+                            if from < to {
+                                std::mem::swap(&mut start, &mut end);
+                            }
+                        }
+                    }
                     let test = if down { ">=" } else { "<" };
                     // The counter is a name of its own, so that a pattern
                     // may take it apart.
@@ -969,6 +980,19 @@ impl Codegen {
 /// Whether a number is below zero.
 ///
 /// A loop that counts down is written the other way round.
+/// The value of a number, when it is one that is written.
+fn number_value(expr: &Expr) -> Option<f64> {
+    match expr {
+        Expr::Number(value, _) => Some(*value),
+        // The minus is in front of the number, so the number is above zero.
+        Expr::Unary(op, inner, _) if op == "-" => match &**inner {
+            Expr::Number(value, _) => Some(-*value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn is_negative(expr: &Expr) -> bool {
     match expr {
         Expr::Number(value, _) => *value < 0.0,

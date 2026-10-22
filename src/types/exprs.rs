@@ -20,6 +20,7 @@ use super::helpers::{
     argument_label, literal_number, operand_type, place_path, qualified_type, set_object_field,
     type_argument_label,
 };
+use crate::types::helpers::expr_has_yield;
 use crate::parser::exprs::NAMED_MARKER;
 use crate::suggest::did_you_mean;
 
@@ -220,6 +221,16 @@ impl TypeChecker<'_> {
                 Ok(Type::Array(Box::new(Type::Number)))
             }
             Expr::Match(subject, arms, _) => {
+                // The arms of a match are written in a function of their
+                // own, so a `yield` in them would not reach the caller.
+                if expr_has_yield(subject)
+                    || arms.iter().any(|arm| expr_has_yield(&arm.body))
+                {
+                    return Err(self.error(
+                        subject.pos(),
+                        "a `yield` may not be used inside a `match`",
+                    ));
+                }
                 let subject_ty = self.infer_expr(subject)?;
                 let mut types = Vec::new();
                 let mut covered = std::collections::HashSet::new();
@@ -233,98 +244,9 @@ impl TypeChecker<'_> {
                             Pattern::Enum {
                                 enum_name,
                                 variant,
-                                bindings,
-                                pos,
+                                ..
                             } => {
-                                // resolve enum
-                                let Some(info) = self.enum_info(enum_name) else {
-                                    return Err(
-                                        self.error(*pos, format!("unknown enum '{}'", enum_name))
-                                    );
-                                };
-                                let v_fields: Vec<(String, Option<TypeExpr>)> = {
-                                    let v = info.variant(variant).ok_or_else(|| {
-                                        self.error(
-                                            *pos,
-                                            format!(
-                                                "enum '{}' has no variant '{}'",
-                                                enum_name, variant
-                                            ),
-                                        )
-                                    })?;
-                                    v.fields
-                                        .iter()
-                                        .map(|f| (f.name.clone(), f.ty.clone()))
-                                        .collect()
-                                };
-                                // subject compatibility
-                                match &subject_ty {
-                                    Type::EnumUnion(e) if e != enum_name => {
-                                        return Err(self.error(
-                                            *pos,
-                                            format!(
-                                                "pattern '{}.{}' does not match '{}'",
-                                                enum_name, variant, e
-                                            ),
-                                        ));
-                                    }
-                                    Type::Enum(e, _) if e != enum_name => {
-                                        return Err(self.error(
-                                            *pos,
-                                            format!(
-                                                "pattern '{}.{}' does not match '{}'",
-                                                enum_name, variant, e
-                                            ),
-                                        ));
-                                    }
-                                    _ => {}
-                                }
-                                // binding count check
-                                if bindings.len() != v_fields.len() {
-                                    return Err(self.error(
-                                        *pos,
-                                        format!(
-                                            "variant '{}.{}' expects {} binding(s), found {}",
-                                            enum_name,
-                                            variant,
-                                            v_fields.len(),
-                                            bindings.len()
-                                        ),
-                                    ));
-                                }
-                                // resolve field types and declare bindings
-                                // positional vs named
-                                let mut positional_idx = 0;
-                                for b in bindings {
-                                    let field_name = if let Some(f) = &b.field {
-                                        f.clone()
-                                    } else {
-                                        if positional_idx >= v_fields.len() {
-                                            return Err(self.error(b.pos, format!("variant '{}.{}' expects {} binding(s), found {}", enum_name, variant, v_fields.len(), bindings.len())));
-                                        }
-                                        let name = v_fields[positional_idx].0.clone();
-                                        positional_idx += 1;
-                                        name
-                                    };
-                                    let field_ty = v_fields
-                                        .iter()
-                                        .find(|(n, _)| n == &field_name)
-                                        .map(|(_, t)| t.clone())
-                                        .ok_or_else(|| {
-                                            self.error(
-                                                b.pos,
-                                                format!(
-                                                    "variant '{}.{}' has no field '{}'",
-                                                    enum_name, variant, field_name
-                                                ),
-                                            )
-                                        })?;
-                                    let ty = match &field_ty {
-                                        Some(ty) => self.resolve_type(ty)?,
-                                        None => Type::Any,
-                                    };
-                                    self.declare(&b.name, ty);
-                                }
+                                self.check_enum_pattern(pattern, &subject_ty)?;
                                 // An arm with a condition does not cover its
                                 // variant on its own: the value may fall
                                 // through to the next arm.
@@ -1634,6 +1556,117 @@ impl TypeChecker<'_> {
             | Type::String => Err(self.no_field_error(ty, name, pos)),
             _ => Ok(Type::Any),
         }
+    }
+
+
+    /// Check a pattern of an enum against the type of the value.
+    ///
+    /// The enum has to be known, the variant has to be there, and the number
+    /// of the names has to be the number of the fields.
+    pub(crate) fn check_enum_pattern(
+        &mut self,
+        pattern: &Pattern,
+        subject_ty: &Type,
+    ) -> Result<(), VeyError> {
+        let Pattern::Enum {
+            enum_name,
+            variant,
+            bindings,
+            pos,
+        } = pattern
+        else {
+            return Ok(());
+        };
+                        // resolve enum
+                        let Some(info) = self.enum_info(enum_name) else {
+                            return Err(
+                                self.error(*pos, format!("unknown enum '{}'", enum_name))
+                            );
+                        };
+                        let v_fields: Vec<(String, Option<TypeExpr>)> = {
+                            let v = info.variant(variant).ok_or_else(|| {
+                                self.error(
+                                    *pos,
+                                    format!(
+                                        "enum '{}' has no variant '{}'",
+                                        enum_name, variant
+                                    ),
+                                )
+                            })?;
+                            v.fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect()
+                        };
+                        // subject compatibility
+                        match &subject_ty {
+                            Type::EnumUnion(e) if e != enum_name => {
+                                return Err(self.error(
+                                    *pos,
+                                    format!(
+                                        "pattern '{}.{}' does not match '{}'",
+                                        enum_name, variant, e
+                                    ),
+                                ));
+                            }
+                            Type::Enum(e, _) if e != enum_name => {
+                                return Err(self.error(
+                                    *pos,
+                                    format!(
+                                        "pattern '{}.{}' does not match '{}'",
+                                        enum_name, variant, e
+                                    ),
+                                ));
+                            }
+                            _ => {}
+                        }
+                        // binding count check
+                        if bindings.len() != v_fields.len() {
+                            return Err(self.error(
+                                *pos,
+                                format!(
+                                    "variant '{}.{}' expects {} binding(s), found {}",
+                                    enum_name,
+                                    variant,
+                                    v_fields.len(),
+                                    bindings.len()
+                                ),
+                            ));
+                        }
+                        // resolve field types and declare bindings
+                        // positional vs named
+                        let mut positional_idx = 0;
+                        for b in bindings {
+                            let field_name = if let Some(f) = &b.field {
+                                f.clone()
+                            } else {
+                                if positional_idx >= v_fields.len() {
+                                    return Err(self.error(b.pos, format!("variant '{}.{}' expects {} binding(s), found {}", enum_name, variant, v_fields.len(), bindings.len())));
+                                }
+                                let name = v_fields[positional_idx].0.clone();
+                                positional_idx += 1;
+                                name
+                            };
+                            let field_ty = v_fields
+                                .iter()
+                                .find(|(n, _)| n == &field_name)
+                                .map(|(_, t)| t.clone())
+                                .ok_or_else(|| {
+                                    self.error(
+                                        b.pos,
+                                        format!(
+                                            "variant '{}.{}' has no field '{}'",
+                                            enum_name, variant, field_name
+                                        ),
+                                    )
+                                })?;
+                            let ty = match &field_ty {
+                                Some(ty) => self.resolve_type(ty)?,
+                                None => Type::Any,
+                            };
+                            self.declare(&b.name, ty);
+                        }
+        Ok(())
     }
 
     /// The error for a field that a type does not have.

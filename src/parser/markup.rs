@@ -8,6 +8,15 @@ use crate::VeyError;
 
 impl Parser {
     pub(crate) fn parse_markup_nodes(&mut self) -> Result<Vec<MarkupNode>, VeyError> {
+        // A markup that is nested too deep takes the compiler down, so the
+        // depth of it is watched.
+        self.enter()?;
+        let result = self.parse_markup_nodes_inner();
+        self.leave();
+        result
+    }
+
+    fn parse_markup_nodes_inner(&mut self) -> Result<Vec<MarkupNode>, VeyError> {
         let mut nodes = Vec::new();
         while !self.is_punct("}") && self.tok.kind != TokKind::Eof {
             if self.is_kw("if") {

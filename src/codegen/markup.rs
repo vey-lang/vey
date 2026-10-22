@@ -69,13 +69,15 @@ impl Codegen {
             for arm in &m.arms {
                 let mut conditions = Vec::new();
                 let mut value_names = Vec::new();
+                let mut taken: Vec<(String, String)> = Vec::new();
                 for pattern in &arm.patterns {
                     match pattern {
                         Pattern::Wildcard { .. } => {}
                         Pattern::Binding { name, .. } => value_names.push(name.clone()),
                         other => {
-                            let (condition, _) = codegen.gen_pattern(other, &temp)?;
+                            let (condition, bindings) = codegen.gen_pattern(other, &temp)?;
                             conditions.push(condition);
+                            taken.extend(bindings);
                         }
                     }
                 }
@@ -88,6 +90,9 @@ impl Codegen {
                 codegen.emit(&format!("if ({}) {{", test));
                 codegen.indent += 1;
                 // The names are there before the guard reads them.
+                for (name, expression) in &taken {
+                    codegen.emit(&format!("const _{} = {};", name, expression));
+                }
                 for name in &value_names {
                     codegen.emit(&format!("const _{} = {};", name, temp));
                 }

@@ -200,7 +200,10 @@ impl Linter {
             Stmt::Block(block, _) => self.walk_body(&block.body, depth + 1, names),
             Stmt::Fn(decl) => {
                 self.remember(&decl.name, decl.pos, names);
-                self.walk_body(&decl.body.body, depth + 1, names);
+                // The names of a function are its own, so they are not said
+                // against the names of another function.
+                let mut inner = names.clone();
+                self.walk_body(&decl.body.body, depth + 1, &mut inner);
             }
             Stmt::Component(decl) => {
                 self.remember(&decl.name, decl.pos, names);

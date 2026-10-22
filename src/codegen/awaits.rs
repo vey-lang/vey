@@ -4,7 +4,7 @@ use crate::ast::*;
 
 // The question "does this piece of code yield?" is answered in one place,
 // so that the checker and the writer of the code cannot disagree.
-pub(crate) use crate::types::helpers::block_has_yield;
+pub(crate) use crate::types::helpers::{block_has_yield, expr_has_yield};
 
 pub(crate) fn block_has_await(block: &Block) -> bool {
     block.body.iter().any(stmt_has_await)

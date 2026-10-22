@@ -312,6 +312,11 @@ impl Parser {
                 }
                 ":" if depth == 0 => return true,
                 ";" => return false,
+                // A word that starts a statement ends the expression, so
+                // the `:` of a later statement is not the `:` of a ternary.
+                "let" | "const" | "fn" | "return" | "if" | "else" | "for" | "while"
+                | "repeat" | "break" | "continue" | "try" | "use" | "export" | "component"
+                | "enum" | "type" | "throw" => return false,
                 _ => {}
             }
         }

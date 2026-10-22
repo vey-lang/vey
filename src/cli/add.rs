@@ -69,6 +69,25 @@ pub(crate) fn cmd_add(args: &[String]) -> i32 {
     0
 }
 
+/// Add the dependencies to a manifest that has none.
+fn add_dependencies(text: &str, package: &str) -> String {
+    // The object of the manifest ends with a brace.
+    let Some(brace) = text.rfind('}') else {
+        return text.to_string();
+    };
+    let head = text[..brace].trim_end();
+    let comma = if head.ends_with(',') { "" } else { "," };
+    let mut out = String::new();
+    out.push_str(head);
+    out.push_str(comma);
+    out.push_str(&format!(
+        "\n  \"dependencies\": {{\n    \"{}\": \"latest\"\n  }}",
+        package
+    ));
+    out.push_str(&text[brace..]);
+    out
+}
+
 /// Add a package to the dependencies of a manifest.
 ///
 /// The manifest is JSON, and the name of the package is written in the
@@ -82,7 +101,8 @@ fn add_dependency(text: &str, package: &str) -> String {
     // dependencies of the program are the first of them.
     let marker = "\"dependencies\"";
     let Some(start) = text.find(marker) else {
-        return text.to_string();
+        // The manifest has no dependencies yet, so they are added.
+        return add_dependencies(text, package);
     };
     let Some(brace) = text[start..].find('{') else {
         return text.to_string();

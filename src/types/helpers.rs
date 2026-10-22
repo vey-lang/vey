@@ -298,7 +298,7 @@ fn stmt_has_yield(stmt: &Stmt) -> bool {
     }
 }
 
-fn expr_has_yield(expr: &Expr) -> bool {
+pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
     match expr {
         Expr::Yield(_, _) => true,
         Expr::Fn(..) | Expr::Arrow(..) => false,

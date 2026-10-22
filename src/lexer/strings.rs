@@ -9,6 +9,7 @@ impl Lexer {
         start: usize,
         pos: Pos,
         quote: char,
+        newline_before: bool,
     ) -> Result<Token, VeyError> {
         let mut parts: Vec<StrPartToken> = Vec::new();
         let mut text = String::new();
@@ -28,7 +29,7 @@ impl Lexer {
                     pos,
                     start,
                     end: self.pos,
-                    newline_before: false,
+                    newline_before,
                 });
             }
 
