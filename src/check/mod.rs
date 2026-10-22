@@ -67,6 +67,16 @@ impl Checker<'_> {
                 pos.col,
             ));
         }
+        // A name that hides a helper of the runtime takes the helper away
+        // for the whole scope, so the reader should know about it.
+        if is_builtin(name) && !self.scopes.resolve(name).is_some() {
+            self.warn(Warning::new(
+                format!("'{}' hides a helper of the runtime", name),
+                self.file,
+                pos.line,
+                pos.col,
+            ));
+        }
         let file = self.file;
         self.scopes.declare(name, kind, pos, file)
     }

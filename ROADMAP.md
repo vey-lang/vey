@@ -372,7 +372,7 @@ its own and large in the life of a program.
 - [x] **The named arguments live only in the markup**; `f(a=1)` is a
       mistake anywhere else (`src/parser/exprs.rs:262-268`).
 
-- [ ] **The `async` keyword is refused** (`src/parser/mod.rs:140-150`),
+- [x] **The `async` keyword is refused** (`src/parser/mod.rs:140-150`),
       which is right, but nothing says so in the language itself.
 
 ### 5.3 The shape of the types
@@ -413,7 +413,7 @@ its own and large in the life of a program.
 - [x] **A `match` that is not exhaustive gives `undefined`**
       (`src/codegen/exprs.rs:391-393`).
 
-- [ ] **A name of the program is only made safe with a `_`**; a variable
+- [x] **A name of the program is only made safe with a `_`**; a variable
       called `json` hides the runtime for the whole scope.
 
 - [x] **There is no cache of the build.** Every build reads every module and

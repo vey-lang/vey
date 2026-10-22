@@ -279,6 +279,8 @@ print("value {name}") // the value of `name`
 ```
 
 A function that uses `await` is async on its own; there is no `async` keyword.
+The word is refused, so that a program cannot have a function that waits and
+one that does not without saying so.
 
 A template holds the parts of a text, and the values that are woven into it:
 
