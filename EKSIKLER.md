@@ -1051,10 +1051,10 @@ function fitsPath(pattern, pathname) {
 ```
 `app.use("/user/{id}", fn)` ve `app.use("/assets/*", fn)` artık çalışıyor. Regresyon testi: `tests/runtime.rs::middleware_paths_accept_route_parameters_and_wildcards`.
 
-### D7 · Hata middleware'i **4-arity** değil; instance izolasyonu ✅ **düzeltildi**
+### D7 · Hata middleware'i ✅ **4-arity ve zincir desteği eklendi**
 `runtime.errorHandler(handler)` callback'i artık `ctx` üzerine yazmıyor; `server.use()` onu kendi server instance'ına bağlıyor. İki sunucunun eşzamanlı hataları artık handler'larını karıştırmıyor. Test: `tests/runtime.rs::error_handlers_are_isolated_between_server_instances`.
 
-Kalan: API 4-arity Express biçiminde değil (`(error, req, res)`); `next(err)` ile bir sonraki hata middleware'ine devretme yok.
+Hata middleware'leri artık `(error, req, res, next)` imzasıyla `next()`/`next(err)` kullanarak sıradaki hata middleware'ine geçebiliyor. Test: `tests/runtime.rs::error_handlers_can_pass_errors_to_the_next_handler`.
 
 ### D8 · Statik dosya servisi bir **middleware** değil, yalnızca 404 fallback'i
 `src/runtime/server.js:371-373` + `611-613`

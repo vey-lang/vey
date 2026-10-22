@@ -1439,6 +1439,32 @@ Promise.all([
 }
 
 #[test]
+fn error_handlers_can_pass_errors_to_the_next_handler() {
+    let text = run_runtime(
+        "error-handler-chain",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use(runtime.errorHandler((error, req, res, next) => next(new Error("forwarded:" + error.message))));
+app.use(runtime.errorHandler((error, req, res) => res.send(error.message)));
+app.get("/boom", () => { throw new Error("original"); });
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/boom", res => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      console.log(body);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains("forwarded:original"), "{text}");
+}
+
+#[test]
 fn custom_not_found_and_error_handlers_control_their_responses() {
     let text = run_runtime(
         "not-found-error-handlers",

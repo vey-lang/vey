@@ -137,6 +137,7 @@ function veyServer(ctx) {
     var streams = [];
     var errorHandler = null;
     var middlewareErrorHandler = null;
+    var errorHandlers = [];
     var staticDir = null;
     // The name of the file of a folder that is served.
     var staticIndex = "index.html";
@@ -515,27 +516,44 @@ function veyServer(ctx) {
         res.send("The request is too large.");
         return;
       }
-      // The catch of the mistakes is either the one of the server, or the
-      // one of a middle piece.
-      var catcher = errorHandler || middlewareErrorHandler;
-      if (catcher) {
-        try {
-          catcher(err, info, res);
-          return;
-        } catch (ignored) {
-          // The handler of the mistakes had a mistake of its own.
+      var catchers = errorHandlers.slice();
+      if (!catchers.length) {
+        var catcher = errorHandler || middlewareErrorHandler;
+        if (catcher) catchers.push(catcher);
+      }
+      function fallback(error) {
+        log.error(error);
+        res.status(500);
+        // The reason of the mistake is only told to the visitor when the
+        // program says that it may, because it may tell something about the
+        // machine of the server.
+        if (exposeErrors) {
+          res.send("Server error: " + (error && error.message ? error.message : error));
+        } else {
+          res.send("Server error");
         }
       }
-      log.error(err);
-      res.status(500);
-      // The reason of the mistake is only told to the visitor when the
-      // program says that it may be, because it may tell something about
-      // the machine of the server.
-      if (exposeErrors) {
-        res.send("Server error: " + (err && err.message ? err.message : err));
-      } else {
-        res.send("Server error");
+      function dispatch(index, error) {
+        if (index >= catchers.length) {
+          fallback(error);
+          return;
+        }
+        var called = false;
+        function next(nextError) {
+          if (called) return;
+          called = true;
+          dispatch(index + 1, nextError || error);
+        }
+        try {
+          var result = catchers[index](error, info, res, next);
+          if (result && typeof result.then === "function") {
+            result.catch(function (nextError) { next(nextError); });
+          }
+        } catch (nextError) {
+          dispatch(index + 1, nextError);
+        }
       }
+      dispatch(0, err);
     }
 
     // The middle pieces are run, one after the other.
@@ -1069,6 +1087,7 @@ function veyServer(ctx) {
         var piece = typeof path === "function" ? path : fn;
         if (piece && piece.errorHandler) {
           middlewareErrorHandler = piece.errorHandler;
+          errorHandlers.push(piece.errorHandler);
         }
         if (typeof path === "function") {
           middlewares.push({ path: null, fn: path });
@@ -1087,6 +1106,7 @@ function veyServer(ctx) {
       // The piece that catches the mistakes.
       error: function (handler) {
         errorHandler = handler;
+        if (typeof handler === "function") errorHandlers.push(handler);
         return this;
       },
       static: function (dir, options) {
