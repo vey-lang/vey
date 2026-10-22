@@ -30,6 +30,7 @@ fn builtin_signature(params: Vec<Type>, required: usize, rest: bool, ret: Type) 
         checked: true,
         constraints: Vec::new(),
         type_params: Vec::new(),
+        param_names: Vec::new(),
     })
 }
 

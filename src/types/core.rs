@@ -59,6 +59,12 @@ pub struct EnumInfo {
     pub variants: Vec<EnumVariantInfo>,
 }
 
+/// The calls whose arguments are given by name.
+///
+/// The key is the place of the call, and the value is the arguments in the
+/// order of the parameters.
+pub type ResolvedCalls = std::collections::HashMap<(usize, usize), Vec<crate::ast::Expr>>;
+
 /// The members of an interface.
 #[derive(Clone)]
 pub struct InterfaceInfo {
@@ -115,6 +121,9 @@ pub struct FunctionType {
     pub(crate) constraints: Vec<(String, Type)>,
     /// The names of the type parameters, in the order they were declared.
     pub(crate) type_params: Vec<String>,
+    /// The names of the parameters, so that the arguments that are given by
+    /// name may be matched.
+    pub(crate) param_names: Vec<String>,
 }
 
 impl Type {

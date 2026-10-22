@@ -128,6 +128,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
             exports: module.exports.clone(),
             source: index,
             enums: std::collections::HashMap::new(),
+            resolved: std::collections::HashMap::new(),
         };
         let found = check::check(&module.ast, &module.path.display().to_string())?;
         warnings.extend(found);
@@ -157,6 +158,7 @@ pub fn compile_project(entry: &Path) -> Result<Bundle, VeyError> {
         // generator uses the same description.
         options.push(Options {
             enums: env.enums,
+            resolved: env.resolved,
             ..module_options
         });
     }

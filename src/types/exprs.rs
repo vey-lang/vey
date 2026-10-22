@@ -17,6 +17,7 @@ use super::helpers::{
     argument_label, literal_number, operand_type, qualified_type, set_object_field,
     type_argument_label,
 };
+use crate::parser::exprs::NAMED_MARKER;
 use crate::suggest::did_you_mean;
 
 impl TypeChecker<'_> {
@@ -162,14 +163,25 @@ impl TypeChecker<'_> {
             }
             Expr::Call(callee, args, optional, pos) => {
                 let callee_ty = self.infer_expr(callee)?;
-                let (arg_types, has_spread) = self.call_argument_types(args)?;
-                // A call that may not happen has a value that may be
-                // nothing.
+                // The callee may be a value that may be nothing.
                 let callee_ty = if *optional {
                     without_empty(&callee_ty)
                 } else {
                     callee_ty
                 };
+                // The arguments that are given by name are matched with the
+                // parameters, and the order of the arguments is written down
+                // for the code generator.
+                let (positional, named) = self.split_named(args)?;
+                let order = if named.is_empty() {
+                    positional.clone()
+                } else {
+                    self.match_named(&callee_ty, &positional, &named, *pos)?
+                };
+                let (arg_types, has_spread) = self.argument_types(&order)?;
+                if !named.is_empty() {
+                    self.resolved.insert((pos.line, pos.col), order);
+                }
                 self.check_call(&callee_ty, &arg_types, has_spread, *pos, None, None)
             }
             Expr::CallGeneric(callee, type_args, args, _, pos) => {
@@ -485,6 +497,11 @@ impl TypeChecker<'_> {
         &mut self,
         args: &[Expr],
     ) -> Result<(Vec<Type>, bool), VeyError> {
+        self.argument_types(args)
+    }
+
+    /// The types of a list of arguments.
+    fn argument_types(&mut self, args: &[Expr]) -> Result<(Vec<Type>, bool), VeyError> {
         let mut types = Vec::new();
         let mut has_spread = false;
         for arg in args {
@@ -497,6 +514,111 @@ impl TypeChecker<'_> {
             }
         }
         Ok((types, has_spread))
+    }
+
+    /// The arguments of a call, in the order they are given, and the ones
+    /// that are given by name.
+    fn split_named(&mut self, args: &[Expr]) -> Result<(Vec<Expr>, Vec<(String, Expr)>), VeyError> {
+        let count = args.len();
+        let mut positional = Vec::new();
+        let mut named = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
+            // The last argument may hold the arguments that are given by
+            // name.
+            if index + 1 == count {
+                if let Some(found) = self.named_arguments(arg) {
+                    named = found;
+                    continue;
+                }
+            }
+            positional.push(arg.clone());
+        }
+        Ok((positional, named))
+    }
+
+    /// The arguments of a call that are given by name.
+    fn named_arguments(&self, expr: &Expr) -> Option<Vec<(String, Expr)>> {
+        let Expr::Object(props, _) = expr else {
+            return None;
+        };
+        let mut named = Vec::new();
+        let mut marked = false;
+        for prop in props {
+            let ObjectProp::Field(name, value) = prop else {
+                continue;
+            };
+            if name == NAMED_MARKER {
+                marked = true;
+                continue;
+            }
+            named.push((name.clone(), value.clone()));
+        }
+        if marked {
+            Some(named)
+        } else {
+            None
+        }
+    }
+
+    /// Match the arguments that are given by name with the parameters.
+    ///
+    /// The arguments that are given by name fill their own parameter, and
+    /// the ones that are given in order fill the parameters that are left.
+    /// The arguments in the order of the parameters are returned.
+    fn match_named(
+        &mut self,
+        callee: &Type,
+        positional: &[Expr],
+        named: &[(String, Expr)],
+        pos: Pos,
+    ) -> Result<Vec<Expr>, VeyError> {
+        let Type::Function(function) = callee else {
+            return Err(self.error(pos, "this value does not take its arguments by name"));
+        };
+        if function.param_names.is_empty() {
+            return Err(self.error(
+                pos,
+                "this function does not take its arguments by name",
+            ));
+        }
+        // The parameters that are given by name.
+        let mut taken: Vec<usize> = Vec::new();
+        for (name, value) in named {
+            let Some(index) = function.param_names.iter().position(|n| n == name) else {
+                return Err(self.error(
+                    pos,
+                    format!("this function has no parameter named '{}'", name),
+                ));
+            };
+            let actual = self.infer_expr(value)?;
+            let expected = &function.params[index];
+            if !assignable(&actual, expected) {
+                return Err(self.type_error(value.pos(), &actual, expected));
+            }
+            taken.push(index);
+        }
+        // The arguments in the order of the parameters.
+        let mut order: Vec<Expr> = Vec::new();
+        let mut at = 0usize;
+        for index in 0..function.params.len() {
+            if taken.contains(&index) {
+                let value = named
+                    .iter()
+                    .find(|(name, _)| {
+                        function.param_names.iter().position(|n| n == name) == Some(index)
+                    })
+                    .map(|(_, value)| value.clone());
+                if let Some(value) = value {
+                    order.push(value);
+                }
+                continue;
+            }
+            if at < positional.len() {
+                order.push(positional[at].clone());
+            }
+            at += 1;
+        }
+        Ok(order)
     }
 
     /// Infer the type of an expression that is used as a certain type.
@@ -977,6 +1099,7 @@ impl TypeChecker<'_> {
             checked: true,
             constraints: Vec::new(),
             type_params: Vec::new(),
+            param_names: Vec::new(),
         }))
     }
 
@@ -1025,6 +1148,7 @@ impl TypeChecker<'_> {
             checked: true,
             constraints: Vec::new(),
             type_params: Vec::new(),
+            param_names: Vec::new(),
         }))
     }
 

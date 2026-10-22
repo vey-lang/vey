@@ -7,7 +7,7 @@ use crate::lexer::Pos;
 use crate::types::builtins::is_builtin_type;
 use crate::types::core::{
     rest_element_type, union, Alias, EnumFieldInfo, EnumInfo, EnumVariantInfo, FunctionType,
-    ImplInfo, InterfaceInfo, ObjectField, Type,
+    ImplInfo, InterfaceInfo, ObjectField, ResolvedCalls, Type,
 };
 use crate::types::helpers::name_alias;
 use crate::types::rules::assignable;
@@ -46,6 +46,9 @@ pub struct ModuleTypeEnv {
     /// A package of npm is not checked, so its members are not known and
     /// are not reported.
     pub unchecked: bool,
+    /// The calls whose arguments are given by name, and the order of the
+    /// arguments.
+    pub resolved: ResolvedCalls,
 }
 
 pub fn check(
@@ -71,6 +74,7 @@ pub fn check(
         type_param_constraints: Vec::new(),
         components: HashMap::new(),
         param_scopes: Vec::new(),
+        resolved: HashMap::new(),
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
     };
@@ -84,6 +88,10 @@ pub fn check(
     env.interfaces = checker.interfaces.keys().cloned().collect();
     // The names the module keeps to itself.
     env.private = program.private.iter().cloned().collect();
+    // The calls whose arguments are given by name.
+    env.resolved = checker.resolved.clone();
+    // The calls whose arguments are given by name.
+    env.resolved = checker.resolved.clone();
     for stmt in &program.body {
         match stmt {
             Stmt::Type(decl) if decl.exported => {
@@ -400,6 +408,9 @@ pub(crate) struct TypeChecker<'a> {
     /// A parameter without a type is judged by the way it is used, and the
     /// type it is given here is the type of the arguments of a call.
     pub(crate) param_scopes: Vec<HashMap<String, Type>>,
+    /// The calls whose arguments are given by name, and the order of the
+    /// arguments.
+    pub(crate) resolved: ResolvedCalls,
     pub(crate) expected_returns: Vec<Option<Type>>,
     pub(crate) collected_returns: Vec<Vec<Type>>,
 }
@@ -431,6 +442,7 @@ impl TypeChecker<'_> {
             type_param_constraints: Vec::new(),
             components: HashMap::new(),
             param_scopes: Vec::new(),
+            resolved: HashMap::new(),
             expected_returns: Vec::new(),
             collected_returns: Vec::new(),
         };
@@ -669,6 +681,12 @@ impl TypeChecker<'_> {
             .iter()
             .position(|param| param.default.is_some() || param.rest)
             .unwrap_or(params.len());
+        // The names of the parameters, so that the arguments that are given
+        // by name may be matched.
+        let param_names: Vec<String> = params
+            .iter()
+            .map(|param| param.name().unwrap_or("").to_string())
+            .collect();
         let rest = params.last().map(|param| param.rest).unwrap_or(false);
         let checked = ret_annotated || params.iter().any(|param| param.ty.is_some());
         let mut constraints = Vec::new();
@@ -685,6 +703,7 @@ impl TypeChecker<'_> {
             checked,
             constraints,
             type_params: type_params.iter().map(|param| param.name.clone()).collect(),
+            param_names,
         }))
     }
 

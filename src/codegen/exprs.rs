@@ -78,11 +78,23 @@ impl Codegen {
                 self.gen_expr(cons)?,
                 self.gen_expr(alt)?
             )),
-            Expr::Call(callee, args, optional, _) => {
+            Expr::Call(callee, args, optional, pos) => {
                 let callee = self.gen_expr(callee)?;
                 let mut parts = Vec::new();
-                for arg in args {
-                    parts.push(self.gen_expr(arg)?);
+                // The arguments that are given by name are put in the order
+                // of the parameters.
+                let order = self.resolved.get(&(pos.line, pos.col)).cloned();
+                match order {
+                    Some(order) => {
+                        for arg in &order {
+                            parts.push(self.gen_expr(arg)?);
+                        }
+                    }
+                    None => {
+                        for arg in args {
+                            parts.push(self.gen_expr(arg)?);
+                        }
+                    }
                 }
                 if *optional {
                     Ok(format!("{}?.({})", callee, parts.join(", ")))

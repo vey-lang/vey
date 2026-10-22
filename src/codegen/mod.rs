@@ -29,6 +29,9 @@ pub struct Options {
     pub source: usize,
     /// The enums of the program, described by the checker.
     pub enums: std::collections::HashMap<String, EnumInfo>,
+    /// The calls whose arguments are given by name, and the order of the
+    /// arguments.
+    pub resolved: crate::types::core::ResolvedCalls,
 }
 
 impl Options {
@@ -41,6 +44,7 @@ impl Options {
             exports: Vec::new(),
             source: 0,
             enums: std::collections::HashMap::new(),
+            resolved: std::collections::HashMap::new(),
         }
     }
 }
@@ -64,6 +68,7 @@ pub fn generate(program: &Program, opts: &Options) -> Result<Generated, VeyError
         module: opts.module,
         exports: opts.exports.clone(),
         enums: opts.enums.clone(),
+        resolved: opts.resolved.clone(),
     };
     codegen.run(program)?;
     Ok(Generated {
@@ -88,6 +93,9 @@ struct Codegen {
     module: bool,
     exports: Vec<String>,
     enums: std::collections::HashMap<String, EnumInfo>,
+    /// The calls whose arguments are given by name, and the order of the
+    /// arguments.
+    resolved: crate::types::core::ResolvedCalls,
 }
 
 impl Codegen {

@@ -247,15 +247,31 @@ print(type(str(a)))
 }
 
 #[test]
-fn named_arguments_are_only_supported_in_markup() {
-    let error = run_err(
+fn a_call_may_give_its_arguments_by_name() {
+    let text = run_ok(
         "named-args",
         r#"
-component C(title) { p { title } }
-print(html(C(title="x")))
+fn draw(width: number, height: number, color: string) -> string {
+  return color + " " + str(width) + "x" + str(height)
+}
+print(draw(height=20, width=10, color="red"))
 "#,
     );
-    assert!(error.contains("named arguments"), "{error}");
+    assert!(text.contains("red 10x20"), "{text}");
+}
+
+#[test]
+fn an_argument_that_is_given_by_name_must_be_known() {
+    let error = run_err(
+        "named-args-unknown",
+        r#"
+fn draw(width: number, height: number) -> string {
+  return str(width) + "x" + str(height)
+}
+print(draw(widht=10, height=20))
+"#,
+    );
+    assert!(error.contains("no parameter named 'widht'"), "{error}");
 }
 
 #[test]

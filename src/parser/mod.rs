@@ -3,7 +3,7 @@
 //! The grammar is split over a few modules: `types` reads type expressions,
 //! `patterns` reads binding patterns and `markup` reads the tag syntax.
 
-mod exprs;
+pub(crate) mod exprs;
 pub(crate) mod html;
 mod markup;
 mod patterns;

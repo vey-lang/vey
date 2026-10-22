@@ -291,6 +291,7 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
                 .map(|(name, constraint)| (name.clone(), erase_type_vars(constraint)))
                 .collect(),
             type_params: function.type_params.clone(),
+            param_names: Vec::new(),
         }),
         Type::Union(items) => union(items.iter().map(erase_type_vars).collect()),
         other => other.clone(),
@@ -357,6 +358,7 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 .map(|(name, constraint)| (name.clone(), substitute_bound(constraint, subst)))
                 .collect(),
             type_params: function.type_params.clone(),
+            param_names: Vec::new(),
         }),
         Type::Union(items) => union(
             items
@@ -689,6 +691,7 @@ pub(crate) fn substitute_with(
                 .map(|(name, constraint)| (name.clone(), substitute_with(constraint, subst, seen)))
                 .collect(),
             type_params: function.type_params.clone(),
+            param_names: Vec::new(),
         }),
         Type::Union(items) => union(
             items

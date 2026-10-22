@@ -369,7 +369,7 @@ its own and large in the life of a program.
       (`src/parser/exprs.rs:355-415` reads only the types of the
       parameters).
 
-- [ ] **The named arguments live only in the markup**; `f(a=1)` is a
+- [x] **The named arguments live only in the markup**; `f(a=1)` is a
       mistake anywhere else (`src/parser/exprs.rs:262-268`).
 
 - [ ] **The `async` keyword is refused** (`src/parser/mod.rs:140-150`),

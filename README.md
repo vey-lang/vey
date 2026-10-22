@@ -309,6 +309,18 @@ let double = (n: number): number => n * 2
 ```
 <!-- check -->
 
+The arguments of a call may be given by name, and the ones that are given
+in order fill the parameters that are left:
+
+```vey
+fn draw(width: number, height: number, color: string) -> string {
+  return color + " " + str(width) + "x" + str(height)
+}
+
+print(draw(height=20, width=10, color="red"))
+```
+<!-- check -->
+
 ### The shapes of a program
 
 A map keeps the keys that are not texts, and a set holds the values it has

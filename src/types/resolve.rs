@@ -260,6 +260,7 @@ impl TypeChecker<'_> {
                     checked: true,
                     constraints: Vec::new(),
                     type_params: Vec::new(),
+                    param_names: Vec::new(),
                 }))
             }
         }
@@ -317,6 +318,7 @@ impl TypeChecker<'_> {
                             checked: true,
                             constraints: Vec::new(),
                             type_params: Vec::new(),
+                            param_names: Vec::new(),
                         }),
                         optional: false,
                     });

@@ -6,6 +6,9 @@ use crate::VeyError;
 
 use super::Parser;
 
+/// The mark that holds the arguments that are given by name.
+pub(crate) const NAMED_MARKER: &str = "__veyNamed";
+
 impl Parser {
     pub(crate) fn parse_pipe(&mut self) -> Result<Expr, VeyError> {
         let mut left = self.parse_ternary()?;
@@ -414,20 +417,25 @@ impl Parser {
     pub(crate) fn parse_args(&mut self) -> Result<Vec<Expr>, VeyError> {
         self.expect_punct("(")?;
         let mut args = Vec::new();
+        // The arguments that are given by name, held in one object.
+        let mut named: Vec<(String, Expr)> = Vec::new();
         while !self.is_punct(")") {
             if self.is_op("...") {
                 let pos = self.advance()?.pos;
                 let value = self.parse_expression()?;
                 args.push(Expr::Spread(Box::new(value), pos));
             } else {
-                args.push(self.parse_expression()?);
-            }
-            if self.is_op("=") {
-                return Err(self
-                    .error("named arguments are only supported in markup")
-                    .with_hint(
-                        "use `Card title=\"value\"` inside markup, or pass the value in order",
-                    ));
+                // An argument may be given by name, as in `f(width=10)`.
+                if self.tok.kind == TokKind::Ident && self.peek()?.kind == TokKind::Op
+                    && self.peek()?.value == "="
+                {
+                    let name = self.advance()?.value;
+                    self.advance()?;
+                    let value = self.parse_expression()?;
+                    named.push((name, value));
+                } else {
+                    args.push(self.parse_expression()?);
+                }
             }
             if self.is_punct(",") {
                 self.advance()?;
@@ -436,6 +444,17 @@ impl Parser {
             }
         }
         self.expect_punct(")")?;
+        if !named.is_empty() {
+            let pos = self.tok.pos;
+            let mut props = vec![ObjectProp::Field(
+                NAMED_MARKER.to_string(),
+                Expr::Bool(true, pos),
+            )];
+            for (name, value) in named {
+                props.push(ObjectProp::Field(name, value));
+            }
+            args.push(Expr::Object(props, pos));
+        }
         Ok(args)
     }
 
