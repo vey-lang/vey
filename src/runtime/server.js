@@ -158,6 +158,39 @@ function veyServer(ctx) {
     var exposeErrors = opts.exposeErrors === true || opts.exposeErrors === "true";
     // The requests that are running now.
     var running = 0;
+    var shutdownCallbacks = [];
+    var signalListeners = {};
+    var signalsInstalled = false;
+    var app = null;
+    var processModule = null;
+    if (isNode) {
+      try { processModule = ctx.nodeModule("node:process"); } catch (ignored) { }
+    }
+
+    function installSignals() {
+      if (!processModule || signalsInstalled || typeof processModule.on !== "function") return;
+      ["SIGTERM", "SIGINT"].forEach(function (signal) {
+        var listener = function () {
+          var work = [];
+          for (var i = 0; i < shutdownCallbacks.length; i++) {
+            try { work.push(Promise.resolve(shutdownCallbacks[i](signal))); } catch (err) { work.push(Promise.reject(err)); }
+          }
+          Promise.allSettled(work).then(function () {
+            if (app) app.stop();
+          });
+        };
+        signalListeners[signal] = listener;
+        processModule.on(signal, listener);
+      });
+      signalsInstalled = true;
+    }
+
+    function removeSignals() {
+      if (!processModule || !signalsInstalled || typeof processModule.removeListener !== "function") return;
+      for (var signal in signalListeners) processModule.removeListener(signal, signalListeners[signal]);
+      signalListeners = {};
+      signalsInstalled = false;
+    }
 
     function add(method, pattern, handler, extra) {
       // A middle piece may ask for a smaller body. The limit of the route
@@ -1009,7 +1042,7 @@ function veyServer(ctx) {
       };
     }
 
-    return {
+    var api = {
       get: methodOf("GET"),
       post: methodOf("POST"),
       put: methodOf("PUT"),
@@ -1071,6 +1104,7 @@ function veyServer(ctx) {
       },
       start: function (callback) {
         serverInstance.listen(actualPort, function () {
+          installSignals();
           var address = serverInstance.address();
           var port = address && address.port ? address.port : actualPort;
           actualPort = port;
@@ -1082,6 +1116,10 @@ function veyServer(ctx) {
           print("Vey server listening on http://" + host + ":" + port);
           if (callback) callback();
         });
+        return this;
+      },
+      onShutdown: function (fn) {
+        if (typeof fn === "function") shutdownCallbacks.push(fn);
         return this;
       },
       // The mistake of the server is given to the program, so that it may
@@ -1101,6 +1139,7 @@ function veyServer(ctx) {
       },
       // The server stops, and the requests that are running are waited for.
       stop: function () {
+        removeSignals();
         return new Promise(function (resolve) {
           for (var i = 0; i < sockets.length; i++) sockets[i].close();
           for (var j = 0; j < streams.length; j++) streams[j].close();
@@ -1134,6 +1173,8 @@ function veyServer(ctx) {
         });
       }
     };
+    app = api;
+    return api;
   }
 
   function response(body, status, headers) {

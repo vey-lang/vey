@@ -727,6 +727,26 @@ app.start(() => {
 }
 
 #[test]
+fn server_runs_shutdown_callbacks_for_sigterm() {
+    let text = run_runtime(
+        "server-shutdown-signal",
+        r#"
+const app = runtime.server(0);
+let received = null;
+app.onShutdown(signal => { received = signal; });
+app.start(() => {
+  process.emit("SIGTERM");
+  setTimeout(() => {
+    console.log(received);
+    process.exit(received === "SIGTERM" ? 0 : 1);
+  }, 50);
+});
+"#,
+    );
+    assert!(text.contains("SIGTERM"), "{text}");
+}
+
+#[test]
 fn cors_answers_preflight_with_the_configured_headers() {
     let text = run_runtime(
         "cors-preflight",

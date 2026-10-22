@@ -1033,8 +1033,10 @@ Bu yüzden `onMount(...)`, `onDestroy(...)`, `print(...)` gibi **yan etki** ifad
 ### D4 · Timeout yok
 `serverInstance.requestTimeout` / `headersTimeout` / `keepAliveTimeout` ayarlanmıyor. Handler başına timeout, `AbortSignal` desteği yok.
 
-### D5 · Graceful shutdown yalnızca API seviyesinde
-`app.stop()` artık **deadline** alıyor ve `closeAllConnections()` kullanıyor (`server.js:962-969`). Kalan eksik: `SIGTERM`/`SIGINT` dinleyicisi yok (`grep -rn "SIGTERM\|SIGINT" src/` → 0), yani konteyner durdurulduğunda süreç kendisi boşaltmıyor; programın `onShutdown(...)` ile bağlaması gerekiyor.
+### D5 · Graceful shutdown ✅ **SIGTERM/SIGINT eklendi**
+`app.stop()` **deadline** alıyor ve `closeAllConnections()` kullanıyor; sinyal listener'ları da server yaşam döngüsüne bağlandı.
+
+`app.onShutdown(fn)` artık SIGTERM ve SIGINT sinyallerinde callback'leri çalıştırıyor, ardından mevcut graceful `app.stop()` akışını başlatıyor. Listener'lar manuel `stop()` sonrasında temizleniyor. Regresyon testi: `tests/runtime.rs::server_runs_shutdown_callbacks_for_sigterm`.
 
 ### D6 · `use()` middleware yolu parametre/wildcard desteklemiyor ✅ **düzeltildi**
 `src/runtime/server.js:181-186`
