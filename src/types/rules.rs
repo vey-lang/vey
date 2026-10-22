@@ -449,6 +449,7 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
                 .collect(),
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
+            defaults: function.defaults.clone(),
         }),
         Type::Union(items) => union(items.iter().map(erase_type_vars).collect()),
         other => other.clone(),
@@ -527,6 +528,7 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
                 .collect(),
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
+            defaults: function.defaults.clone(),
         }),
         Type::Union(items) => union(
             items
@@ -876,6 +878,7 @@ pub(crate) fn substitute_with(
                 .collect(),
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
+            defaults: function.defaults.clone(),
         }),
         Type::Union(items) => union(
             items

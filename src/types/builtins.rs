@@ -22,6 +22,7 @@ pub(crate) fn builtin_rest(param: Type, ret: Type) -> Type {
 }
 
 fn builtin_signature(params: Vec<Type>, required: usize, rest: bool, ret: Type) -> Type {
+    let count = params.len();
     Type::Function(FunctionType {
         params,
         required,
@@ -31,6 +32,7 @@ fn builtin_signature(params: Vec<Type>, required: usize, rest: bool, ret: Type) 
         constraints: Vec::new(),
         type_params: Vec::new(),
         param_names: Vec::new(),
+        defaults: vec![false; count],
     })
 }
 

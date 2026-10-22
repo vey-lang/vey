@@ -213,7 +213,10 @@ impl TypeChecker<'_> {
                     resolved_args.push(self.resolve_type_with(arg, stack, vars)?);
                 }
                 if stack.iter().any(|item| item == name) {
-                    return Err(self.error(*pos, format!("recursive type alias '{}'", name)));
+                    // The alias refers to itself. The part that is still
+                    // open cannot be written out, so it stays a reference to
+                    // the alias.
+                    return Ok(Type::Recursion(name.clone()));
                 }
                 stack.push(name.clone());
                 let mut alias_vars = HashMap::new();
@@ -294,6 +297,7 @@ impl TypeChecker<'_> {
                     param_types.len()
                 };
                 let ret = self.resolve_type_with(ret, stack, vars)?;
+                let count = param_types.len();
                 Ok(Type::Function(FunctionType {
                     params: param_types,
                     required,
@@ -303,6 +307,7 @@ impl TypeChecker<'_> {
                     constraints: Vec::new(),
                     type_params: Vec::new(),
                     param_names: Vec::new(),
+                    defaults: vec![false; count],
                 }))
             }
         }
@@ -344,6 +349,7 @@ impl TypeChecker<'_> {
                     let mut params = Vec::new();
                     let mut required = 0usize;
                     let mut rest = false;
+                    let mut defaults = Vec::new();
                     for param in &method.params {
                         let ty = match &param.ty {
                             Some(ty) => self.resolve_type_with(ty, stack, vars)?,
@@ -358,6 +364,7 @@ impl TypeChecker<'_> {
                         if param.default.is_none() && !param.rest {
                             required += 1;
                         }
+                        defaults.push(param.default.is_some() || param.rest);
                     }
                     let ret = self.resolve_type_with(&method.ret, stack, vars)?;
                     fields.push(ObjectField {
@@ -371,6 +378,7 @@ impl TypeChecker<'_> {
                             constraints: Vec::new(),
                             type_params: Vec::new(),
                             param_names: Vec::new(),
+                            defaults,
                         }),
                         optional: false,
                     });

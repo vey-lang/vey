@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
+use crate::types::ModuleTypeEnv;
 use crate::types::core::{
     union, without_empty, without_nullish, EnumInfo, EnumVariantInfo, FunctionType, ObjectField, Type,
 };
@@ -359,12 +360,20 @@ impl TypeChecker<'_> {
                                         ),
                                     ));
                                 }
-                                if let Expr::Bool(value, _) = expr {
-                                    covered_bools.insert(*value);
+                                // An arm with a condition does not cover its
+                                // value on its own: the value may fall
+                                // through to the next arm.
+                                if arm.guard.is_none() {
+                                    if let Expr::Bool(value, _) = expr {
+                                        covered_bools.insert(*value);
+                                    }
                                 }
                             }
                             _ => {
                                 self.check_pattern(pattern)?;
+                                // The names of a list or an object pattern are
+                                // known by the subject.
+                                self.declare_pattern_names(pattern, &subject_ty);
                             }
                         }
                     }
@@ -569,7 +578,7 @@ impl TypeChecker<'_> {
         };
         let (positional, named) = self.split_named(args)?;
         let order = if named.is_empty() {
-            positional.clone()
+            positional.iter().cloned().map(Some).collect()
         } else {
             self.match_named(&callee_ty, &positional, &named, pos)?
         };
@@ -598,7 +607,7 @@ impl TypeChecker<'_> {
     fn argument_types_against(
         &mut self,
         callee: &Type,
-        args: &[Expr],
+        args: &[Option<Expr>],
     ) -> Result<(Vec<Type>, bool), VeyError> {
         let expected: Vec<Type> = match callee {
             Type::Function(function) => function.params.clone(),
@@ -607,6 +616,11 @@ impl TypeChecker<'_> {
         let mut types = Vec::new();
         let mut has_spread = false;
         for (index, arg) in args.iter().enumerate() {
+            let Some(arg) = arg else {
+                // A parameter that is not given has no argument to check.
+                types.push(Type::Any);
+                continue;
+            };
             match arg {
                 Expr::Spread(inner, _) => {
                     has_spread = true;
@@ -677,7 +691,7 @@ impl TypeChecker<'_> {
         positional: &[Expr],
         named: &[(String, Expr)],
         pos: Pos,
-    ) -> Result<Vec<Expr>, VeyError> {
+    ) -> Result<Vec<Option<Expr>>, VeyError> {
         let Type::Function(function) = callee else {
             return Err(self.error(pos, "this value does not take its arguments by name"));
         };
@@ -696,6 +710,12 @@ impl TypeChecker<'_> {
                     format!("this function has no parameter named '{}'", name),
                 ));
             };
+            if taken.contains(&index) {
+                return Err(self.error(
+                    pos,
+                    format!("the argument '{}' is given twice", name),
+                ));
+            }
             let actual = self.infer_expr(value)?;
             let expected = &function.params[index];
             if !self.fits(&actual, expected) {
@@ -703,8 +723,10 @@ impl TypeChecker<'_> {
             }
             taken.push(index);
         }
-        // The arguments in the order of the parameters.
-        let mut order: Vec<Expr> = Vec::new();
+        // The arguments in the order of the parameters. A parameter that is
+        // not given keeps its place, so that the arguments after it do not
+        // move.
+        let mut order: Vec<Option<Expr>> = Vec::new();
         let mut at = 0usize;
         for index in 0..function.params.len() {
             if taken.contains(&index) {
@@ -714,15 +736,38 @@ impl TypeChecker<'_> {
                         function.param_names.iter().position(|n| n == name) == Some(index)
                     })
                     .map(|(_, value)| value.clone());
-                if let Some(value) = value {
-                    order.push(value);
-                }
+                order.push(value);
                 continue;
             }
             if at < positional.len() {
-                order.push(positional[at].clone());
+                order.push(Some(positional[at].clone()));
+                at += 1;
+                continue;
             }
-            at += 1;
+            order.push(None);
+        }
+        if at < positional.len() {
+            return Err(self.error(
+                pos,
+                format!(
+                    "expected at most {} {}, got {}",
+                    function.params.len(),
+                    argument_label(function.params.len()),
+                    positional.len() + named.len()
+                ),
+            ));
+        }
+        // Every parameter that has no value of its own has to be given,
+        // even when the arguments are given by name.
+        for index in 0..function.params.len() {
+            let has_default = function.defaults.get(index).copied().unwrap_or(false);
+            if !has_default && order.get(index).is_some_and(Option::is_none) {
+                let name = function.param_names.get(index).cloned().unwrap_or_default();
+                return Err(self.error(
+                    pos,
+                    format!("this function needs the argument '{}'", name),
+                ));
+            }
         }
         Ok(order)
     }
@@ -891,6 +936,24 @@ impl TypeChecker<'_> {
                         ));
                     }
                     for (name, ty) in names.iter().zip(explicit) {
+                        // The constraint of the type parameter has to hold
+                        // for the type that is given, even when the
+                        // parameter is not used in the signature.
+                        if let Some((_, constraint)) =
+                            function.constraints.iter().find(|(other, _)| other == name)
+                        {
+                            if !self.fits(ty, constraint) {
+                                return Err(self.error(
+                                    pos,
+                                    format!(
+                                        "type argument '{}' expects {}, found {}",
+                                        name,
+                                        constraint.display(),
+                                        ty.display()
+                                    ),
+                                ));
+                            }
+                        }
                         // A parameter that was settled already keeps its type.
                         if free.iter().any(|item| item == name) {
                             subst.insert(name.clone(), ty.clone());
@@ -916,6 +979,18 @@ impl TypeChecker<'_> {
                     let mut trial = subst.clone();
                     if unify_types(arg, &expected, &mut trial) {
                         subst = trial;
+                        // A type that has functions of its own is only made
+                        // by its constructor, which gives the value those
+                        // functions.
+                        if matches!(arg, Type::Object(_)) && self.has_methods(&expected) {
+                            return Err(self.error(
+                                pos,
+                                format!(
+                                    "a value of the type '{}' has to be made with its constructor",
+                                    expected.display()
+                                ),
+                            ));
+                        }
                     } else if !self.fits(arg, &expected) {
                         return Err(self.error(
                             pos,
@@ -1142,8 +1217,11 @@ impl TypeChecker<'_> {
                             // The type may have functions of its own.
                             let ty = qualified_type(alias, ty.clone());
                             match &ty {
-                                Type::Named(type_name, _) | Type::Interface(type_name, _) => {
-                                    if let Some(methods) = env.impls.get(type_name) {
+                                Type::Named(_, _) | Type::Interface(_, _) => {
+                                    // The methods are known by the name of
+                                    // the type in the module that declares
+                                    // them.
+                                    if let Some(methods) = env.impls.get(name) {
                                         if let Some(method) = methods.get(name) {
                                             return Ok(if optional {
                                                 union(vec![method.clone(), Type::Null])
@@ -1265,10 +1343,11 @@ impl TypeChecker<'_> {
         let mut params = Vec::new();
         for field in &variant.fields {
             params.push(match &field.ty {
-                Some(ty) => self.resolve_type(ty)?,
+                Some(ty) => self.enum_field_type(enum_name, ty)?,
                 None => Type::Any,
             });
         }
+        let count = params.len();
         Ok(Type::Function(FunctionType {
             params,
             required: variant.fields.len(),
@@ -1278,7 +1357,59 @@ impl TypeChecker<'_> {
             constraints: Vec::new(),
             type_params: Vec::new(),
             param_names: Vec::new(),
+            defaults: vec![false; count],
         }))
+    }
+
+    /// The type of a field of an enum.
+    ///
+    /// The names of the type belong to the module that declares the enum,
+    /// so they are looked up there.
+    fn enum_field_type(&self, enum_name: &str, ty: &TypeExpr) -> Result<Type, VeyError> {
+        let Some((alias, _)) = enum_name.split_once('.') else {
+            return self.resolve_type(ty);
+        };
+        let Some(env) = self.imports.get(alias) else {
+            return self.resolve_type(ty);
+        };
+        self.foreign_type(ty, env)
+    }
+
+    /// A type of another module, with the names of that module.
+    fn foreign_type(&self, ty: &TypeExpr, env: &ModuleTypeEnv) -> Result<Type, VeyError> {
+        match ty {
+            TypeExpr::Name(name, _) => {
+                if let Some(found) = env.types.get(name) {
+                    return Ok(found.clone());
+                }
+                self.resolve_type(ty)
+            }
+            TypeExpr::Array(inner, _) => Ok(Type::Array(Box::new(
+                self.foreign_type(inner, env)?,
+            ))),
+            TypeExpr::Optional(inner, _) => {
+                Ok(union(vec![self.foreign_type(inner, env)?, Type::Null]))
+            }
+            TypeExpr::Union(items, _) => {
+                let mut out = Vec::new();
+                for item in items {
+                    out.push(self.foreign_type(item, env)?);
+                }
+                Ok(union(out))
+            }
+            TypeExpr::Tuple(items, _) => {
+                let mut out = Vec::new();
+                for item in items {
+                    out.push(self.foreign_type(item, env)?);
+                }
+                Ok(Type::Tuple(out))
+            }
+            TypeExpr::Dict(key, value, _) => Ok(Type::Dict(
+                Box::new(self.foreign_type(key, env)?),
+                Box::new(self.foreign_type(value, env)?),
+            )),
+            other => self.resolve_type(other),
+        }
     }
 
     /// The error for a variant that an enum does not have.
@@ -1307,17 +1438,27 @@ impl TypeChecker<'_> {
     /// The type of a function of a type.
     pub(crate) fn method_type(&self, method: &ImplMethod) -> Result<Type, VeyError> {
         let mut params = Vec::new();
+        let mut defaults = Vec::new();
         for param in &method.params {
             params.push(match &param.ty {
                 Some(ty) => self.resolve_type(ty)?,
                 None => Type::Any,
             });
+            defaults.push(param.default.is_some() || param.rest);
         }
         let ret = match &method.ret {
             Some(ty) => self.resolve_type(ty)?,
             None => Type::Any,
         };
-        let required = params.len();
+        // A parameter that has a value of its own may be left out.
+        let required = method
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, param)| param.default.is_none() && !param.rest)
+            .map(|(index, _)| index + 1)
+            .max()
+            .unwrap_or(0);
         Ok(Type::Function(FunctionType {
             params,
             required,
@@ -1327,6 +1468,7 @@ impl TypeChecker<'_> {
             constraints: Vec::new(),
             type_params: Vec::new(),
             param_names: Vec::new(),
+            defaults,
         }))
     }
 
@@ -1378,8 +1520,7 @@ impl TypeChecker<'_> {
             }
             Type::Enum(enum_name, variant) => {
                 let info = self
-                    .enums
-                    .get(enum_name)
+                    .enum_info(enum_name)
                     .ok_or_else(|| self.error(pos, format!("unknown enum '{}'", enum_name)))?;
                 let v = info
                     .variants
@@ -1395,7 +1536,7 @@ impl TypeChecker<'_> {
                     .iter()
                     .find(|f| f.name == name)
                     .map(|f| match &f.ty {
-                        Some(ty) => self.resolve_type(ty),
+                        Some(ty) => self.enum_field_type(enum_name, ty),
                         None => Ok(Type::Any),
                     })
                     .unwrap_or(Ok(Type::Any))
@@ -1410,7 +1551,15 @@ impl TypeChecker<'_> {
                     _ => None,
                 };
                 if let Some(type_name) = type_name {
-                    if let Some(info) = self.impls.get(type_name) {
+                    // The methods of a type of another module are known to
+                    // the module that declares it.
+                    if let Some((alias, plain)) = type_name.split_once('.') {
+                        if let Some(methods) = self.imports.get(alias).and_then(|env| env.impls.get(plain)) {
+                            if let Some(method) = methods.get(name) {
+                                return Ok(method.clone());
+                            }
+                        }
+                    } else if let Some(info) = self.impls.get(type_name) {
                         if let Some(method) = info.methods.iter().find(|m| m.name == name) {
                             return self.method_type(method);
                         }
@@ -1420,6 +1569,11 @@ impl TypeChecker<'_> {
             }
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
+            // The answer of a function that may fail says whether it
+            // worked, and what it was.
+            Type::Result(ok, _) if name == "ok" => Ok(Type::Bool),
+            Type::Result(ok, _) if name == "value" => Ok((**ok).clone()),
+            Type::Result(_, err) if name == "error" => Ok((**err).clone()),
             // A symbol and a big number are read as a text, and a symbol
             // says what it is.
             Type::Symbol if name == "description" => {
@@ -1435,6 +1589,7 @@ impl TypeChecker<'_> {
                     constraints: Vec::new(),
                     type_params: Vec::new(),
                     param_names: Vec::new(),
+                    defaults: Vec::new(),
                 },
             )),
             Type::Union(items) => {

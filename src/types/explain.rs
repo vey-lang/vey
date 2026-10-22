@@ -266,6 +266,11 @@ impl Walker {
             Expr::Match(subject, arms, _) => {
                 self.expr(subject);
                 for arm in arms {
+                    // The condition of the arm is walked as well, so that
+                    // the type of a name inside it is found.
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
                     self.expr(&arm.body);
                 }
             }

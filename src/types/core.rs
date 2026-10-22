@@ -63,7 +63,13 @@ pub struct EnumInfo {
 ///
 /// The key is the place of the call, and the value is the arguments in the
 /// order of the parameters.
-pub type ResolvedCalls = std::collections::HashMap<(usize, usize), Vec<crate::ast::Expr>>;
+/// The calls whose arguments are given by name, and the order of the
+/// arguments.
+///
+/// A parameter that is not given has no place in the order, so that the
+/// arguments after it do not move.
+pub type ResolvedCalls =
+    std::collections::HashMap<(usize, usize), Vec<Option<crate::ast::Expr>>>;
 
 /// The members of an interface.
 #[derive(Clone)]
@@ -127,6 +133,9 @@ pub struct FunctionType {
     /// The names of the parameters, so that the arguments that are given by
     /// name may be matched.
     pub(crate) param_names: Vec<String>,
+    /// The parameters that have a value of their own, so that a caller may
+    /// leave them out.
+    pub(crate) defaults: Vec<bool>,
 }
 
 impl Type {
@@ -271,6 +280,8 @@ pub(crate) fn element_type(ty: &Type) -> Type {
         Type::Tuple(items) => union(items.iter().cloned().collect()),
         // A loop over a dictionary gives its keys.
         Type::Dict(key, _) => (**key).clone(),
+        // A loop over an object gives its keys as well.
+        Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => Type::String,
         Type::String => Type::String,
         Type::Any => Type::Any,
         Type::Union(items) => union(items.iter().map(element_type).collect()),

@@ -171,10 +171,16 @@ pub fn check(
                     continue;
                 }
                 let base = env.types.get(&decl.type_name).cloned().unwrap_or(Type::Any);
+                // The constructor takes the shape of the type, and gives
+                // the value the functions of the type.
+                let shape = match &base {
+                    Type::Named(_, fields) => Type::Object(fields.clone()),
+                    other => other.clone(),
+                };
                 env.values.insert(
                     decl.type_name.clone(),
                     Type::Function(FunctionType {
-                        params: vec![base.clone()],
+                        params: vec![shape],
                         required: 1,
                         rest: false,
                         ret: Box::new(base),
@@ -182,6 +188,7 @@ pub fn check(
                         constraints: Vec::new(),
                         type_params: Vec::new(),
                         param_names: vec![decl.type_name.clone()],
+                        defaults: vec![false],
                     }),
                 );
             }
@@ -745,11 +752,36 @@ impl TypeChecker<'_> {
     /// The types that refer to themselves are opened up first, so that the
     /// end of a list of links is checked like the rest of it.
     pub(crate) fn fits(&self, source: &Type, target: &Type) -> bool {
+        // A type that has functions of its own is only made by its
+        // constructor, which gives the value those functions. A plain
+        // object is not such a value.
+        if matches!(source, Type::Object(_)) && self.has_methods(target) {
+            return false;
+        }
         // A type that refers to itself is opened where the check reaches
         // it, and not into a copy of itself: a shape of six fields would
         // otherwise become six copies of six copies, six times over.
         let mut opening = Opening::new(&self.alias_types);
         assignable_with(source, target, &mut opening)
+    }
+
+    /// Whether a type has functions of its own.
+    ///
+    /// The functions of a type of another module are known to the module
+    /// that declares it.
+    pub(crate) fn has_methods(&self, ty: &Type) -> bool {
+        let name = match ty {
+            Type::Named(name, _) | Type::Interface(name, _) => name,
+            _ => return false,
+        };
+        match name.split_once('.') {
+            Some((alias, plain)) => self
+                .imports
+                .get(alias)
+                .and_then(|env| env.impls.get(plain))
+                .is_some(),
+            None => self.impls.contains_key(name),
+        }
     }
     pub(crate) fn param_type(&self, param: &Param) -> Result<Type, VeyError> {
         let ty = match &param.ty {
@@ -815,6 +847,10 @@ impl TypeChecker<'_> {
                 constraints.push((param.name.clone(), self.resolve_type(expr)?));
             }
         }
+        let defaults = params
+            .iter()
+            .map(|param| param.default.is_some() || param.rest)
+            .collect();
         Ok(Type::Function(FunctionType {
             params: param_types,
             required,
@@ -824,6 +860,7 @@ impl TypeChecker<'_> {
             constraints,
             type_params: type_params.iter().map(|param| param.name.clone()).collect(),
             param_names,
+            defaults,
         }))
     }
 

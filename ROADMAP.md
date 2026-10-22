@@ -830,6 +830,24 @@ gap that is closed.
       or when the module itself is handed around as a value. The exports of
       the entry module always stay. (`src/compiler/loader.rs`,
       `src/codegen/mod.rs`)
+- [x] **The condition of a `match` arm was joined with `||`,** so the
+      condition of the arm was ignored and the arm held whenever its
+      pattern held. (`src/codegen/exprs.rs`)
+- [ ] **The build cache does not know the stylesheets,** so a change in a
+      `.css` file was served from the cache and the old style was kept.
+      (`src/compiler/cache.rs`, `src/compiler/mod.rs`)
+- [ ] **`vey build -o` into a folder of the project wipes the sources,**
+      because the folder is emptied before the site is written.
+      (`src/cli/site.rs`)
+- [ ] **The dev server does not see a page that is added to a folder of
+      the pages,** because only the folder itself is watched.
+      (`src/cli/dev.rs`)
+- [ ] **`vey new --template lib` recommends `vey check`,** and the check
+      cannot find the project, because the template has no `main.vey`.
+      (`src/cli/scaffold.rs`, `src/cli/entry.rs`)
+- [ ] **`vey add` says that the package was added to `package.json`,** and
+      the manifest is left as it was when it has no `dependencies` yet.
+      (`src/cli/add.rs`)
 
 ### 14.2 The type checker
 
@@ -935,9 +953,77 @@ gap that is closed.
       narrowing away. The name of a `catch` stays `any`, because a `throw`
       may give anything, which is the same choice as an unannotated `let`.
       (`src/types/patterns.rs`, `src/types/checker.rs`)
+- [x] **A parameter that takes its value apart gave every name the type of
+      the whole parameter,** so `{ name, age }: User` made `name` a `User`.
+      (`src/types/stmts.rs`)
+- [x] **The arguments that are given by name were checked against the
+      wrong parameters,** when a parameter in front of them was left out.
+      The value was also given to the wrong parameter at runtime. A
+      parameter that is left out keeps its place now, and a parameter
+      without a value of its own has to be given. (`src/types/exprs.rs`,
+      `src/types/core.rs`, `src/codegen/exprs.rs`)
+- [x] **The fields of a variant of an enum of another module were
+      resolved in the module that used them,** so a field whose type is a
+      name of the other module was an unknown type.
+      (`src/types/exprs.rs`)
+- [x] **The field of a variant of an enum of another module could not be
+      read at all,** because the enum was looked up without the name of
+      its module. (`src/types/exprs.rs`)
+- [x] **The methods of an `impl` block were not found from another
+      module,** because they were known by the name of the type with the
+      name of the module in front of it. (`src/types/exprs.rs`)
+- [x] **A result had no members,** so `result.value` and `result.error`
+      were `any` although the runtime has them. (`src/types/exprs.rs`)
+- [x] **A `match` on a `bool` was called exhaustive even when the arm had
+      a condition,** so a value that no arm held had no answer.
+      (`src/types/exprs.rs`)
+- [x] **The names of a list or an object pattern of a `match` were never
+      declared,** so they were `any` and nothing was checked with them.
+      (`src/types/exprs.rs`)
+- [x] **A method of an `impl` block treated every parameter as needed,**
+      so a parameter with a value of its own could not be left out.
+      (`src/types/exprs.rs`)
+- [x] **A dictionary and an object could not be walked through,** although
+      the runtime walks them by their keys. (`src/types/stmts.rs`,
+      `src/types/core.rs`)
+- [x] **The condition of a markup `if` and the condition of a markup
+      `match` were not checked to be a yes or a no.** (`src/types/stmts.rs`)
+- [x] **`vey explain` did not walk the condition of a `match` arm,** so it
+      answered with the type of the subject. (`src/types/explain.rs`)
+- [x] **The constraint of a type parameter that is not used in the
+      signature was not checked,** so `f<string>(1)` was accepted by a
+      function that asks for a number. (`src/types/exprs.rs`)
+- [x] **A `const` did not keep the type it was given,** although the
+      README says that a simple `const` keeps it. An object and a list
+      stay dynamic, so that they may be written to later.
+      (`src/types/stmts.rs`)
+- [x] **A recursive generic alias was refused,** while a recursive alias
+      without type arguments was fine. (`src/types/resolve.rs`)
+- [x] **A value of a type that has functions of its own could be a plain
+      object,** so the program passed the check and failed at runtime,
+      because the functions are given by the constructor.
+      (`src/types/checker.rs`, `src/types/exprs.rs`)
 
 ### 14.3 The runtime and the tools
 
+- [ ] **The language server publishes no diagnostics,** so a type error
+      and a warning are both invisible in the editor. (`src/cli/lsp.rs`)
+- [ ] **`vey fmt` eats the spaces of a text that spans lines,** so the
+      program means something else after it is written. (`src/cli/fmt.rs`)
+- [ ] **`vey fmt` writes any file it is given,** so a Markdown file or a
+      stylesheet is written as if it were a program.
+      (`src/cli/fmt.rs`)
+- [ ] **A value that is used in its own initializer is not caught,** so
+      the program passes the check and fails at runtime.
+      (`src/check/mod.rs`)
+- [ ] **The code after a `return` is not reported at the top of a
+      function,** because the function body is walked and not the block.
+      (`src/check/mod.rs`)
+- [ ] **A name that is only written is not reported as unused,** because
+      the writing of a name counts as reading it. (`src/check/mod.rs`)
+- [ ] **The linter compares the names of two different functions,** so a
+      name that is near another one is said for the wrong reason.
+      (`src/cli/lint.rs`)
 - [x] **The types of the helper objects did not have the members that the
       runtime has,** so `http.fetch`, `fs.readStream`, `process.spawn`,
       `text.encode` and `Map().toList()` were type errors although the

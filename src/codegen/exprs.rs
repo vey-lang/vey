@@ -87,7 +87,13 @@ impl Codegen {
                 match order {
                     Some(order) => {
                         for arg in &order {
-                            parts.push(self.gen_expr(arg)?);
+                            match arg {
+                                Some(arg) => parts.push(self.gen_expr(arg)?),
+                                // A parameter that is not given keeps its
+                                // place, so that the arguments after it do
+                                // not move.
+                                None => parts.push("undefined".to_string()),
+                            }
                         }
                     }
                     None => {
@@ -486,15 +492,20 @@ impl Codegen {
                     continue;
                 }
 
-                // The arm that is one condition.
-                let mut all = conditions;
+                // The arm that is one condition. The patterns are one of
+                // them, and the condition of the arm has to hold as well.
+                let mut all = conditions.join(" || ");
                 if let Some(guard) = guard {
-                    all.push(guard);
+                    all = if all.is_empty() {
+                        format!("({})", guard)
+                    } else {
+                        format!("({}) && ({})", all, guard)
+                    };
                 }
                 if all.is_empty() {
                     codegen.emit(&format!("return {};", body));
                 } else {
-                    codegen.emit(&format!("if ({}) return {};", all.join(" || "), body));
+                    codegen.emit(&format!("if ({}) return {};", all, body));
                 }
             }
             if !has_default {

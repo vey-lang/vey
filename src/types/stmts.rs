@@ -89,10 +89,16 @@ impl TypeChecker<'_> {
                         .get(&decl.type_name)
                         .cloned()
                         .unwrap_or(Type::Any);
+                    // The constructor takes the shape of the type, and gives
+                    // the value the functions of the type.
+                    let shape = match &ty {
+                        Type::Named(_, fields) => Type::Object(fields.clone()),
+                        other => other.clone(),
+                    };
                     self.declare(
                         &decl.type_name,
                         Type::Function(FunctionType {
-                            params: vec![ty.clone()],
+                            params: vec![shape],
                             required: 1,
                             rest: false,
                             ret: Box::new(ty),
@@ -100,6 +106,7 @@ impl TypeChecker<'_> {
                             constraints: Vec::new(),
                             type_params: Vec::new(),
                             param_names: Vec::new(),
+                            defaults: vec![false],
                         }),
                     );
                 }
@@ -152,6 +159,15 @@ impl TypeChecker<'_> {
             // the types of its parameters were guessed from the body, so a
             // call to it is checked even when the name has no type.
             let ty = ty.clone();
+            self.declare_pattern_typed(&decl.pattern, &ty);
+        } else if decl.kind == VarKind::Const {
+            // A constant never changes, so a simple value keeps the type it
+            // was given. An object and a list stay dynamic, so that they may
+            // be written to later.
+            let ty = match &init_ty {
+                Some(ty @ (Type::Number | Type::String | Type::Bool)) => ty.clone(),
+                _ => Type::Any,
+            };
             self.declare_pattern_typed(&decl.pattern, &ty);
         } else {
             // A value without a type stays dynamic, so that it may be
@@ -484,7 +500,15 @@ impl TypeChecker<'_> {
     pub(crate) fn check_iterable(&self, ty: &Type, pos: Pos) -> Result<(), VeyError> {
         if !matches!(
             ty,
-            Type::Array(_) | Type::Tuple(_) | Type::String | Type::Any | Type::Var(_)
+            Type::Array(_)
+                | Type::Tuple(_)
+                | Type::String
+                | Type::Dict(_, _)
+                | Type::Object(_)
+                | Type::Named(_, _)
+                | Type::Interface(_, _)
+                | Type::Any
+                | Type::Var(_)
         ) {
             return Err(self.error(pos, format!("cannot walk through a {}", ty.display())));
         }
@@ -558,9 +582,9 @@ impl TypeChecker<'_> {
         for param in params {
             let ty = self.param_type(param)?;
             self.check_pattern_defaults(&param.pattern)?;
-            for (name, _) in param.bindings() {
-                self.declare(name, ty.clone());
-            }
+            // A parameter that takes the value apart gives every name the
+            // type of its own place.
+            self.declare_pattern_typed(&param.pattern, &ty);
             if let Some(default) = &param.default {
                 let actual = self.infer_expr(default)?;
                 if !self.fits(&actual, &ty) {
@@ -955,7 +979,10 @@ impl TypeChecker<'_> {
                     self.infer_expr(expr)?;
                 }
                 MarkupNode::If(branch) => {
-                    self.infer_expr(&branch.test)?;
+                    let test_ty = self.infer_expr(&branch.test)?;
+                    // The condition of a markup is a condition like any
+                    // other.
+                    self.check_condition(&test_ty, branch.test.pos())?;
                     let narrowing = self.narrow_condition(&branch.test).filter(|(name, _, _)| {
                         let root = name.split('.').next().unwrap_or(name.as_str());
                         !markup_assigns_name(&branch.then_nodes, root)
@@ -992,7 +1019,10 @@ impl TypeChecker<'_> {
                             self.check_pattern(pattern)?;
                         }
                         if let Some(guard) = &arm.guard {
-                            self.infer_expr(guard)?;
+                            let guard_ty = self.infer_expr(guard)?;
+                            if !assignable(&guard_ty, &Type::Bool) {
+                                return Err(self.type_error(guard.pos(), &guard_ty, &Type::Bool));
+                            }
                         }
                         self.check_markup(&arm.body)?;
                         self.pop_scope();
