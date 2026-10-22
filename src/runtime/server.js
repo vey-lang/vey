@@ -637,7 +637,8 @@ function veyServer(ctx) {
 
       function send(text) {
         if (!open) return;
-        frame(0x81, Buffer.from(String(text), "utf8"));
+        var binary = typeof Buffer !== "undefined" && Buffer.isBuffer(text);
+        frame(binary ? 0x82 : 0x81, binary ? text : Buffer.from(String(text), "utf8"));
       }
 
       function close() {
@@ -741,8 +742,8 @@ function veyServer(ctx) {
             return;
           }
           if (opcode === 0x1 || opcode === 0x2) {
-            var text = payload.toString("utf8");
-            for (var j = 0; j < messageHandlers.length; j++) messageHandlers[j](text);
+            var message = opcode === 0x2 ? payload : payload.toString("utf8");
+            for (var j = 0; j < messageHandlers.length; j++) messageHandlers[j](message);
           }
         }
       }
@@ -879,6 +880,10 @@ function veyServer(ctx) {
         );
         var connection = makeSocket(socket);
         sockets.push(connection);
+        connection.onClose(function () {
+          var index = sockets.indexOf(connection);
+          if (index !== -1) sockets.splice(index, 1);
+        });
         found.route.handler(connection, makeRequest(request, url, found.params));
       } catch (err) {
         log.error(err);
