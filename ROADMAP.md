@@ -863,7 +863,7 @@ gap that is closed.
       (`src/types/exprs.rs`)
 - [x] **The bindings of an enum pattern of an `if let` get the type of the
       whole subject** and not the type of the field. (`src/types/stmts.rs`)
-- [ ] **A function written as an expression ignores the types that were
+- [x] **A function written as an expression ignores the types that were
       guessed,** so the same code is checked in one form and not in the
       other. (`src/types/checker.rs`, `src/types/stmts.rs`)
 - [x] **A type argument that is given by hand is dropped when the type
@@ -916,12 +916,10 @@ gap that is closed.
 - [x] **The value that a name of a `let` has by default is not checked**
       against the type of the name. (`src/types/patterns.rs`)
 - [x] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
-- [ ] **The smaller gaps:** `undefined` is not a helper of the language,
-      `symbol` and `bigint` have no members, the name of a `catch` is
-      always `any`, a `while` does not narrow, a comparison of a member
-      does not narrow, a dictionary and a tuple cannot be walked through,
-      `&&` and `||` are typed `bool` and not the value, an unknown operator
-      is typed `any`, and a `yield` inside a cast is not seen.
+- [ ] **The smaller gaps:** `symbol` and `bigint` have no members, the
+      name of a `catch` is always `any`, a comparison of a member does not
+      narrow, `and` and `or` are typed `bool` and not the value they give
+      back, and an unknown operator is typed `any`.
 
 ### 14.3 The runtime and the tools
 

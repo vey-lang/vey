@@ -146,6 +146,12 @@ impl TypeChecker<'_> {
 
         if let Some(expected) = annotation {
             self.declare_pattern_typed(&decl.pattern, &expected);
+        } else if let Some(ty @ Type::Function(_)) = &init_ty {
+            // A function that is written as a value has a type of its own:
+            // the types of its parameters were guessed from the body, so a
+            // call to it is checked even when the name has no type.
+            let ty = ty.clone();
+            self.declare_pattern_typed(&decl.pattern, &ty);
         } else {
             // A value without a type stays dynamic, so that it may be
             // anything later on.
@@ -472,7 +478,10 @@ impl TypeChecker<'_> {
 
     /// Only a list can be walked through.
     pub(crate) fn check_iterable(&self, ty: &Type, pos: Pos) -> Result<(), VeyError> {
-        if !matches!(ty, Type::Array(_) | Type::String | Type::Any | Type::Var(_)) {
+        if !matches!(
+            ty,
+            Type::Array(_) | Type::Tuple(_) | Type::String | Type::Any | Type::Var(_)
+        ) {
             return Err(self.error(pos, format!("cannot walk through a {}", ty.display())));
         }
         Ok(())
