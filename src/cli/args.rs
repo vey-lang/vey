@@ -7,7 +7,6 @@ pub(crate) struct ParsedArgs {
     pub(crate) host: Option<String>,
     pub(crate) title: Option<String>,
     pub(crate) node: bool,
-    pub(crate) force: bool,
     /// The user asked for the help of the command.
     pub(crate) help: bool,
     /// The name of the tests that are run.
@@ -31,7 +30,6 @@ impl ParsedArgs {
             host: None,
             title: None,
             node: false,
-            force: false,
             help: false,
             filter: None,
             watch: false,
@@ -61,7 +59,6 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             "--host" => parsed.host = Some(value_of(args, &mut index, arg)?),
             "--title" => parsed.title = Some(value_of(args, &mut index, arg)?),
             "--node" => parsed.node = true,
-            "--force" => parsed.force = true,
             "-h" | "--help" => parsed.help = true,
             "--filter" => parsed.filter = Some(value_of(args, &mut index, arg)?),
             "--watch" => parsed.watch = true,
@@ -98,6 +95,13 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     }
 
     Ok(parsed)
+}
+
+/// Whether the `--force` mark is in the arguments.
+///
+/// Only the commands that write over what is there read it.
+pub(crate) fn wants_force(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--force")
 }
 
 /// The value of an option.

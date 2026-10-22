@@ -322,6 +322,22 @@ function veyCore(ctx) {
     );
   }
 
+  // The kind of a value, which is what a check of a type looks at.
+  function is(value, kind) {
+    if (kind === "number") return typeof value === "number";
+    if (kind === "string") return typeof value === "string";
+    if (kind === "boolean") return typeof value === "boolean";
+    if (kind === "null") return value === null;
+    if (kind === "undefined") return value === undefined;
+    if (kind === "list") return Array.isArray(value);
+    if (kind === "function") return typeof value === "function";
+    if (kind === "object") {
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    }
+    // A type of the program is an object.
+    return value !== null && typeof value === "object";
+  }
+
   ctx.print = print;
   ctx.input = input;
   ctx.sleep = sleep;
@@ -350,6 +366,7 @@ function veyCore(ctx) {
   ctx.err = err;
   ctx.propagate = propagate;
   ctx.failure = err;
+  ctx.is = is;
   ctx.todo = todo;
   ctx.unimplemented = unimplemented;
 
@@ -382,6 +399,7 @@ function veyCore(ctx) {
     err: err,
     propagate: propagate,
     failure: err,
+    is: is,
     todo: todo,
     unimplemented: unimplemented,
   };

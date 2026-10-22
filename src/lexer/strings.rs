@@ -105,6 +105,32 @@ impl Lexer {
                 continue;
             }
 
+            if quote == '`' && c == '{' {
+                // A template holds the parts of a text, and the values that
+                // are woven into it.
+                let Some(end) = self.match_brace(self.pos) else {
+                    text.push('{');
+                    self.bump();
+                    continue;
+                };
+                let source: String = self.chars[self.pos + 1..end].iter().collect();
+                if !text.is_empty() {
+                    parts.push(StrPartToken {
+                        text: std::mem::take(&mut text),
+                        expr: None,
+                    });
+                }
+                let expr_pos = Pos::new(self.line, self.col + 1);
+                parts.push(StrPartToken {
+                    text: String::new(),
+                    expr: Some((source, expr_pos)),
+                });
+                while self.pos <= end {
+                    self.bump();
+                }
+                continue;
+            }
+
             text.push(c);
             self.bump();
         }

@@ -198,9 +198,9 @@ impl TypeChecker<'_> {
                 // are not, so that a closure fits the type it is given.
                 self.function_type_from_parts(params, ret, ret_ann.is_some(), &[], &param_types)
             }
-            Expr::Arrow(params, body, pos) => {
-                let ret = self.check_arrow(params, body, *pos)?;
-                self.function_type_from_parts(params, ret, false, &[], &[])
+            Expr::Arrow(params, body, ret_ann, pos) => {
+                let (ret, param_types) = self.check_arrow(params, body, ret_ann.as_ref(), *pos)?;
+                self.function_type_from_parts(params, ret, ret_ann.is_some(), &[], &param_types)
             }
             Expr::Range(start, end, pos) => {
                 let start_ty = self.infer_expr(start)?;
@@ -388,6 +388,21 @@ impl TypeChecker<'_> {
                                 ),
                             ));
                         }
+                        // A value of a union may be one of many, so the match
+                        // has to take them all.
+                        Type::Union(items) => {
+                            let parts: Vec<String> = items
+                                .iter()
+                                .map(|item| item.display())
+                                .collect();
+                            return Err(self.error(
+                                subject.pos(),
+                                format!(
+                                    "match on '{}' is not exhaustive: a name or a _ is needed",
+                                    parts.join(" | ")
+                                ),
+                            ));
+                        }
                         _ => {}
                     }
                 }
@@ -425,6 +440,24 @@ impl TypeChecker<'_> {
                 })
             }
             Expr::Yield(inner, _) => self.infer_expr(inner),
+            Expr::As(inner, ty, pos) => {
+                // A cast is only possible between types that are near one
+                // another.
+                let actual = self.infer_expr(inner)?;
+                let wanted = self.resolve_type(ty)?;
+                if !self.fits(&actual, &wanted) && !self.fits(&wanted, &actual) {
+                    return Err(self.type_error(*pos, &actual, &wanted));
+                }
+                Ok(wanted)
+            }
+            Expr::Is(inner, ty, pos) => {
+                let actual = self.infer_expr(inner)?;
+                let wanted = self.resolve_type(ty)?;
+                if !self.fits(&actual, &wanted) && !self.fits(&wanted, &actual) {
+                    return Err(self.type_error(*pos, &actual, &wanted));
+                }
+                Ok(Type::Bool)
+            }
             Expr::Spread(inner, _) => self.infer_expr(inner),
         }
     }

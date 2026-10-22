@@ -247,7 +247,7 @@ fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
         return true;
     }
     match expr {
-        Expr::Fn(..) | Expr::Arrow(_, _, _) => false,
+        Expr::Fn(..) | Expr::Arrow(_, _, _, _) => false,
         Expr::Number(_, _) | Expr::Bool(_, _) | Expr::Null(_) | Expr::Ident(_, _) => false,
         Expr::String(parts, _) => parts
             .iter()
@@ -284,6 +284,7 @@ fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
         Expr::Await(inner, _) => walk(inner, test),
         Expr::Try(inner, _) => walk(inner, test),
         Expr::Yield(inner, _) => walk(inner, test),
+        Expr::As(inner, _, _) | Expr::Is(inner, _, _) => walk(inner, test),
         Expr::Spread(arg, _) => walk(arg, test),
     }
 }

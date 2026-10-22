@@ -1802,3 +1802,70 @@ try {
     let text = stdout(&output);
     assert!(text.contains("caught a problem"), "{text}");
 }
+
+#[test]
+fn a_value_may_be_cast_and_its_type_may_be_checked() {
+    let dir = temp_dir("cast");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let value: any = "a text"
+let text = value as string
+print(text)
+
+let n: any = 42
+print(n is number)
+print(n is string)
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("a text"), "{text}");
+    assert!(text.contains("true"), "{text}");
+    assert!(text.contains("false"), "{text}");
+}
+
+#[test]
+fn a_template_holds_the_parts_of_a_text() {
+    let dir = temp_dir("template");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let name = "Vey"
+print(`Hello, {name}!`)
+print(`a "quote" and {1 + 2}`)
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("Hello, Vey!"), "{text}");
+    assert!(text.contains("a \"quote\" and 3"), "{text}");
+}
+
+#[test]
+fn the_type_of_an_arrow_may_be_written() {
+    let dir = temp_dir("arrow-type");
+    let file = dir.join("main.vey");
+    fs::write(&file, "let double = (n: number): number => n * 2\nprint(double(21))\n").unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("42"), "{}", stdout(&output));
+}
+
+#[test]
+fn a_module_may_only_be_used_at_the_top_level() {
+    check_error(
+        "fn run() {\n  use \"./other.vey\"\n}\n",
+        "use-inside",
+        "only be used at the top level",
+    );
+}

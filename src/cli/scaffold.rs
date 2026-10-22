@@ -14,6 +14,14 @@ pub(crate) const PROJECT_LOGO: &str = include_str!("../../logo.svg");
 pub(crate) const PROJECT_FAVICON: &str = include_str!("../../favicon.svg");
 
 pub(crate) fn cmd_new(args: &[String]) -> i32 {
+    // The `--force` mark is read here, and not by every command.
+    let force = crate::cli::args::wants_force(args);
+    let rest: Vec<String> = args
+        .iter()
+        .filter(|arg| arg.as_str() != "--force")
+        .cloned()
+        .collect();
+    let args = &rest[..];
     let parsed = match parse_args(args) {
         Ok(parsed) => parsed,
         Err(err) => {
@@ -38,7 +46,7 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         let not_empty = fs::read_dir(root)
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false);
-        if not_empty && !parsed.force {
+        if not_empty && !force {
             eprintln!("{} already exists and is not empty", name);
             eprintln!("pass --force to fill in missing files");
             return 1;

@@ -280,6 +280,35 @@ print("value {name}") // the value of `name`
 
 A function that uses `await` is async on its own; there is no `async` keyword.
 
+A template holds the parts of a text, and the values that are woven into it:
+
+```vey
+let name = "Vey"
+print(`Hello, {name}!`)
+```
+<!-- check -->
+
+A value may be cast to another type with `as`, and its type may be checked
+with `is`:
+
+```vey
+let value: any = "a text"
+let text = value as string
+
+let n: any = 42
+if n is number {
+  print("a number")
+}
+```
+<!-- check -->
+
+The type of an arrow may be written as well:
+
+```vey
+let double = (n: number): number => n * 2
+```
+<!-- check -->
+
 ### The shapes of a program
 
 A map keeps the keys that are not texts, and a set holds the values it has

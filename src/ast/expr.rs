@@ -124,7 +124,7 @@ pub enum Expr {
     CallGeneric(Box<Expr>, Vec<TypeExpr>, Vec<Expr>, bool, Pos),
     Member(Box<Expr>, MemberProp, bool, Pos),
     Fn(Vec<Param>, Block, Option<TypeExpr>, Pos),
-    Arrow(Vec<Param>, ArrowBody, Pos),
+    Arrow(Vec<Param>, ArrowBody, Option<TypeExpr>, Pos),
     Range(Box<Expr>, Box<Expr>, Pos),
     Match(Box<Expr>, Vec<MatchArm>, Pos),
     Await(Box<Expr>, Pos),
@@ -132,6 +132,10 @@ pub enum Expr {
     Try(Box<Expr>, Pos),
     /// A value that a generator hands back one by one.
     Yield(Box<Expr>, Pos),
+    /// A value that is used as another type.
+    As(Box<Expr>, TypeExpr, Pos),
+    /// A check of the type of a value.
+    Is(Box<Expr>, TypeExpr, Pos),
     Spread(Box<Expr>, Pos),
 }
 
@@ -154,12 +158,14 @@ impl Expr {
             | Expr::CallGeneric(_, _, _, _, p)
             | Expr::Member(_, _, _, p)
             | Expr::Fn(_, _, _, p)
-            | Expr::Arrow(_, _, p)
+            | Expr::Arrow(_, _, _, p)
             | Expr::Range(_, _, p)
             | Expr::Match(_, _, p)
             | Expr::Await(_, p)
             | Expr::Try(_, p)
             | Expr::Yield(_, p)
+            | Expr::As(_, _, p)
+            | Expr::Is(_, _, p)
             | Expr::Spread(_, p) => *p,
         }
     }

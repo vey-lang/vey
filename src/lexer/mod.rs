@@ -131,6 +131,7 @@ pub fn is_keyword(word: &str) -> bool {
             | "throw"
             | "yield"
             | "defer"
+            | "is"
     )
 }
 
@@ -283,7 +284,7 @@ impl Lexer {
             return Ok(self.read_number(start, pos));
         }
 
-        if c == '"' || c == '\'' {
+        if c == '"' || c == '\'' || c == '`' {
             return self.read_string(start, pos, c);
         }
 

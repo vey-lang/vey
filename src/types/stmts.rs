@@ -680,20 +680,26 @@ impl TypeChecker<'_> {
         &mut self,
         params: &[Param],
         body: &ArrowBody,
+        ret_ann: Option<&TypeExpr>,
         pos: Pos,
-    ) -> Result<Type, VeyError> {
+    ) -> Result<(Type, Vec<Type>), VeyError> {
         match body {
             ArrowBody::Expr(expr) => {
                 self.push_scope();
                 self.declare_params(params)?;
                 let ty = self.infer_expr(expr)?;
                 self.pop_scope();
-                Ok(ty)
+                // The type that is written is the type of the value.
+                if let Some(ann) = ret_ann {
+                    let wanted = self.resolve_type(ann)?;
+                    if !self.fits(&ty, &wanted) {
+                        return Err(self.type_error(expr.pos(), &ty, &wanted));
+                    }
+                    return Ok((wanted, Vec::new()));
+                }
+                Ok((ty, Vec::new()))
             }
-            ArrowBody::Block(block) => {
-                let (ty, _) = self.check_function(params, block, None, pos)?;
-                Ok(ty)
-            }
+            ArrowBody::Block(block) => self.check_function(params, block, ret_ann, pos),
         }
     }
 

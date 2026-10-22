@@ -545,3 +545,30 @@ fn a_component_has_no_argument_that_is_not_its_own() {
     );
     assert!(error.contains("has no argument 'titel'"), "{error}");
 }
+
+#[test]
+fn a_cast_is_only_possible_between_types_that_are_near() {
+    let error = check_err(
+        "cast-impossible",
+        "let value: number = 1\nlet text = value as string\n",
+    );
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn the_type_of_an_arrow_is_checked() {
+    let error = check_err(
+        "arrow-type",
+        "let wrong = (n: number): string => n * 2\n",
+    );
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn a_match_of_a_union_needs_a_name_or_a_wildcard() {
+    let error = check_err(
+        "union-not-exhaustive",
+        "fn f(value: number | string) -> string {\n  return match value {\n    1 => \"one\"\n  }\n}\n",
+    );
+    assert!(error.contains("not exhaustive"), "{error}");
+}

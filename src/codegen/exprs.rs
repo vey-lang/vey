@@ -118,7 +118,7 @@ impl Codegen {
                 }
             }
             Expr::Fn(params, body, _, _) => self.gen_fn_expr(params, body),
-            Expr::Arrow(params, body, _) => self.gen_arrow(params, body),
+            Expr::Arrow(params, body, _, _) => self.gen_arrow(params, body),
             Expr::Range(start, end, _) => Ok(format!(
                 "V.range({}, {})",
                 self.gen_expr(start)?,
@@ -127,6 +127,12 @@ impl Codegen {
             Expr::Match(subject, arms, _) => self.gen_match(subject, arms),
             Expr::Await(arg, _) => Ok(format!("(await {})", self.gen_expr(arg)?)),
             Expr::Try(arg, _) => Ok(format!("V.propagate({})", self.gen_expr(arg)?)),
+            // A cast is erased: the value is the same.
+            Expr::As(arg, _, _) => self.gen_expr(arg),
+            Expr::Is(arg, ty, _) => {
+                let value = self.gen_expr(arg)?;
+                Ok(format!("V.is({}, {})", value, js_string(&kind_of(ty))))
+            }
             Expr::Yield(arg, _) => Ok(format!("(yield {})", self.gen_expr(arg)?)),
             Expr::Spread(arg, _) => Ok(format!("...{}", self.gen_expr(arg)?)),
         }
@@ -472,7 +478,9 @@ impl Codegen {
                 }
             }
             if !has_default {
-                codegen.emit("return undefined;");
+                // The match does not take every value, so the program says
+                // so instead of handing back nothing.
+                codegen.emit("V.error(\"the match is not exhaustive\");");
             }
             Ok(())
         })?;
@@ -492,5 +500,24 @@ impl Codegen {
             pad,
             subject
         ))
+    }
+}
+
+/// The kind of a value at runtime, which is what a check of a type looks at.
+fn kind_of(ty: &TypeExpr) -> String {
+    match ty {
+        TypeExpr::Name(name, _) => match name.as_str() {
+            "number" | "int" => "number".to_string(),
+            "string" => "string".to_string(),
+            "bool" | "boolean" => "boolean".to_string(),
+            "null" => "null".to_string(),
+            "undefined" => "undefined".to_string(),
+            other => other.to_string(),
+        },
+        TypeExpr::Array(_, _) => "list".to_string(),
+        TypeExpr::Object(_, _) => "object".to_string(),
+        TypeExpr::Tuple(_, _) => "list".to_string(),
+        TypeExpr::Function(_, _, _, _) => "function".to_string(),
+        _ => "object".to_string(),
     }
 }

@@ -147,12 +147,13 @@ where it should speak.
       the optional call `?.()` is not checked at all
       (`src/types/exprs.rs:139-143`).
 
-- [ ] **A name that is not known is `any`, without an error**
+- [x] **A name that is not known is `any`, without an error**
       (`src/types/exprs.rs:32-35`), and the member of a module that is not
       known is `any`, without an error (`src/types/exprs.rs:666-679`). A
       typo in `ui.Card` or `math.PIe` is silent.
 
-- [ ] **A `let` without a type is `any`** (`src/types/stmts.rs:113`) and the
+- [ ] **A `let` without a type is `any`** (the language is gradual, and a
+      value without a type stays dynamic) (`src/types/stmts.rs:113`) and the
       type of a `const` is only guessed for the simple shapes
       (`src/types/helpers.rs:186-197`).
 
@@ -174,7 +175,8 @@ where it should speak.
 - [x] **No tuple and no dictionary type.** `{[string]: number}` cannot be
       written (`src/parser/types.rs:40-127`).
 - [x] **No `unknown`, no `object`, no `symbol`, no `bigint`.**
-- [ ] **No cast (`as`), no `is`, no `satisfies`, no `typeof`, `keyof` or
+- [x] **A cast (`as`) and a check of a type (`is`) are there.** There is no
+      `satisfies`, no `typeof`, no `keyof` or
       `infer` in a type.**
 - [ ] **No generic function expression.** The generics are on the `fn` of a
       declaration (`src/ast/decl.rs:63-79`), not on an arrow
@@ -203,7 +205,7 @@ where it should speak.
       The kind `undefined` cannot be narrowed at all
       (`src/types/core.rs:253-285`).
 
-- [ ] **The exhaustiveness of a `match` is only checked for the enums of
+- [x] **The exhaustiveness of a `match` is only checked for the enums of
       the program.** A `match` on `number | string` is not checked
       (`src/types/exprs.rs:327-364`).
 
@@ -236,17 +238,17 @@ where it should speak.
       without a word (`src/check/scopes.rs:81-86`).
 - [x] **No unreachable code.** The code after a `return`, a `break` or a
       `continue` is not reported.
-- [ ] **The order of the names is only checked for `let` and `const` at the
+- [x] **The order of the names is only checked for `let` and `const` at the
       top level** (`src/check/mod.rs:101-106`, `:354-364`); a function or a
       component may be used before it is written.
 - [x] **The names of a module are not checked.** `ui.Card` and `math.PIe`
       are only checked as an object and an index
       (`src/check/mod.rs:415-420`).
-- [ ] **A `break` outside a loop is not found in every case.** The counter
+- [x] **A `break` outside a loop is not found in every case.** The counter
       is reset for every function (`src/check/mod.rs:243-247`), so a
       `break` inside a `match` inside a loop passes and becomes a mistake
       in the emitted JavaScript.
-- [ ] **The types and the enums are not names for the checker**
+- [x] **The types and the enums are not names for the checker**
       (`src/check/mod.rs:222-223`), so two types with the same name are
       only caught by the type checker.
 
@@ -337,7 +339,7 @@ its own and large in the life of a program.
       (`src/lexer/strings.rs:117-125`).
 - [x] **There is no `!`, no `&`, no `^`, no `<<`, no `>>`** in the marks
       (`src/lexer/mod.rs:75-78`). `not` is there, the bitwise family is not.
-- [ ] **There is no regex and no template string.**
+- [x] **There is no regex and no template string.**
 
 ### 5.2 The parser
 
@@ -363,7 +365,7 @@ its own and large in the life of a program.
       markup, no `key`, no slot, no spread of the children, no index in a
       `for`, and a `<` in the text is a mistake. One `id` per element.
 
-- [ ] **The type of an arrow function cannot be written**
+- [x] **The type of an arrow function cannot be written**
       (`src/parser/exprs.rs:355-415` reads only the types of the
       parameters).
 
@@ -390,11 +392,11 @@ its own and large in the life of a program.
       seen, so the emitted function is not `async` and the JavaScript is a
       mistake.
 
-- [ ] **The events are twelve** (`src/codegen/js.rs:44-57`): there is no
+- [x] **The events are twelve** (`src/codegen/js.rs:44-57`): there is no
       `keypress`, `wheel`, `pointer*`, `touch*`, `drag*`, `contextmenu`,
       no events of one's own and no delegation.
 
-- [ ] **The attributes are thin.** The `class` and the `id` are put
+- [x] **The attributes are thin.** The `class` and the `id` are put
       together by hand (`src/codegen/markup.rs:59-87`); there is no list of
       the marks that are true when they are there, no care for `data-*` and
       `aria-*`, and no difference between a `style` that is a text and a
@@ -404,11 +406,11 @@ its own and large in the life of a program.
       `V.flatMap` (`src/codegen/markup.rs:32-39`), so the items of a list
       have no name of their own.
 
-- [ ] **The `use` of a module is lifted above everything**
+- [x] **The `use` of a module is lifted above everything**
       (`src/codegen/mod.rs:129-139`), even when the parser allows a `use`
       inside a block.
 
-- [ ] **A `match` that is not exhaustive gives `undefined`**
+- [x] **A `match` that is not exhaustive gives `undefined`**
       (`src/codegen/exprs.rs:391-393`).
 
 - [ ] **A name of the program is only made safe with a `_`**; a variable
@@ -545,7 +547,7 @@ of a web framework is missing.
       built and run.
 - [x] **There is no `vey explain`.** There is no way to ask the compiler
       what the type of an expression is.
-- [ ] **There is no watch outside `dev`,** and `dev` watches by asking the
+- [x] **The tests may be watched,** and `dev` watches by asking the
       files every 300 ms (`src/cli/dev.rs:143-159`, `:518-585`) instead of
       waiting for the system to say that something changed.
 - [ ] **The reload of the page is a script that is put in every page**
@@ -559,7 +561,7 @@ of a web framework is missing.
       `vey add` for a package.**
 - [x] **There is no `--help` for a command.** `vey build --help` says
       "unknown option" (`src/cli/args.rs:54-56`).
-- [ ] **`--force` is read by every command and used by one**
+- [x] **`--force` is read by every command and used by one**
       (`src/cli/args.rs:40`, `src/cli/scaffold.rs:36`).
 - [x] **The help does not name `--force`, the `--host` of `dev`, or the
       entry of `run` and `dev`** (`src/cli/output.rs:142-175`).
@@ -572,7 +574,8 @@ of a web framework is missing.
 - [x] **The scaffold has one shape only** (`src/cli/scaffold.rs`); there is
       no template for a program with a server, for a library or for a
       single page.
-- [ ] **There is no bench and no recipe for the continuous integration**;
+- [x] **There is a recipe for the continuous integration;** the bench is
+      still missing.
       a new project has no Dockerfile and no workflow.
 
 ---

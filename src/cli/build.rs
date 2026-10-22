@@ -13,6 +13,13 @@ use crate::cli::site::write_site;
 pub(crate) const OUTPUT_FOLDER: &str = ".dist";
 
 pub(crate) fn cmd_build(args: &[String]) -> i32 {
+    // The `--force` mark is read here, and not by every command.
+    let rest: Vec<String> = args
+        .iter()
+        .filter(|arg| arg.as_str() != "--force")
+        .cloned()
+        .collect();
+    let args = &rest[..];
     let parsed = match parse_args(args) {
         Ok(parsed) => parsed,
         Err(err) => {

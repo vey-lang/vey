@@ -150,6 +150,29 @@ impl Checker<'_> {
     }
 
     fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
+        // The types have a name of their own, and two of them may not have
+        // the same one.
+        let mut type_names: HashMap<&str, Pos> = HashMap::new();
+        for stmt in &program.body {
+            let name = match stmt {
+                Stmt::Type(decl) => Some(decl.name.as_str()),
+                Stmt::Enum(decl) => Some(decl.name.as_str()),
+                Stmt::Interface(decl) => Some(decl.name.as_str()),
+                _ => None,
+            };
+            let Some(name) = name else {
+                continue;
+            };
+            if let Some(previous) = type_names.insert(name, stmt.pos()) {
+                return Err(self.error(
+                    stmt.pos(),
+                    format!(
+                        "duplicate type '{}' (first declared on line {})",
+                        name, previous.line
+                    ),
+                ));
+            }
+        }
         // The names the program gives to the outside world are used
         // elsewhere, so they are not reported as unused.
         for stmt in &program.body {
@@ -175,8 +198,12 @@ impl Checker<'_> {
                         self.declared_at.insert(name.to_string(), index);
                     }
                 }
-                Stmt::Fn(decl) => self.declare(&decl.name, BindingKind::Function, decl.pos)?,
+                Stmt::Fn(decl) => {
+                    self.declared_at.insert(decl.name.clone(), index);
+                    self.declare(&decl.name, BindingKind::Function, decl.pos)?
+                }
                 Stmt::Component(decl) => {
+                    self.declared_at.insert(decl.name.clone(), index);
                     self.declare(&decl.name, BindingKind::Component, decl.pos)?
                 }
                 Stmt::Enum(decl) => self.declare(&decl.name, BindingKind::Const, decl.pos)?,
@@ -342,6 +369,14 @@ impl Checker<'_> {
                 }
             }
             Stmt::Use(decl) => {
+                // A module is used at the top level, because the code of a
+                // module is written before the program runs.
+                if self.scopes.depth() > 1 {
+                    return Err(self.error(
+                        decl.pos,
+                        "a module may only be used at the top level",
+                    ));
+                }
                 if !decl.path.ends_with(".css") {
                     self.declare(&decl.alias, BindingKind::Import, decl.pos)?;
                 }
@@ -622,7 +657,7 @@ impl Checker<'_> {
                 }
             }
             Expr::Fn(params, body, _, _) => self.check_function(params, body)?,
-            Expr::Arrow(params, body, _) => self.check_arrow(params, body)?,
+            Expr::Arrow(params, body, _, _) => self.check_arrow(params, body)?,
             Expr::Match(subject, arms, _) => {
                 self.check_expr(subject)?;
                 for arm in arms {
@@ -670,6 +705,7 @@ impl Checker<'_> {
             }
             Expr::Await(arg, _) => self.check_expr(arg)?,
             Expr::Try(arg, _) => self.check_expr(arg)?,
+            Expr::As(arg, _, _) | Expr::Is(arg, _, _) => self.check_expr(arg)?,
             Expr::Yield(arg, _) => self.check_expr(arg)?,
             Expr::Spread(arg, _) => self.check_expr(arg)?,
         }

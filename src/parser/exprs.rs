@@ -266,6 +266,16 @@ impl Parser {
                 // The value hands its failure on.
                 let pos = self.advance()?.pos;
                 expr = Expr::Try(Box::new(expr), pos);
+            } else if self.is_kw("as") {
+                // The value is used as another type.
+                let pos = self.advance()?.pos;
+                let ty = self.parse_type()?;
+                expr = Expr::As(Box::new(expr), ty, pos);
+            } else if self.is_kw("is") {
+                // The type of the value is checked.
+                let pos = self.advance()?.pos;
+                let ty = self.parse_type()?;
+                expr = Expr::Is(Box::new(expr), ty, pos);
             } else {
                 break;
             }
@@ -460,6 +470,7 @@ impl Parser {
                             pos: token.pos,
                         }],
                         body,
+                        None,
                         token.pos,
                     ));
                 }
@@ -548,13 +559,21 @@ impl Parser {
                 }
             }
             self.expect_punct(")")?;
+            // The type the arrow gives back may be written after the
+            // parameters.
+            let ret = if self.is_punct(":") {
+                self.advance()?;
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
             if !self.is_op("=>") {
                 return Ok(None);
             }
             self.advance()?;
             committed = true;
             let body = self.parse_arrow_body()?;
-            Ok(Some(Expr::Arrow(params, body, pos)))
+            Ok(Some(Expr::Arrow(params, body, ret, pos)))
         })();
 
         match result {
@@ -577,7 +596,7 @@ impl Parser {
             self.advance()?;
             self.expect_op("=>")?;
             let body = self.parse_arrow_body()?;
-            return Ok(Expr::Arrow(Vec::new(), body, pos));
+            return Ok(Expr::Arrow(Vec::new(), body, None, pos));
         }
 
         let mut exprs = vec![self.parse_expression()?];
@@ -604,7 +623,7 @@ impl Parser {
                 });
             }
             let body = self.parse_arrow_body()?;
-            return Ok(Expr::Arrow(params, body, pos));
+            return Ok(Expr::Arrow(params, body, None, pos));
         }
 
         if exprs.len() > 1 {
