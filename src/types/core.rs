@@ -241,6 +241,24 @@ pub(crate) fn union(types: Vec<Type>) -> Type {
     }
 }
 
+/// A type without the values that are never there.
+///
+/// `a or b` gives `a` only when it is there, so the part of `a` that is
+/// nothing is the part that gives `b`.
+pub(crate) fn without_nullish(ty: &Type) -> Type {
+    match ty {
+        Type::Null | Type::Undefined | Type::Void => Type::Never,
+        Type::Union(items) => union(
+            items
+                .iter()
+                .map(without_nullish)
+                .filter(|item| !matches!(item, Type::Never))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 pub(crate) fn push_unique(out: &mut Vec<Type>, ty: Type) {
     if !out.contains(&ty) {
         out.push(ty);

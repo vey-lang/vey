@@ -916,10 +916,10 @@ gap that is closed.
 - [x] **The value that a name of a `let` has by default is not checked**
       against the type of the name. (`src/types/patterns.rs`)
 - [x] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
-- [ ] **The smaller gaps:** `symbol` and `bigint` have no members, the
-      name of a `catch` is always `any`, a comparison of a member does not
-      narrow, `and` and `or` are typed `bool` and not the value they give
-      back, and an unknown operator is typed `any`.
+- [ ] **The smaller gaps:** a comparison of a member does not narrow, so
+      `if user.name != null { user.name.length }` is not known. The name of
+      a `catch` stays `any`, because a `throw` may give anything, which is
+      the same choice as an unannotated `let`.
 
 ### 14.3 The runtime and the tools
 

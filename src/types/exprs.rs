@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::builtins::builtin_type;
-use crate::types::core::{union, without_empty, EnumInfo, EnumVariantInfo, FunctionType, ObjectField, Type};
+use crate::types::core::{
+    union, without_empty, without_nullish, EnumInfo, EnumVariantInfo, FunctionType, ObjectField, Type,
+};
 use crate::types::rules::{
     assignable, collect_type_vars, comparable, erase_type_vars, has_type_var, orderable, substitute,
     substitute_bound, unify_types,
@@ -140,19 +142,18 @@ impl TypeChecker<'_> {
                 self.note_operand(op, right, &right_ty, &left_ty);
                 self.binary_result(op, &left_ty, &right_ty, *pos)
             }
-            Expr::Logical(_, left, right, pos) => {
+            Expr::Logical(op, left, right, _) => {
+                // `and` and `or` give one of their two values back, so the
+                // result is either of them. A condition that they are part
+                // of is still checked like any other condition.
                 let left = self.infer_expr(left)?;
                 let right = self.infer_expr(right)?;
-                // A condition is a yes or a no.
-                for ty in [&left, &right] {
-                    if matches!(ty, Type::Any | Type::Unknown | Type::Var(_)) {
-                        continue;
-                    }
-                    if !assignable(ty, &Type::Bool) {
-                        return Err(self.type_error(*pos, ty, &Type::Bool));
-                    }
+                if op == "||" {
+                    // `a or b` gives `a` only when it is there.
+                    Ok(union(vec![without_nullish(&left), right]))
+                } else {
+                    Ok(union(vec![left, right]))
                 }
-                Ok(Type::Bool)
             }
             Expr::Nullish(left, right, _) => {
                 let left = self.infer_expr(left)?;
@@ -1090,7 +1091,9 @@ impl TypeChecker<'_> {
                     ))
                 }
             }
-            _ => Ok(Type::Any),
+            // A word that the parser does not know cannot be typed, so a
+            // new operator has to be given a place here when it is added.
+            _ => Err(self.error(pos, format!("unknown operator '{}'", op))),
         }
     }
 
@@ -1403,6 +1406,23 @@ impl TypeChecker<'_> {
             }
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
+            // A symbol and a big number are read as a text, and a symbol
+            // says what it is.
+            Type::Symbol if name == "description" => {
+                Ok(union(vec![Type::String, Type::Null]))
+            }
+            Type::Symbol | Type::BigInt if name == "toString" => Ok(Type::Function(
+                crate::types::core::FunctionType {
+                    params: Vec::new(),
+                    required: 0,
+                    rest: false,
+                    ret: Box::new(Type::String),
+                    checked: true,
+                    constraints: Vec::new(),
+                    type_params: Vec::new(),
+                    param_names: Vec::new(),
+                },
+            )),
             Type::Union(items) => {
                 let mut out = Vec::new();
                 for item in items {
