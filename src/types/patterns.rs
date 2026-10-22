@@ -10,29 +10,46 @@ use crate::VeyError;
 use super::checker::TypeChecker;
 
 impl TypeChecker<'_> {
+    /// The path of a value that a check may narrow, and its type.
+    ///
+    /// A check narrows a name, such as `value`, or a member of it, such as
+    /// `user.name`. A member is known by its path, which is not a name of
+    /// the program.
+    pub(crate) fn place(&self, expr: &Expr) -> Option<(String, Type)> {
+        match expr {
+            Expr::Ident(name, _) => self.lookup(name).map(|ty| (name.clone(), ty)),
+            Expr::Member(object, MemberProp::Name(name), _, pos) => {
+                let (base, base_ty) = self.place(object)?;
+                let path = format!("{}.{}", base, name);
+                let ty = match self.lookup_member_path(&path) {
+                    Some(ty) => ty,
+                    None => self.lookup_member(&base_ty, name, *pos).ok()?,
+                };
+                Some((path, ty))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn narrow_condition(&self, expr: &Expr) -> Option<(String, Type, Type)> {
         // A check of the type: `if value is string { }`.
         if let Expr::Is(inner, ty, _) = expr {
-            let Expr::Ident(name, _) = &**inner else {
-                return None;
-            };
-            let original = self.lookup(name)?;
+            let (name, original) = self.place(inner)?;
             let wanted = self.resolve_type(ty).ok()?;
             // In the branch the value is of the type that was asked for, and
             // outside it is the rest.
             let else_ty = remove_type(&original, &wanted);
-            return Some((name.clone(), wanted, else_ty));
+            return Some((name, wanted, else_ty));
         }
         // The truth of a value: `if user { }`. A value that may be nothing
         // is asked with its truth, and the branch knows that it is there.
-        if let Expr::Ident(name, _) = expr {
-            let original = self.lookup(name)?;
+        if let Some((name, original)) = self.place(expr) {
             let then_ty = without_empty(&original);
             if then_ty == original {
                 return None;
             }
             let else_ty = union(vec![Type::Null, Type::Undefined]);
-            return Some((name.clone(), then_ty, else_ty));
+            return Some((name, then_ty, else_ty));
         }
 
         let Expr::Binary(op, left, right, _) = expr else {
@@ -57,17 +74,14 @@ impl TypeChecker<'_> {
     /// The value is of the type on the right, when that is a type of the
     /// program.
     fn narrow_instanceof(&self, left: &Expr, right: &Expr) -> Option<(String, Type, Type)> {
-        let Expr::Ident(name, _) = left else {
-            return None;
-        };
+        let (name, original) = self.place(left)?;
         let Expr::Ident(type_name, _) = right else {
             return None;
         };
-        let original = self.lookup(name)?;
         let target = self.type_by_name(type_name)?;
         let then_ty = union(vec![target.clone(), original.clone()]);
         let else_ty = remove_type(&original, &target);
-        Some((name.clone(), then_ty, else_ty))
+        Some((name, then_ty, else_ty))
     }
 
     /// The type of the program with this name, when it is one.
@@ -104,19 +118,17 @@ impl TypeChecker<'_> {
 
         // A value that is compared with nothing is narrowed to nothing, and
         // the other way around.
-        if let Expr::Ident(name, _) = left {
+        if let Some((name, original)) = self.place(left) {
             if is_empty(right) {
-                let original = self.lookup(name)?;
                 let else_ty = without_empty(&original);
-                return Some((name.clone(), Type::Null, else_ty));
+                return Some((name, Type::Null, else_ty));
             }
         }
 
-        if let Expr::Ident(name, _) = right {
+        if let Some((name, original)) = self.place(right) {
             if is_empty(left) {
-                let original = self.lookup(name)?;
                 let else_ty = without_empty(&original);
-                return Some((name.clone(), Type::Null, else_ty));
+                return Some((name, Type::Null, else_ty));
             }
         }
 
@@ -133,10 +145,7 @@ impl TypeChecker<'_> {
         if name != "type" || args.len() != 1 {
             return None;
         }
-        let Expr::Ident(variable, _) = &args[0] else {
-            return None;
-        };
-        self.lookup(variable).map(|ty| (variable.clone(), ty))
+        self.place(&args[0])
     }
 
     pub(crate) fn check_pattern(&mut self, pattern: &Pattern) -> Result<(), VeyError> {

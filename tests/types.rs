@@ -82,6 +82,107 @@ fn f(x: number | null) -> number {
 }
 
 #[test]
+fn a_check_narrows_a_member_of_a_value() {
+    check_ok(
+        "narrow-member",
+        r#"
+type User = { name: string | null }
+fn takes(s: string) -> string { return s }
+fn show(user: User) {
+  if user.name != null {
+    print(takes(user.name))
+  }
+  if user.name {
+    print(takes(user.name))
+  }
+  if user.name == null {
+    return
+  }
+  print(takes(user.name))
+}
+"#,
+    );
+    let error = check_err(
+        "narrow-member-off",
+        r#"
+type User = { name: string | null }
+fn takes(s: string) -> string { return s }
+fn show(user: User) {
+  print(takes(user.name))
+}
+"#,
+    );
+    assert!(error.contains("string | null"), "{error}");
+}
+
+#[test]
+fn a_narrowing_of_a_member_reaches_inside_a_closure() {
+    check_ok(
+        "narrow-member-closure",
+        r#"
+type User = { name: string | null }
+fn takes(s: string) -> string { return s }
+fn show(user: User) {
+  if user.name != null {
+    let read = fn() { return takes(user.name) }
+    print(read())
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn a_write_takes_away_the_narrowing_of_a_member() {
+    let error = check_err(
+        "narrow-member-written",
+        r#"
+type User = { name: string | null }
+fn takes(s: string) -> string { return s }
+fn show(user: User) {
+  if user.name != null {
+    user.name = null
+    print(takes(user.name))
+  }
+}
+"#,
+    );
+    assert!(error.contains("string | null"), "{error}");
+    // A write to the value itself takes the narrowing of a member away too.
+    let error = check_err(
+        "narrow-member-root-written",
+        r#"
+type User = { name: string | null }
+fn takes(s: string) -> string { return s }
+fn show(user: User, other: User) {
+  if user.name != null {
+    user = other
+    print(takes(user.name))
+  }
+}
+"#,
+    );
+    assert!(error.contains("string | null"), "{error}");
+}
+
+#[test]
+fn a_chain_of_members_is_narrowed_by_its_path() {
+    check_ok(
+        "narrow-member-chain",
+        r#"
+type Address = { city: string | null }
+type User = { address: Address }
+fn takes(s: string) -> string { return s }
+fn show(user: User) {
+  if user.address.city != null {
+    print(takes(user.address.city))
+  }
+}
+"#,
+    );
+}
+
+#[test]
 fn a_function_may_not_fall_off_the_end() {
     let error = check_err(
         "fall-off-end",

@@ -13,6 +13,7 @@ use crate::VeyError;
 
 use super::checker::{ComponentParam, TypeChecker};
 use super::helpers::{
+    place_path,
     argument_label, block_always_exits, block_assigns_name, block_has_yield, extra_field,
     markup_assigns_name, name_alias, stmt_assigns_name,
 };
@@ -306,17 +307,20 @@ impl TypeChecker<'_> {
                 let test = self.infer_expr(&decl.test)?;
                 self.check_condition(&test, decl.pos)?;
                 let narrowing = self.narrow_condition(&decl.test).filter(|(name, _, _)| {
-                    !block_assigns_name(&decl.then_block, name)
+                    // A member is narrowed by its path, and a write to the
+                    // value it hangs off takes the narrowing away.
+                    let root = name.split('.').next().unwrap_or(name.as_str());
+                    !block_assigns_name(&decl.then_block, root)
                         && !decl
                             .else_branch
                             .as_ref()
-                            .is_some_and(|branch| stmt_assigns_name(branch, name))
+                            .is_some_and(|branch| stmt_assigns_name(branch, root))
                 });
                 if let Some((name, then_ty, else_ty)) = narrowing {
                     self.check_block_narrowed(&decl.then_block, &name, then_ty)?;
                     if let Some(branch) = &decl.else_branch {
                         self.push_scope();
-                        self.declare(&name, else_ty);
+                        self.declare_narrowed(&name, else_ty);
                         self.check_stmt(branch)?;
                         self.pop_scope();
                     } else if block_always_exits(&decl.then_block) {
@@ -542,7 +546,7 @@ impl TypeChecker<'_> {
         ty: Type,
     ) -> Result<(), VeyError> {
         self.push_scope();
-        self.declare(name, ty);
+        self.declare_narrowed(name, ty);
         for stmt in &block.body {
             self.check_stmt(stmt)?;
         }
@@ -687,8 +691,10 @@ impl TypeChecker<'_> {
         // may run later, and what it does says nothing about the value that
         // is there by then.
         let outer = self.scopes.clone();
+        let outer_members = self.member_narrowings.clone();
         let result = self.check_function_inner(params, body, ret_ann, pos);
         self.scopes = outer;
+        self.member_narrowings = outer_members;
         result
     }
 
@@ -951,8 +957,9 @@ impl TypeChecker<'_> {
                 MarkupNode::If(branch) => {
                     self.infer_expr(&branch.test)?;
                     let narrowing = self.narrow_condition(&branch.test).filter(|(name, _, _)| {
-                        !markup_assigns_name(&branch.then_nodes, name)
-                            && !markup_assigns_name(&branch.else_nodes, name)
+                        let root = name.split('.').next().unwrap_or(name.as_str());
+                        !markup_assigns_name(&branch.then_nodes, root)
+                            && !markup_assigns_name(&branch.else_nodes, root)
                     });
                     if let Some((name, then_ty, else_ty)) = narrowing {
                         self.check_markup_narrowed(&branch.then_nodes, &name, then_ty)?;
@@ -1003,13 +1010,17 @@ impl TypeChecker<'_> {
         ty: Type,
     ) -> Result<(), VeyError> {
         self.push_scope();
-        self.declare(name, ty);
+        self.declare_narrowed(name, ty);
         self.check_markup(nodes)?;
         self.pop_scope();
         Ok(())
     }
 
     pub(crate) fn check_assign(&mut self, decl: &AssignStmt) -> Result<(), VeyError> {
+        // A write makes the narrowing of the value it writes go away.
+        if let Some(path) = place_path(&decl.target) {
+            self.forget_member(&path);
+        }
         let target_ty = self.target_type(&decl.target)?;
         let value_ty = self.infer_expr_as(&decl.value, target_ty.as_ref())?;
 

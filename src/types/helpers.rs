@@ -155,6 +155,17 @@ pub(crate) fn markup_assigns_name(nodes: &[MarkupNode], name: &str) -> bool {
     })
 }
 
+/// The path of a value that a check may narrow, such as `user.name`.
+pub(crate) fn place_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Member(object, MemberProp::Name(name), _, _) => {
+            Some(format!("{}.{}", place_path(object)?, name))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn expr_assigns_name(expr: &Expr, name: &str) -> bool {
     match expr {
         Expr::Fn(_, body, _, _) => block_assigns_name(body, name),

@@ -72,6 +72,7 @@ pub fn check(
         impls,
         imports: imports.clone(),
         scopes: vec![HashMap::new()],
+        member_narrowings: vec![HashMap::new()],
         type_param_scopes: Vec::new(),
         type_param_bindings: Vec::new(),
         type_param_constraints: Vec::new(),
@@ -471,6 +472,9 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) impls: HashMap<String, ImplInfo>,
     pub(crate) imports: HashMap<String, ModuleTypeEnv>,
     pub(crate) scopes: Vec<HashMap<String, Type>>,
+    /// The members that a check has narrowed, such as `user.name`, kept
+    /// apart from the names of the program.
+    pub(crate) member_narrowings: Vec<HashMap<String, Type>>,
     pub(crate) type_param_scopes: Vec<HashMap<String, Type>>,
     /// The types the type parameters of the current scope were bound to.
     pub(crate) type_param_bindings: Vec<HashMap<String, Type>>,
@@ -548,6 +552,7 @@ impl TypeChecker<'_> {
             impls,
             imports: HashMap::new(),
             scopes: vec![HashMap::new()],
+        member_narrowings: vec![HashMap::new()],
             type_param_scopes: Vec::new(),
             type_param_bindings: Vec::new(),
             type_param_constraints: Vec::new(),
@@ -586,10 +591,12 @@ impl TypeChecker<'_> {
 
     pub(crate) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.member_narrowings.push(HashMap::new());
     }
 
     pub(crate) fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.member_narrowings.pop();
     }
 
     pub(crate) fn push_type_params(&mut self, params: &[TypeParam]) -> Result<(), VeyError> {
@@ -637,6 +644,44 @@ impl TypeChecker<'_> {
         }
     }
 
+    /// Narrow a member such as `user.name`, in the scope that is open.
+    pub(crate) fn declare_member(&mut self, path: &str, ty: Type) {
+        if let Some(scope) = self.member_narrowings.last_mut() {
+            scope.insert(path.to_string(), ty);
+        }
+    }
+
+    /// The narrowed type of a member, when a check has given one.
+    pub(crate) fn lookup_member_path(&self, path: &str) -> Option<Type> {
+        self.member_narrowings
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(path).cloned())
+    }
+
+    /// A narrowing is no longer true when the value it is about is written.
+    ///
+    /// A write to `user` says nothing about `user.name`, but a write to
+    /// `user.name` or to a member of it does.
+    pub(crate) fn forget_member(&mut self, path: &str) {
+        for scope in self.member_narrowings.iter_mut() {
+            scope.retain(|narrowed, _| {
+                narrowed != path
+                    && !narrowed.starts_with(&format!("{}.", path))
+                    && !path.starts_with(&format!("{}.", narrowed))
+            });
+        }
+    }
+
+    /// Declare a narrowing that a check gave, of a name or of a member.
+    pub(crate) fn declare_narrowed(&mut self, name: &str, ty: Type) {
+        if name.contains('.') {
+            self.declare_member(name, ty);
+        } else {
+            self.declare(name, ty);
+        }
+    }
+
     /// The names of the known types, used to suggest a similar one.
     pub(crate) fn known_types(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.aliases.keys().map(|name| name.as_str()).collect();
@@ -674,6 +719,12 @@ impl TypeChecker<'_> {
     /// This is used after a check such as `if value == null { return }`, where
     /// the rest of the block only sees the narrowed type.
     pub(crate) fn narrow_binding(&mut self, name: &str, ty: Type) {
+        if name.contains('.') {
+            // A member is not a binding, so its narrowing lives in its own
+            // scope.
+            self.declare_member(name, ty);
+            return;
+        }
         for scope in self.scopes.iter_mut().rev() {
             if let Some(slot) = scope.get_mut(name) {
                 *slot = ty;

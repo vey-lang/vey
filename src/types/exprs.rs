@@ -16,7 +16,7 @@ use crate::VeyError;
 
 use super::checker::TypeChecker;
 use super::helpers::{
-    argument_label, literal_number, operand_type, qualified_type, set_object_field,
+    argument_label, literal_number, operand_type, place_path, qualified_type, set_object_field,
     type_argument_label,
 };
 use crate::parser::exprs::NAMED_MARKER;
@@ -1104,6 +1104,20 @@ impl TypeChecker<'_> {
         optional: bool,
         pos: Pos,
     ) -> Result<Type, VeyError> {
+        // A check may have narrowed the member, such as `user.name` after
+        // `if user.name != null`.
+        if let MemberProp::Name(name) = prop {
+            if let Some(path) = place_path(object) {
+                let full = format!("{}.{}", path, name);
+                if let Some(ty) = self.lookup_member_path(&full) {
+                    return Ok(if optional {
+                        union(vec![ty, Type::Null])
+                    } else {
+                        ty
+                    });
+                }
+            }
+        }
         // A member of another module is looked up in the environment of that
         // module, so that its signature is checked.
         if let (MemberProp::Name(name), Expr::Ident(alias, _)) = (prop, object) {

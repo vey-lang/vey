@@ -916,10 +916,13 @@ gap that is closed.
 - [x] **The value that a name of a `let` has by default is not checked**
       against the type of the name. (`src/types/patterns.rs`)
 - [x] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
-- [ ] **The smaller gaps:** a comparison of a member does not narrow, so
-      `if user.name != null { user.name.length }` is not known. The name of
-      a `catch` stays `any`, because a `throw` may give anything, which is
-      the same choice as an unannotated `let`.
+- [x] **The smaller gaps:** a check narrows a member as it narrows a name,
+      by the path of the member (`user.name`, and `user.address.city`), for
+      the branch, the rest of the block after an early return, and the
+      markup. A write to the member or to a value it hangs off takes the
+      narrowing away. The name of a `catch` stays `any`, because a `throw`
+      may give anything, which is the same choice as an unannotated `let`.
+      (`src/types/patterns.rs`, `src/types/checker.rs`)
 
 ### 14.3 The runtime and the tools
 
