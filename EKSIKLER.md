@@ -1036,7 +1036,7 @@ Gövde string / Buffer / nesne olmalı. `fs.readStream` var ama `node.js:208-215
 ### D5 · Graceful shutdown yalnızca API seviyesinde
 `app.stop()` artık **deadline** alıyor ve `closeAllConnections()` kullanıyor (`server.js:962-969`). Kalan eksik: `SIGTERM`/`SIGINT` dinleyicisi yok (`grep -rn "SIGTERM\|SIGINT" src/` → 0), yani konteyner durdurulduğunda süreç kendisi boşaltmıyor; programın `onShutdown(...)` ile bağlaması gerekiyor.
 
-### D6 · `use()` middleware yolu parametre/wildcard desteklemiyor
+### D6 · `use()` middleware yolu parametre/wildcard desteklemiyor ✅ **düzeltildi**
 `src/runtime/server.js:181-186`
 
 ```js
@@ -1047,7 +1047,7 @@ function fitsPath(pattern, pathname) {
   return pathname.indexOf(pattern + "/") === 0;   // düz prefix
 }
 ```
-`app.use("/user/{id}", fn)` çalışmıyor.
+`app.use("/user/{id}", fn)` ve `app.use("/assets/*", fn)` artık çalışıyor. Regresyon testi: `tests/runtime.rs::middleware_paths_accept_route_parameters_and_wildcards`.
 
 ### D7 · Hata middleware'i **4-arity** değil; instance izolasyonu ✅ **düzeltildi**
 `runtime.errorHandler(handler)` callback'i artık `ctx` üzerine yazmıyor; `server.use()` onu kendi server instance'ına bağlıyor. İki sunucunun eşzamanlı hataları artık handler'larını karıştırmıyor. Test: `tests/runtime.rs::error_handlers_are_isolated_between_server_instances`.

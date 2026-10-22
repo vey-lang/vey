@@ -214,7 +214,17 @@ function veyServer(ctx) {
       if (!pattern) return true;
       if (pattern === "/") return true;
       if (pathname === pattern) return true;
-      return pathname.indexOf(pattern + "/") === 0;
+      if (pathname.indexOf(pattern + "/") === 0) return true;
+      // Middleware paths use the same parameter and wildcard syntax as
+      // routes, while retaining the useful prefix behaviour above.
+      if (matchRoute(pattern, pathname) !== null) return true;
+      var patternParts = String(pattern).split("/").filter(Boolean);
+      var pathParts = String(pathname).split("/").filter(Boolean);
+      if (patternParts.length <= pathParts.length && patternParts.indexOf("*") === -1) {
+        var prefix = "/" + pathParts.slice(0, patternParts.length).join("/");
+        return matchRoute(pattern, prefix) !== null;
+      }
+      return false;
     }
 
     function readBody(request, max) {

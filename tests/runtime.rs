@@ -634,6 +634,35 @@ app.start(() => {
 }
 
 #[test]
+fn middleware_paths_accept_route_parameters_and_wildcards() {
+    let text = run_runtime(
+        "middleware-patterns",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use("/v/{version}", (req, res, next) => { res.set("X-Version", "yes"); next(); });
+app.use("/assets/*", (req, res, next) => { res.set("X-Assets", "yes"); next(); });
+app.get("/v/{version}/page", () => "version");
+app.get("/assets/file.txt", () => "asset");
+app.start(() => {
+  const get = path => new Promise(resolve => {
+    http.get("http://127.0.0.1:" + app.port() + path, res => {
+      res.resume();
+      res.on("end", () => resolve([res.statusCode, res.headers["x-version"] || null, res.headers["x-assets"] || null]));
+    });
+  });
+  Promise.all([get("/v/1/page"), get("/assets/file.txt")]).then(async answers => {
+    console.log(JSON.stringify(answers));
+    await app.stop();
+    process.exit(0);
+  });
+});
+"#,
+    );
+    assert!(text.contains(r#"[[200,"yes",null],[200,null,"yes"]]"#), "{text}");
+}
+
+#[test]
 fn cors_answers_preflight_with_the_configured_headers() {
     let text = run_runtime(
         "cors-preflight",
