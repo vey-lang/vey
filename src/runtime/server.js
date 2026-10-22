@@ -789,6 +789,7 @@ function veyServer(ctx) {
     // The events of the server, as they come.
     function makeStream(response, onClose, extra) {
       var open = true;
+      var heartbeatTimer = null;
       var headers = {};
       for (var key in extra || {}) headers[key] = extra[key];
       headers["Content-Type"] = "text/event-stream; charset=utf-8";
@@ -801,6 +802,7 @@ function veyServer(ctx) {
       var ended = function () {
         if (!open) return;
         open = false;
+        if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
         if (onClose) onClose();
       };
       if (response.on) {
@@ -812,18 +814,36 @@ function veyServer(ctx) {
         response.socket.on("error", ended);
       }
       return {
-        send: function (data) {
+        send: function (data, id) {
           if (!open) return;
+          if (id !== undefined) response.write("id: " + String(id) + "\n");
           response.write("data: " + String(data) + "\n\n");
         },
-        event: function (name, data) {
+        event: function (name, data, id) {
           if (!open) return;
           response.write("event: " + String(name) + "\n");
+          if (id !== undefined) response.write("id: " + String(id) + "\n");
           response.write("data: " + String(data) + "\n\n");
+        },
+        retry: function (milliseconds) {
+          if (!open) return;
+          response.write("retry: " + String(Math.max(0, Number(milliseconds))) + "\n\n");
+          return this;
+        },
+        heartbeat: function (milliseconds) {
+          if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
+          var delay = Number(milliseconds);
+          if (open && delay > 0) {
+            heartbeatTimer = hostSetInterval(function () {
+              if (open) response.write(": heartbeat\n\n");
+            }, delay);
+          }
+          return this;
         },
         close: function () {
           if (!open) return;
           open = false;
+          if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
           try { response.end(); } catch (ignored) { }
           if (onClose) onClose();
         }

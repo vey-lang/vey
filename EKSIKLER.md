@@ -1081,8 +1081,8 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 - Origin doğrulaması yok, auth hook yok, backpressure yok.
 - ~~`sockets` dizisi hiç temizlenmiyor~~ ✅ bağlantı kapanınca listeden çıkarılıyor.
 
-### D11 · SSE eksikleri
-`src/runtime/server.js:493-519` — status sabit 200 (`res.status(404)` çalışmaz), `id:`/`retry:` yok (resume yok), heartbeat yok, `response.on("close")` yok (P0-8).
+### D11 · SSE eksikleri 🟡 **id/retry/heartbeat eklendi**
+`src/runtime/server.js:790-845` — `stream.send(data, id)`, `stream.event(name, data, id)`, `stream.retry(ms)` ve `stream.heartbeat(ms)` artık mevcut; bağlantı kapanınca heartbeat timer'ı temizleniyor. SSE status override, Last-Event-ID ile otomatik resume ve daha gelişmiş backpressure hâlâ eksik. Test: `tests/runtime.rs::sse_stream_supports_ids_retry_and_heartbeats`.
 
 ### D12 · Oturum deposu yalnızca bellekte, takılabilir arayüz yok
 `src/runtime/session.js` — oturum deposu modül-genel ve yalnızca bellekte; TTL/idle timeout, maksimum oturum ve temizlik job'ı yok → **sınırsız bellek büyümesi**. `session.regenerate()` var; `flash` ve `touch()` yok. Session ID ve data map'leri prototype pollution'a karşı `Object.create(null)` ile oluşturuluyor. Test: `tests/runtime.rs::a_prototype_named_session_cookie_cannot_pollute_object_prototypes`.

@@ -1588,6 +1588,37 @@ app.start(() => {
 }
 
 #[test]
+fn sse_stream_supports_ids_retry_and_heartbeats() {
+    let text = run_runtime(
+        "sse-features",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.sse("/events", (req, stream) => {
+  stream.retry(1500);
+  stream.send("hello", "42");
+  stream.heartbeat(10);
+});
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/events", res => {
+    let body = "";
+    res.on("data", chunk => {
+      body += chunk;
+      if (body.includes(": heartbeat")) {
+        res.destroy();
+        app.stop().then(() => { console.log(body); process.exit(0); });
+      }
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains("retry: 1500"), "{text}");
+    assert!(text.contains("id: 42"), "{text}");
+    assert!(text.contains(": heartbeat"), "{text}");
+}
+
+#[test]
 fn websocket_64_bit_lengths_are_checked_before_reading_the_payload() {
     let text = run_runtime(
         "websocket-64-bit-length",
