@@ -148,6 +148,27 @@ pub fn check(
                     env.components.insert(decl.name.clone(), params.clone());
                 }
             }
+            Stmt::Impl(decl) => {
+                // The constructor of a type is public when the type is, so
+                // that the users of the module may make a value of it.
+                if !env.types.contains_key(&decl.type_name) {
+                    continue;
+                }
+                let base = env.types.get(&decl.type_name).cloned().unwrap_or(Type::Any);
+                env.values.insert(
+                    decl.type_name.clone(),
+                    Type::Function(FunctionType {
+                        params: vec![base.clone()],
+                        required: 1,
+                        rest: false,
+                        ret: Box::new(base),
+                        checked: true,
+                        constraints: Vec::new(),
+                        type_params: Vec::new(),
+                        param_names: vec![decl.type_name.clone()],
+                    }),
+                );
+            }
             Stmt::Var(decl) if decl.exported => {
                 if let BindingPattern::Name { name, .. } = &decl.pattern {
                     if let Some(ty) = checker.lookup(name) {

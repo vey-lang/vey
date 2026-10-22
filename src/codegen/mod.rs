@@ -12,7 +12,9 @@ use crate::sourcemap::marker;
 use crate::types::core::EnumInfo;
 use crate::VeyError;
 
-pub(crate) use awaits::{block_has_await, block_has_defer, block_has_try, block_has_yield};
+pub(crate) use awaits::{
+    block_has_await, block_has_defer, block_has_try, block_has_yield, markup_has_await,
+};
 pub(crate) use js::{js_key, js_string};
 
 pub struct Options {
@@ -293,9 +295,11 @@ impl Codegen {
                 // A component accepts either a marked props object (used by
                 // markup) or plain positional arguments. `__veyValues` holds
                 // the positional arguments, `__veyProps` the named ones.
+                // A component whose markup waits is async.
+                let async_kw = if markup_has_await(&decl.children) { "async " } else { "" };
                 self.emit(&format!(
-                    "function _{} (__veyFirst, ...__veyRest) {{",
-                    decl.name
+                    "{}function _{} (__veyFirst, ...__veyRest) {{",
+                    async_kw, decl.name
                 ));
                 self.indent += 1;
                 self.push_scope();
@@ -479,9 +483,9 @@ impl Codegen {
                 for (name, _) in decl.pattern.bindings() {
                     self.declare(name);
                 }
-                for inner in &decl.body.body {
-                    self.gen_stmt(inner)?;
-                }
+                // The body of the loop has a block of its own, so that the
+                // pieces of code that run when it is left belong to it.
+                self.gen_block(&decl.body)?;
                 self.pop_scope();
                 self.indent -= 1;
                 self.emit("}");
@@ -663,8 +667,19 @@ impl Codegen {
 
     fn gen_block(&mut self, block: &Block) -> Result<(), VeyError> {
         self.push_scope();
-        for stmt in &block.body {
-            self.gen_stmt(stmt)?;
+        // A block that has something to do when it is left needs a block of
+        // its own in the JavaScript, so that the piece of code belongs to
+        // this block and not to the one around it.
+        if block_has_defer(block) {
+            self.emit("{");
+            self.indent += 1;
+            self.gen_body(block)?;
+            self.indent -= 1;
+            self.emit("}");
+        } else {
+            for stmt in &block.body {
+                self.gen_stmt(stmt)?;
+            }
         }
         self.pop_scope();
         Ok(())

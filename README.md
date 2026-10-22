@@ -1384,6 +1384,7 @@ src/runtime/         the runtime shared by node and the browser
   core.js            the console, the conversions and the tests
   text.js            the helpers for text
   collections.js     the helpers for lists and objects
+  map.js             the maps and the sets
   enum.js            the values of the enums of the language
   data.js            JSON, math, time, base64 and URLs
   date.js            the date and the time

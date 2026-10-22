@@ -68,8 +68,10 @@ impl Checker<'_> {
             ));
         }
         // A name that hides a helper of the runtime takes the helper away
-        // for the whole scope, so the reader should know about it.
-        if is_builtin(name) && !self.scopes.resolve(name).is_some() {
+        // for the whole scope, so the reader should know about it. Only the
+        // names of the top level are said out loud: a parameter of a
+        // function hides the helper only inside that function.
+        if is_builtin(name) && self.scopes.depth() == 1 && !self.scopes.resolve(name).is_some() {
             self.warn(Warning::new(
                 format!("'{}' hides a helper of the runtime", name),
                 self.file,
@@ -189,6 +191,23 @@ impl Checker<'_> {
             if let Some((name, exported)) = stmt.exported_name() {
                 if exported {
                     self.exported.insert(name.to_string());
+                }
+            }
+        }
+        // The constructor of a type is public when the type is.
+        let exported_types: Vec<&str> = program
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                Stmt::Type(decl) if decl.exported => Some(decl.name.as_str()),
+                Stmt::Interface(decl) if decl.exported => Some(decl.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        for stmt in &program.body {
+            if let Stmt::Impl(decl) = stmt {
+                if exported_types.contains(&decl.type_name.as_str()) {
+                    self.exported.insert(decl.type_name.clone());
                 }
             }
         }

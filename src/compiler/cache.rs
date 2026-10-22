@@ -245,14 +245,39 @@ pub fn hash(parts: &[&str]) -> u64 {
 ///
 /// The key is the number of the sources and of the compiler, so that a
 /// change in any of them makes the cache of no use.
+///
+/// The number of the compiler is the time it was made, so that a new
+/// compiler never reads the cache of the old one.
 pub fn key(bundle_sources: &[SourceFile], version: &str) -> u64 {
-    let mut parts: Vec<&str> = Vec::with_capacity(bundle_sources.len() + 1);
+    let stamp = compiler_stamp();
+    let mut parts: Vec<&str> = Vec::with_capacity(bundle_sources.len() + 3);
     parts.push(version);
+    parts.push(&stamp);
     for source in bundle_sources {
         parts.push(&source.path);
         parts.push(&source.content);
     }
     hash(&parts)
+}
+
+/// The time the compiler was made.
+///
+/// The cache of a project is of no use when the compiler is another one, so
+/// the time of the program is part of the key.
+fn compiler_stamp() -> String {
+    let Ok(path) = std::env::current_exe() else {
+        return String::new();
+    };
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return String::new();
+    };
+    let Ok(modified) = metadata.modified() else {
+        return String::new();
+    };
+    let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return String::new();
+    };
+    format!("{}", duration.as_nanos())
 }
 
 /// Put a bundle that was built into the cache.

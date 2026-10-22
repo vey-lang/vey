@@ -143,13 +143,33 @@ pub(crate) fn load_module(
         }
     }
 
-    let exports = ast
+    let mut exports: Vec<String> = ast
         .body
         .iter()
         .filter_map(|stmt| stmt.exported_name())
         .filter(|(_, exported)| *exported)
         .map(|(name, _)| name.to_string())
         .collect();
+
+    // The constructor of a type is exported when the type is, so that the
+    // users of the module may make a value of the type.
+    let exported_types: Vec<&str> = ast
+        .body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Type(decl) if decl.exported => Some(decl.name.as_str()),
+            Stmt::Interface(decl) if decl.exported => Some(decl.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    for stmt in &ast.body {
+        let Stmt::Impl(decl) = stmt else {
+            continue;
+        };
+        if exported_types.contains(&decl.type_name.as_str()) {
+            exports.push(decl.type_name.clone());
+        }
+    }
 
     let id = modules.len();
     ids.insert(path.to_path_buf(), id);

@@ -31,6 +31,16 @@ pub(crate) fn comparable(left: &Type, right: &Type) -> bool {
     if matches!(right, Type::Null) {
         return holds_null(left);
     }
+    // A value of an enum is the same as one of its variants.
+    if let (Type::Enum(enum_name, variant), Type::EnumUnion(other)) = (left, right) {
+        return enum_name == other || variant.is_empty();
+    }
+    if let (Type::EnumUnion(other), Type::Enum(enum_name, variant)) = (left, right) {
+        return enum_name == other || variant.is_empty();
+    }
+    if let (Type::Enum(name, variant), Type::Enum(other, other_variant)) = (left, right) {
+        return name == other && variant == other_variant;
+    }
     false
 }
 

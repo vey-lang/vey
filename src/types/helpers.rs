@@ -5,7 +5,12 @@ use crate::types::core::{ObjectField, Type};
 
 pub(crate) fn block_always_exits(block: &Block) -> bool {
     match block.body.last() {
-        Some(Stmt::Return(_)) | Some(Stmt::Break(_, _)) | Some(Stmt::Continue(_, _)) => true,
+        // A `throw` leaves the function as well, so the code after it is
+        // never run.
+        Some(Stmt::Return(_))
+        | Some(Stmt::Break(_, _))
+        | Some(Stmt::Continue(_, _))
+        | Some(Stmt::Throw(_)) => true,
         Some(Stmt::If(decl)) => {
             let then_exits = block_always_exits(&decl.then_block);
             let else_exits = decl
@@ -21,7 +26,7 @@ pub(crate) fn block_always_exits(block: &Block) -> bool {
 /// Whether the statement always leaves the function or the loop.
 pub(crate) fn stmt_always_exits(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::Return(_) | Stmt::Break(_, _) | Stmt::Continue(_, _) => true,
+        Stmt::Return(_) | Stmt::Break(_, _) | Stmt::Continue(_, _) | Stmt::Throw(_) => true,
         Stmt::If(decl) => {
             let then_exits = block_always_exits(&decl.then_block);
             let else_exits = decl
@@ -36,6 +41,7 @@ pub(crate) fn stmt_always_exits(stmt: &Stmt) -> bool {
 }
 
 /// Whether every path through the block returns a value.
+#[allow(dead_code)]
 pub(crate) fn block_always_returns(block: &Block) -> bool {
     match block.body.last() {
         Some(Stmt::Return(_)) => true,
@@ -53,6 +59,7 @@ pub(crate) fn block_always_returns(block: &Block) -> bool {
 }
 
 /// Whether every path through the statement returns a value.
+#[allow(dead_code)]
 pub(crate) fn stmt_always_returns(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(_) => true,
@@ -218,7 +225,8 @@ pub(crate) fn operand_type(op: &str, other: &Type) -> Option<Type> {
             _ => None,
         },
         "==" | "!=" | "===" | "!==" => match other {
-            Type::Any | Type::Var(_) => None,
+            // The absence of a value does not say what the value is.
+            Type::Any | Type::Var(_) | Type::Null | Type::Undefined => None,
             other => Some(other.clone()),
         },
         _ => None,

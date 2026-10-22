@@ -11,8 +11,8 @@ use crate::VeyError;
 
 use super::checker::{ComponentParam, TypeChecker};
 use super::helpers::{
-    argument_label, block_always_exits, block_always_returns, block_assigns_name, block_has_yield,
-    extra_field, markup_assigns_name, name_alias, stmt_assigns_name,
+    argument_label, block_always_exits, block_assigns_name, block_has_yield, extra_field,
+    markup_assigns_name, name_alias, stmt_assigns_name,
 };
 
 impl TypeChecker<'_> {
@@ -637,12 +637,18 @@ impl TypeChecker<'_> {
             // A function that hands its values back one by one does not
             // return, so it does not have to return on every path.
             let generator = block_has_yield(body);
-            if collected.is_empty() && !assignable(&Type::Void, expected) && !generator {
+            // A function that always throws never hands a value back, so it
+            // keeps its promise in another way.
+            if collected.is_empty()
+                && !assignable(&Type::Void, expected)
+                && !generator
+                && !block_always_exits(body)
+            {
                 return Err(self.error(pos, format!("function must return {}", expected.display())));
             }
             // A function that has a return type may not fall off the end,
             // because it would hand back nothing.
-            if !assignable(&Type::Void, expected) && !block_always_returns(body) && !generator {
+            if !assignable(&Type::Void, expected) && !block_always_exits(body) && !generator {
                 return Err(self.error(
                     pos,
                     format!("function must return {} on every path", expected.display()),

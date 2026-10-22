@@ -49,12 +49,12 @@ pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
         Stmt::WhileLet(decl) => expr_has_await(&decl.value) || block_has_await(&decl.body),
         Stmt::LetElse(decl) => expr_has_await(&decl.value) || block_has_await(&decl.otherwise),
         Stmt::Defer(decl) => expr_has_await(&decl.value),
+        Stmt::Throw(decl) => expr_has_await(&decl.value),
         Stmt::For(decl) => expr_has_await(&decl.iter) || block_has_await(&decl.body),
         Stmt::Repeat(decl) => expr_has_await(&decl.count) || block_has_await(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_await).unwrap_or(false),
         Stmt::Break(_, _)
         | Stmt::Continue(_, _)
-        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -98,12 +98,12 @@ pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
         Stmt::WhileLet(decl) => expr_has_yield(&decl.value) || block_has_yield(&decl.body),
         Stmt::LetElse(decl) => expr_has_yield(&decl.value) || block_has_yield(&decl.otherwise),
         Stmt::Defer(decl) => expr_has_yield(&decl.value),
+        Stmt::Throw(decl) => expr_has_yield(&decl.value),
         Stmt::For(decl) => expr_has_yield(&decl.iter) || block_has_yield(&decl.body),
         Stmt::Repeat(decl) => expr_has_yield(&decl.count) || block_has_yield(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_yield).unwrap_or(false),
         Stmt::Break(_, _)
         | Stmt::Continue(_, _)
-        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -124,6 +124,7 @@ pub(crate) fn stmt_has_yield(stmt: &Stmt) -> bool {
 pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Defer(_) => true,
+        Stmt::Throw(decl) => expr_has_defer(&decl.value),
         Stmt::Var(decl) => decl.init.as_ref().map(expr_has_defer).unwrap_or(false),
         Stmt::Fn(_) | Stmt::Component(_) => false,
         Stmt::If(decl) => {
@@ -152,7 +153,6 @@ pub(crate) fn stmt_has_defer(stmt: &Stmt) -> bool {
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_defer).unwrap_or(false),
         Stmt::Break(_, _)
         | Stmt::Continue(_, _)
-        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -196,12 +196,12 @@ pub(crate) fn stmt_has_try(stmt: &Stmt) -> bool {
         Stmt::WhileLet(decl) => expr_has_try(&decl.value) || block_has_try(&decl.body),
         Stmt::LetElse(decl) => expr_has_try(&decl.value) || block_has_try(&decl.otherwise),
         Stmt::Defer(decl) => expr_has_try(&decl.value),
+        Stmt::Throw(decl) => expr_has_try(&decl.value),
         Stmt::For(decl) => expr_has_try(&decl.iter) || block_has_try(&decl.body),
         Stmt::Repeat(decl) => expr_has_try(&decl.count) || block_has_try(&decl.body),
         Stmt::Return(decl) => decl.value.as_ref().map(expr_has_try).unwrap_or(false),
         Stmt::Break(_, _)
         | Stmt::Continue(_, _)
-        | Stmt::Throw(_)
         | Stmt::Use(_)
         | Stmt::Style(_)
         | Stmt::Type(_)
@@ -279,7 +279,11 @@ fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
                 }
         }
         Expr::Match(subject, arms, _) => {
-            walk(subject, test) || arms.iter().any(|arm| walk(&arm.body, test))
+            walk(subject, test)
+                || arms.iter().any(|arm| {
+                    arm.guard.as_ref().map(|guard| walk(guard, test)).unwrap_or(false)
+                        || walk(&arm.body, test)
+                })
         }
         Expr::Await(inner, _) => walk(inner, test),
         Expr::Try(inner, _) => walk(inner, test),
@@ -287,4 +291,34 @@ fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
         Expr::As(inner, _, _) | Expr::Is(inner, _, _) => walk(inner, test),
         Expr::Spread(arg, _) => walk(arg, test),
     }
+}
+
+
+/// Whether the markup of a component waits for something.
+pub(crate) fn markup_has_await(nodes: &[MarkupNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        MarkupNode::Expr(expr) => expr_has_await(expr),
+        MarkupNode::Element(element) => {
+            element.attrs.iter().any(|(_, value)| expr_has_await(value))
+                || element.args.iter().any(expr_has_await)
+                || markup_has_await(&element.children)
+        }
+        MarkupNode::If(branch) => {
+            expr_has_await(&branch.test)
+                || markup_has_await(&branch.then_nodes)
+                || markup_has_await(&branch.else_nodes)
+        }
+        MarkupNode::For(loop_node) => {
+            expr_has_await(&loop_node.iter)
+                || loop_node.key.as_ref().is_some_and(expr_has_await)
+                || markup_has_await(&loop_node.body)
+        }
+        MarkupNode::Match(m) => {
+            expr_has_await(&m.subject)
+                || m.arms.iter().any(|arm| {
+                    arm.guard.as_ref().map(|guard| expr_has_await(guard)).unwrap_or(false)
+                        || markup_has_await(&arm.body)
+                })
+        }
+    })
 }

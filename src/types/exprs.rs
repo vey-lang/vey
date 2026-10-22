@@ -1179,8 +1179,12 @@ impl TypeChecker<'_> {
         if let Some(info) = self.enums.get(name) {
             return Some(info);
         }
-        for env in self.imports.values() {
-            if let Some(info) = env.enums.get(name) {
+        // The modules are looked at in the order of their names, so that the
+        // answer is the same every time.
+        let mut aliases: Vec<&String> = self.imports.keys().collect();
+        aliases.sort();
+        for alias in aliases {
+            if let Some(info) = self.imports[alias].enums.get(name) {
                 return Some(info);
             }
         }

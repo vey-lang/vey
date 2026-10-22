@@ -60,7 +60,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
 
     match name {
         "print" => Some(builtin_rest(any(), Type::Void)),
-        "bind" => Some(builtin_function(vec![any(), any()], Type::Void)),
+        "bind" => Some(builtin_function(vec![any(), any()], any())),
         "input" => Some(builtin_optional(vec![string()], 0, string())),
         "sleep" => Some(builtin_function(vec![number()], promise())),
         "str" => Some(builtin_function(vec![any()], string())),
@@ -93,11 +93,11 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("kebab", builtin_function(vec![string()], string())),
             (
                 "padStart",
-                builtin_function(vec![string(), number(), string()], string()),
+                builtin_optional(vec![string(), number(), string()], 2, string()),
             ),
             (
                 "padEnd",
-                builtin_function(vec![string(), number(), string()], string()),
+                builtin_optional(vec![string(), number(), string()], 2, string()),
             ),
             (
                 "repeat",
@@ -106,6 +106,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("reverse", builtin_function(vec![string()], string())),
             ("words", builtin_function(vec![string()], list(string()))),
             ("dedent", builtin_function(vec![string()], string())),
+            ("encode", builtin_function(vec![string()], list(number()))),
+            ("decode", builtin_function(vec![list(number())], string())),
         ])),
         "date" => Some(builtin_object(vec![
             ("now", builtin_function(vec![], number())),
@@ -209,7 +211,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "html" => Some(builtin_function(vec![any()], string())),
         "raw" => Some(builtin_function(vec![any()], any())),
         "cls" => Some(builtin_rest(any(), string())),
-        "server" => Some(builtin_optional(vec![number()], 0, any())),
+        "server" => Some(builtin_optional(vec![number(), any()], 0, any())),
         "require" => Some(builtin_function(vec![string()], any())),
         "hash" => Some(builtin_function(vec![any()], string())),
         "highlight" => Some(builtin_function(vec![string()], string())),
@@ -223,6 +225,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("argv", builtin_function(vec![], list(string()))),
             ("platform", builtin_function(vec![], string())),
             ("exit", builtin_function(vec![number()], Type::Void)),
+            ("spawn", builtin_function(vec![string(), any()], any())),
+            ("run", builtin_function(vec![string(), any()], any())),
         ])),
         "response" => Some(builtin_optional(vec![any(), any(), any()], 1, any())),
         "redirect" => Some(builtin_optional(vec![string(), number()], 1, any())),
@@ -255,6 +259,11 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
                 "post",
                 builtin_optional(vec![string(), any(), any()], 2, promise()),
             ),
+            ("fetch", builtin_optional(vec![string(), any()], 1, promise())),
+            ("Request", builtin_optional(vec![string(), any()], 1, any())),
+            ("Response", builtin_optional(vec![any(), any()], 1, any())),
+            ("Headers", builtin_optional(vec![any()], 0, any())),
+            ("AbortController", builtin_function(vec![], any())),
         ])),
         "base64" => Some(builtin_object(vec![
             ("encode", builtin_function(vec![string()], string())),
@@ -279,6 +288,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("list", builtin_function(vec![string()], list(string()))),
             ("remove", builtin_function(vec![string()], Type::Void)),
             ("mkdir", builtin_function(vec![string()], Type::Void)),
+            ("readStream", builtin_function(vec![string()], any())),
+            ("writeStream", builtin_function(vec![string(), any()], any())),
         ])),
         "path" => Some(builtin_object(vec![
             ("join", builtin_rest(string(), string())),
@@ -290,7 +301,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "Map" => Some(builtin_optional(vec![any()], 0, map_type())),
         "Set" => Some(builtin_optional(vec![any()], 0, set_type())),
         // The library of the browser and of the server.
-        "regex" => Some(builtin_function(vec![string(), string()], any())),
+        "regex" => Some(builtin_optional(vec![string(), string()], 1, any())),
         "intl" => Some(builtin_object(vec![
             (
                 "formatNumber",
@@ -302,7 +313,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ),
             (
                 "formatTime",
-                builtin_optional(vec![any(), string()], 1, string()),
+                builtin_optional(vec![any(), any()], 1, string()),
             ),
             (
                 "dayName",
@@ -330,8 +341,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("text", builtin_function(vec![list(number())], string())),
         ])),
         "deepCopy" => Some(builtin_function(vec![any()], any())),
-        "signal" => Some(builtin_function(vec![any()], any())),
-        "store" => Some(builtin_optional(vec![any()], 0, any())),
+        "signal" => Some(builtin_optional(vec![any()], 0, any())),
+        "store" => Some(builtin_optional(vec![any(), any()], 0, any())),
         "effect" => Some(builtin_function(vec![any()], any())),
         "mount" => Some(builtin_function(vec![any(), any()], any())),
         "route" => Some(builtin_function(vec![string(), any()], any())),
@@ -367,17 +378,21 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("keys", builtin_function(vec![], list(string()))),
         ])),
         "history" => Some(builtin_object(vec![
-            ("push", builtin_function(vec![any(), string(), string()], Type::Void)),
+            (
+                "push",
+                builtin_optional(vec![any(), string(), string()], 0, Type::Void),
+            ),
             (
                 "replace",
-                builtin_function(vec![any(), string(), string()], Type::Void),
+                builtin_optional(vec![any(), string(), string()], 0, Type::Void),
             ),
             ("back", builtin_function(vec![], Type::Void)),
             ("forward", builtin_function(vec![], Type::Void)),
-            ("go", builtin_function(vec![number()], Type::Void)),
+            ("go", builtin_optional(vec![number()], 0, Type::Void)),
             ("state", builtin_function(vec![], any())),
         ])),
-        "Blob" | "File" => Some(builtin_optional(vec![any(), string()], 1, any())),
+        "Blob" => Some(builtin_optional(vec![any(), any()], 1, any())),
+        "File" => Some(builtin_optional(vec![any(), string(), any()], 1, any())),
         "FileReader" => Some(builtin_function(vec![], any())),
         "FormData" => Some(builtin_function(vec![], any())),
         "WebSocket" => Some(builtin_optional(vec![string(), any()], 1, any())),
@@ -431,6 +446,7 @@ fn map_type() -> Type {
         ("entries", builtin_function(vec![], list)),
         ("forEach", builtin_function(vec![any.clone()], Type::Void)),
         ("size", Type::Number),
+        ("toList", builtin_function(vec![], Type::Array(Box::new(Type::Any)))),
     ])
 }
 
@@ -444,8 +460,9 @@ fn set_type() -> Type {
         ("delete", builtin_function(vec![any.clone()], Type::Bool)),
         ("clear", builtin_function(vec![], any.clone())),
         ("values", builtin_function(vec![], list)),
-        ("forEach", builtin_function(vec![any], Type::Void)),
+        ("forEach", builtin_function(vec![any.clone()], Type::Void)),
         ("size", Type::Number),
+        ("toList", builtin_function(vec![], Type::Array(Box::new(Type::Any)))),
     ])
 }
 

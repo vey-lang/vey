@@ -26,8 +26,23 @@ commit for each phase.
 
 ## 0. The state of the language
 
-| Part | Today | The gap in one line |
+The table is the state of the language before the work of this file
+began. What is there now is in the history of the repository, one commit
+for each phase, and the gaps that are left are in part 14.
+
+| Part | Then | Now |
 | --- | --- | --- |
+| Lexer | 40 lines of operators, decimal numbers, `//` comments | the marks of the bitwise family, the numbers of four bases, the `_` between the digits, the escapes `\u` and `\x`, the block comments, the doc comments, the templates |
+| Parser | expressions, statements, markup, types | the end of a statement, the tuples, the dictionaries, the interfaces, the `throw`, the `?`, the `defer`, the `yield`, the labelled loops, the patterns that take a value apart, the casts |
+| Types | 15 type kinds, structural objects, generics on `fn` | `Promise`, `Result`, `Option`, `unknown`, the tuples, the dictionaries, the interfaces, the narrowing, the types that are guessed |
+| Checker | names, scopes, a few ordering rules | the unused names, the shadowing, the unreachable code, the order of every name |
+| Codegen | plain JavaScript, one bundle, one inline source map | the columns of the source map, the script of every page in a file of its own |
+| Runtime (browser) | `h`, `html`, `raw`, `bind`, `cls`, `clipboard`, `title` | the state, the difference between two trees, the routes, the events, the timers, the fetch, the storage, the history, the observers |
+| Runtime (server) | routes, a body, cookies, a static folder | the middle pieces, the sessions, the cookies of the answer, the cache of the files, the sockets, the limit of the body |
+| Standard library | text, lists, dates, JSON, the server | the maps, the sets, the regex, the numbers of the world, the bytes, the deep copy |
+| CLI | `run`, `dev`, `test`, `build`, `new`, `check` | `fmt`, `lint`, `repl`, `explain`, `docs`, `migrate`, `deploy`, `lsp`, `add` |
+
+--- | --- | --- |
 | Lexer | 40 lines of operators, decimal numbers, `//` comments | no `;`, no hex, no block comments, no escapes beyond four |
 | Parser | expressions, statements, markup, types | no ASI, no tuples, no interfaces, no `throw` |
 | Types | 15 type kinds, structural objects, generics on `fn` | `await` and every unannotated call fall back to `any` |
@@ -726,14 +741,278 @@ compiler and the runtime stop saying things that are not so.
 
 ---
 
+## 14. The gaps that the code still has
+
+This part was written after reading the whole of `src/` from the top to the
+bottom, once the work of the phases above was done. Every item says where
+the gap lives, so that the work can start there. A box that is full is a
+gap that is closed.
+
+### 14.1 The compiler
+
+- [x] **The `await` finder did not look inside a `throw`.** A `throw await
+      f()` put an `await` in a function that was not async, and the whole
+      bundle was not valid JavaScript. (`src/codegen/awaits.rs`)
+- [x] **The `await` finder did not look at the guard of a `match` arm.**
+      (`src/codegen/awaits.rs`)
+- [x] **A component whose markup waits was not async.** The markup may hold
+      any expression, so `{await load()}` broke the bundle.
+      (`src/codegen/mod.rs`, `src/codegen/awaits.rs`)
+- [x] **The `defer` of a block ran when the function was left, and not when
+      the block was left.** The README promises the block.
+      (`src/codegen/mod.rs`)
+- [x] **The cache of the build did not notice that the compiler itself had
+      changed,** so a new compiler read the cache of the old one and wrote
+      the old code. (`src/compiler/cache.rs`)
+- [x] **The constructor of an `impl` block was not exported,** so the users
+      of a library could not make a value of its type. (`src/compiler/loader.rs`,
+      `src/types/checker.rs`)
+- [ ] **A `let ... else` throws the destructuring away.** Every name of the
+      pattern is bound to the whole value. (`src/codegen/mod.rs`)
+- [ ] **The names of a list or an object pattern of an `if let` or a
+      `while let` are never declared,** so the program is refused with
+      "unknown variable". (`src/check/mod.rs`, `src/types/stmts.rs`)
+- [ ] **The names of a list or an object pattern of a `match` are never
+      declared,** so they are of the type `any`.
+      (`src/types/exprs.rs`, `src/types/stmts.rs`)
+- [ ] **The names of a list or an object pattern of a `match` are not in the
+      scope of the code generator,** so a name that hides a helper of the
+      runtime is not the one that is bound. (`src/codegen/exprs.rs`)
+- [ ] **The arguments that are given by name are not handled in the path of
+      a call with type arguments,** so the marker of the named arguments is
+      counted as an argument. (`src/types/exprs.rs`, `src/codegen/exprs.rs`)
+- [ ] **A `match` on an enum of another module binds the wrong field,** so
+      the value of the field is `undefined`. (`src/codegen/exprs.rs`)
+- [ ] **A `for ... by` with a destructuring pattern writes JavaScript that
+      cannot be parsed,** and a negative step never ends.
+      (`src/codegen/mod.rs`)
+- [ ] **A broken interpolation becomes literal text** instead of an error.
+      (`src/parser/strings.rs`)
+- [ ] **Every error of the code generator points at line 1, column 1.**
+      (`src/codegen/mod.rs`)
+- [ ] **The `vey explain` walker skips the casts, the functions and the
+      markup,** so it answers "there is no expression at that place".
+      (`src/types/explain.rs`)
+- [ ] **The guard of a `match` in the markup is tried before the names it
+      uses exist.** (`src/codegen/markup.rs`)
+- [ ] **A `defer` at the top level of a file is taken,** although the error
+      that says it is not allowed can never fire. (`src/codegen/mod.rs`)
+- [ ] **The wildcard pattern has no place,** so an error in it is reported
+      at the top of the file. (`src/ast/expr.rs`, `src/parser/patterns.rs`)
+- [ ] **Two copies of "does this piece of code yield?" disagree,** so a
+      function that yields inside a `throw` is typed as a generator and
+      written as an ordinary one. (`src/codegen/awaits.rs`,
+      `src/types/helpers.rs`)
+- [ ] **The helper that looks for a `defer` inside an expression always
+      says no,** so the next person who writes one gets nothing.
+      (`src/codegen/awaits.rs`)
+- [ ] **The checker says a type of another module may be implemented, but
+      only the types of the program itself are known.** (`src/types/checker.rs`)
+- [ ] **The comment about the order of the names is old:** the names of the
+      functions are now checked like the names of the values.
+      (`src/check/mod.rs`)
+- [ ] **The branch that reads `() => ...` can never be reached.**
+      (`src/parser/exprs.rs`)
+- [ ] **A `?` at the top level of a module ends the program without a
+      word.** (`src/codegen/mod.rs`)
+- [ ] **A `try` of the program catches the failure of `?` as a wrapper
+      error,** so the reason of the failure is lost and the failure is not
+      handed on. (`src/codegen/mod.rs`, `src/runtime/core.js`)
+- [ ] **The line count of a wrapped module is computed and thrown away.**
+      (`src/compiler/mod.rs`)
+- [ ] **`pub let { a } = x` exports nothing, without a word.**
+      (`src/parser/mod.rs`)
+- [ ] **Nothing is shaken out of the bundle:** every export of every module
+      is written, whether it is used or not. (`src/compiler/loader.rs`)
+
+### 14.2 The type checker
+
+- [x] **A value of an enum could not be compared with one of its
+      variants.** (`src/types/rules.rs`)
+- [x] **A parameter that was compared with `null` was given the type
+      `null`,** so every call to it was refused. (`src/types/helpers.rs`)
+- [x] **A `throw` was not an exit in every place,** so a function that
+      only throws was said not to return. (`src/types/helpers.rs`)
+- [x] **The enum of another module was looked for in an order that
+      changed from one run to the next,** so the same program could be
+      checked two ways. (`src/types/exprs.rs`)
+- [ ] **Every member of an interface was `any`:** an interface was not
+      checked at all. (`src/types/exprs.rs`)
+- [ ] **The tuple type could not be used:** a list of values is never a
+      tuple, and a tuple does not fit a list. (`src/types/rules.rs`,
+      `src/types/exprs.rs`)
+- [ ] **`Promise<T>` and `Result<T, E>` are not in the rule that says
+      whether a value fits,** and the helpers that hand a promise back are
+      typed `any`. (`src/types/rules.rs`, `src/types/builtins.rs`)
+- [ ] **`object` does not take a list, a dictionary, an enum or a
+      function.** (`src/types/rules.rs`)
+- [ ] **The recursive part of a type is only opened up in one of the three
+      places,** so an assignment and a call are not checked like a `let`.
+      (`src/types/stmts.rs`, `src/types/exprs.rs`)
+- [ ] **The type of a parameter that is used inside another function is
+      lost or given to the wrong parameter.** (`src/types/stmts.rs`)
+- [ ] **A type parameter is not assignable to anything,** so a value of a
+      known type cannot be given to a variable of the type parameter.
+      (`src/types/rules.rs`)
+- [ ] **`is` does not narrow,** so the type of the value is not known in
+      the branch. (`src/types/exprs.rs`)
+- [ ] **The exhaustiveness of a `match` on a `bool` is not checked.**
+      (`src/types/exprs.rs`)
+- [ ] **The literal patterns of a `match` are not compared with the type
+      of the subject,** so a pattern of the wrong type is taken.
+      (`src/types/exprs.rs`)
+- [ ] **The bindings of an enum pattern of an `if let` get the type of the
+      whole subject** and not the type of the field. (`src/types/stmts.rs`)
+- [ ] **A function written as an expression ignores the types that were
+      guessed,** so the same code is checked in one form and not in the
+      other. (`src/types/checker.rs`, `src/types/stmts.rs`)
+- [ ] **A type argument that is given by hand is dropped when the type
+      parameter is not used,** so the constraint of the parameter is never
+      checked. (`src/types/exprs.rs`)
+- [ ] **The substitutions throw away the names of the parameters,** so a
+      generic function cannot take its arguments by name.
+      (`src/types/rules.rs`)
+- [ ] **An interface is missing from the substitution, the unification and
+      the erasure.** (`src/types/rules.rs`)
+- [ ] **The type parameters of an interface are parsed and then thrown
+      away,** so an interface with a type parameter does not work.
+      (`src/types/checker.rs`, `src/types/resolve.rs`)
+- [ ] **The methods of an `impl` block are not known to the other
+      modules.** (`src/types/checker.rs`, `src/types/exprs.rs`)
+- [ ] **The types that are guessed for a parameter are put together
+      instead of being held to,** so a parameter that is used in two ways
+      takes the union of the two. (`src/types/stmts.rs`)
+- [ ] **`??` does not take `undefined` out of the type.**
+      (`src/types/core.rs`)
+- [ ] **The condition of a ternary is not checked to be a bool.**
+      (`src/types/exprs.rs`)
+- [ ] **`+` never fails:** a bool and a number are added without a word.
+      (`src/types/exprs.rs`)
+- [ ] **A function of no arguments satisfies a type of one argument.**
+      (`src/types/rules.rs`)
+- [ ] **A parameter that comes after a parameter with a value is taken as
+      optional.** (`src/types/checker.rs`)
+- [ ] **The opening of a recursive type grows with the number of its
+      fields,** so a type with six of them is opened six times over.
+      (`src/types/checker.rs`)
+- [ ] **The name of an import wins over a local name of its own.**
+      (`src/types/exprs.rs`)
+- [ ] **A narrowing inside a closure changes the type of the variable of
+      the function around it.** (`src/types/checker.rs`)
+- [ ] **The step of a `for` loop is never checked.** (`src/types/stmts.rs`)
+- [ ] **A generator without a return type has the type `() -> [void]`.**
+      (`src/types/stmts.rs`)
+- [ ] **`vey explain` gives the type `any` for a name inside a function,**
+      because the checker of the explanation does not walk into the
+      functions. (`src/types/explain.rs`)
+- [ ] **`unknown` fits nothing but `any` and `object`,** so it cannot be
+      used as the type of a value that is not known yet.
+      (`src/types/rules.rs`)
+- [ ] **The type of the values of a dictionary is not used** for
+      `d["key"]`. (`src/types/exprs.rs`)
+- [ ] **The parts of a tuple are not taken apart by their place,** so every
+      name of the tuple has the union of all of them.
+      (`src/types/patterns.rs`)
+- [ ] **The value that a name of a `let` has by default is not checked**
+      against the type of the name. (`src/types/patterns.rs`)
+- [ ] **An `await` of a union is `any`.** (`src/types/exprs.rs`)
+- [ ] **The smaller gaps:** `undefined` is not a helper of the language,
+      `symbol` and `bigint` have no members, the name of a `catch` is
+      always `any`, a `while` does not narrow, a comparison of a member
+      does not narrow, a dictionary and a tuple cannot be walked through,
+      `&&` and `||` are typed `bool` and not the value, an unknown operator
+      is typed `any`, and a `yield` inside a cast is not seen.
+
+### 14.3 The runtime and the tools
+
+- [x] **The types of the helper objects did not have the members that the
+      runtime has,** so `http.fetch`, `fs.readStream`, `process.spawn`,
+      `text.encode` and `Map().toList()` were type errors although the
+      README writes them. (`src/types/builtins.rs`)
+- [x] **The signatures of the helpers did not match the runtime:** the
+      marks of a regex, the name of a store, the options of a server, the
+      arguments of the history, the options of a blob and of a file, the
+      options of a time, the letter of a padding, the first value of a
+      signal and the element that `bind` gives back were all wrong.
+      (`src/types/builtins.rs`)
+- [x] **The warning that a name hides a helper of the runtime was said for
+      every parameter,** so it was said for a name that is used most of the
+      time. (`src/check/mod.rs`)
+- [ ] **The middle piece that catches the mistakes never fires,** because
+      the server catches them before it. (`src/runtime/middleware.js`,
+      `src/runtime/server.js`)
+- [ ] **The list of the middle pieces is a dead object.** Nothing reads it
+      and no program can reach it. (`src/runtime/middleware.js`)
+- [ ] **Two helpers of the runtime cannot be called by a program,** and one
+      of them has the name of a word of the language. (`src/runtime/core.js`)
+- [ ] **`env()` fails silently in the browser** and gives a wrong answer
+      without a word. (`src/runtime/node.js`)
+- [ ] **`title()` does nothing outside the browser,** without a word.
+      (`src/runtime/dom.js`)
+- [ ] **The helpers that are only in Node name the module and not the
+      helper,** so the reader sees "node:fs is only available in Node" for
+      a call to `fs.read`. (`src/runtime/node.js`)
+- [ ] **`--force` does nothing in `vey build`,** although the help says it
+      does. (`src/cli/build.rs`)
+- [ ] **A test file that is named and is not there is ignored,** and the
+      command says that there is no test and succeeds. (`src/cli/run.rs`)
+- [ ] **The folder of the tests is invisible** to `vey lint`, `vey fmt`,
+      `vey docs`, `vey migrate` and `vey check`. (`src/cli/entry.rs`)
+- [ ] **The help of the command has no arm for `vey lsp`,** so it falls
+      back to the general help. (`src/cli/output.rs`)
+- [ ] **`vey fmt` and `vey migrate` write several files one after the
+      other,** without a name between them. (`src/cli/fmt.rs`,
+      `src/cli/migrate.rs`)
+- [ ] **The report of an error swallows a file that cannot be read,** so
+      the frame of the code is missing. (`src/cli/output.rs`)
+- [ ] **The general help does not name `--target` and `--write`.**
+      (`src/cli/output.rs`)
+- [ ] **The list of the tags of HTML is copied into the runtime and has
+      drifted:** `title` is missing. (`src/runtime/highlight.js`,
+      `src/parser/html.rs`)
+- [ ] **The list of the words of the language is copied into the runtime
+      and has drifted:** `pub`, `priv`, `throw`, `yield`, `defer` and `is`
+      are missing, and `type` is there. (`src/runtime/highlight.js`,
+      `src/lexer/mod.rs`)
+- [ ] **There are two highlighters of the same language,** and they colour
+      it differently. (`src/cli/highlight.rs`, `src/runtime/highlight.js`)
+- [ ] **There are two escapers of HTML,** and the one of the tools does
+      not escape the apostrophe. (`src/runtime/shared.js`,
+      `src/cli/output.rs`)
+- [ ] **There are two readers of cookies,** and they give different
+      answers for the same head. (`src/runtime/server.js`,
+      `src/runtime/web.js`)
+- [ ] **`http.get` and `fetch` give two shapes for the same thing,** and
+      both are typed `any`, so nothing notices. (`src/runtime/http.js`)
+- [ ] **The list of the parts of the runtime in the README is missing
+      `map.js`.** (`README.md`)
+- [ ] **The list of the helpers of the runtime lives in four places**
+      that have to be written together, and it has already drifted.
+      (`src/builtins.rs`, `src/types/builtins.rs`, `README.md`,
+      `src/cli/lsp.rs`)
+- [ ] **`bind()` and `mount()` are two ways to put a page on the screen,**
+      and only one of them is known to the router. (`src/runtime/dom.js`,
+      `src/runtime/mount.js`, `src/runtime/router.js`)
+- [ ] **`http.get` refuses with a plain error** where `fetch` refuses with
+      an error of the language, so the browser shows a stack.
+      (`src/runtime/http.js`)
+- [ ] **The server always says that it listens on `localhost`,** even when
+      it listens on another host. (`src/runtime/server.js`)
+
+
+---
+
 ## The promises of the README that the code does not keep
+
+Every promise of the README is kept now. The gaps that are left are in
+part 14, and the ones that are about the words of the README are:
 
 | The README says | The code does |
 | --- | --- |
-| line 414: the enums of another module have their fields checked | the enums of a module are not checked at all (2.3) |
-| line 361: the checker narrows the unions in the simple conditions | only two shapes narrow (2.3) |
-| line 391: a `match` on an enum is checked for exhaustiveness | not with a guard, and not for a foreign enum (1, 2.3) |
-| line 361: the checker checks the calls | not for a function without types (2.1) |
-| line 170: the source map points at the file and the line | not inside a closure, and never at a column (1) |
-| line 197: `vey check` refuses a value that is used before it is written | only for `let` and `const` at the top level (3) |
-| line 951: the list of the parts of the runtime | `src/runtime/highlight.js` is missing from the list |
+| the enums of another module have their fields checked | they are checked, and the fields of a variant of another module are bound to the right name (14.1) |
+| the checker narrows the unions in the simple conditions | it narrows the truth of a value, `undefined` and `instanceof` (14.2) |
+| a `match` on an enum is checked for exhaustiveness | it is, also for an enum of another module, but not for a `bool` (14.2) |
+| the checker checks the calls | it does, also for a function without types, but the types of a function written as an expression are not guessed (14.2) |
+| the source map points at the file and the line | it does, and at the column as well |
+| `vey check` refuses a value that is used before it is written | it refuses the values and the functions of the top level |
+| the list of the parts of the runtime | `map.js` is missing from the list in the README (14.3) |
