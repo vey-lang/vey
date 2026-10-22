@@ -83,6 +83,13 @@ function veyMount(ctx) {
   // program, so they are moved as well.
   function syncMarks(old, neu) {
     if (neu.__veyKey !== undefined) old.__veyKey = neu.__veyKey;
+    // The work of the life of the node is kept, and the one of the new
+    // tree takes its place.
+    if (neu.__veyWorks !== undefined) {
+      var works = neu.__veyWorks;
+      if (old.__veyWorks && old.__veyWorks.done) works.done = old.__veyWorks.done;
+      old.__veyWorks = works;
+    }
     if (neu.__veyRef) {
       old.__veyRef = neu.__veyRef;
       if (typeof neu.__veyRef.set === "function") neu.__veyRef.set(old);
@@ -124,6 +131,8 @@ function veyMount(ctx) {
     }
     // The node is of another kind, so it is left out for the new one.
     var parent = old.parentNode;
+    // The work of the node that goes is done before it goes.
+    sayGoodbye(old);
     if (parent) {
       // The visitor who is writing in the node keeps his place, so the
       // focus follows the new node.
@@ -190,6 +199,8 @@ function veyMount(ctx) {
       if (typeof leaving.__veyUnbind === "function") {
         leaving.__veyUnbind();
       }
+      // The work of the component that gave the node is done.
+      sayGoodbye(leaving);
       var goodbye = leaving.__veyLeave;
       if (typeof goodbye === "function") {
         var waiting = null;
@@ -214,40 +225,72 @@ function veyMount(ctx) {
     }
 
     // The children are put in the order of the new ones.
-    var cursor = parent.firstChild;
+    //
+    // A node that is put in the page for the first time is put at the end
+    // of it, and the nodes are then put in the order of the new ones. A
+    // node that is already there is not moved when it is in the right
+    // place, so that the place of the visitor is not lost.
+    var placed = [];
     for (var m = 0; m < pairs.length; m++) {
-      var target = pairs[m].old;
-      if (target === null) {
+      var target;
+      if (pairs[m].old === null) {
         target = pairs[m].neu;
-        parent.insertBefore(target, cursor);
+        parent.appendChild(target);
         // A node that says hello is called after it is in the page.
-        if (target && typeof target.__veyEnter === "function") {
-          try {
-            target.__veyEnter(target);
-          } catch (err) {
-            log.error(err);
-          }
-        }
+        sayHello(target);
       } else {
-        target = patchNode(target, pairs[m].neu);
-        if (target !== cursor && target.parentNode === parent) {
-          // The node before which the new one is put must be a node of the
-          // parent, or the browser refuses it.
-          var before = cursor && cursor.parentNode === parent ? cursor : null;
-          parent.insertBefore(target, before);
-        }
+        target = patchNode(pairs[m].old, pairs[m].neu);
       }
-      cursor = target.nextSibling;
+      placed.push(target);
+    }
+    for (var p = placed.length - 1; p >= 0; p--) {
+      var node = placed[p];
+      if (p === placed.length - 1) {
+        if (node !== parent.lastChild) parent.appendChild(node);
+        continue;
+      }
+      var next = placed[p + 1];
+      if (node.nextSibling !== next) parent.insertBefore(node, next);
     }
   }
 
   // A node that says hello is called after it is in the page.
   function sayHello(node) {
-    if (!node || typeof node.__veyEnter !== "function") return;
-    try {
-      node.__veyEnter(node);
-    } catch (err) {
-      log.error(err);
+    if (!node) return;
+    if (typeof node.__veyEnter === "function") {
+      try {
+        node.__veyEnter(node);
+      } catch (err) {
+        log.error(err);
+      }
+    }
+    // The work of the component that gave the node is done once, when the
+    // node comes to the page.
+    var works = node.__veyWorks;
+    if (works && !works.done) {
+      works.done = true;
+      for (var i = 0; i < works.mount.length; i++) {
+        try {
+          works.mount[i]();
+        } catch (err) {
+          log.error(err);
+        }
+      }
+    }
+  }
+
+  // The work of a node that is taken away is done before it goes.
+  function sayGoodbye(node) {
+    if (!node) return;
+    var works = node.__veyWorks;
+    if (!works || works.done === "gone") return;
+    works.done = "gone";
+    for (var i = 0; i < works.destroy.length; i++) {
+      try {
+        works.destroy[i]();
+      } catch (err) {
+        log.error(err);
+      }
     }
   }
 
@@ -295,23 +338,89 @@ function veyMount(ctx) {
     };
   }
 
+  // The places of the page that may be scrolled, from the element that is
+  // written to the top of the page.
+  //
+  // The page is written again when a value it reads changes, and the work of
+  // the visitor must not throw them somewhere else: the place they were in
+  // is remembered here and put back when the writing is done.
+  function scrollPlaces(root) {
+    var places = [];
+    var at = root;
+    while (at) {
+      if (at.scrollTop || at.scrollLeft) {
+        places.push({ node: at, top: at.scrollTop, left: at.scrollLeft });
+      }
+      at = at.parentNode;
+    }
+    var view = doc && doc.defaultView;
+    if (view && typeof view.pageYOffset === "number") {
+      places.push({ node: null, top: view.pageYOffset, left: view.pageXOffset || 0 });
+    }
+    return places;
+  }
+
+  // The places that were remembered are scrolled back to.
+  function restoreScroll(places) {
+    for (var i = 0; i < places.length; i++) {
+      var place = places[i];
+      if (!place.node) {
+        var view = doc && doc.defaultView;
+        if (view && typeof view.scrollTo === "function") {
+          view.scrollTo(place.left, place.top);
+        }
+        continue;
+      }
+      // The element was taken away by the new page, so its place is gone.
+      if (!place.node.parentNode) continue;
+      place.node.scrollTop = place.top;
+      place.node.scrollLeft = place.left;
+    }
+  }
+
+  // The element the visitor is working on, when there is one.
+  function focusPlace() {
+    if (!doc || !doc.activeElement) return null;
+    return doc.activeElement;
+  }
+
+  // The focus is put back on the element the visitor was working on.
+  //
+  // The page may change in a way that lets go of the focus even when the
+  // element stays in the page. An element that was taken away keeps the focus
+  // of nobody, the way a browser does it.
+  function restoreFocus(el, was) {
+    if (!was || !doc) return;
+    if (doc.activeElement === was) return;
+    var there = was === el || !!was.parentNode || !!was.isConnected;
+    if (!there) return;
+    if (typeof was.focus === "function") was.focus();
+  }
+
   // A page is written in a place of the page.
   function render(el, nodes) {
-    var existing = childrenOf(el);
-    if (existing.length) {
-      // The page of the server is taken over instead of being put out, so
-      // that the visitor does not see the page twice.
-      patchChildren(el, nodes);
-    } else {
-      el.replaceChildren.apply(el, nodes);
-      // The nodes of the first writing of the page say hello as well.
-      for (var i = 0; i < nodes.length; i++) {
-        sayHello(nodes[i]);
+    var scrolled = scrollPlaces(el);
+    var focused = focusPlace();
+    try {
+      var existing = childrenOf(el);
+      if (existing.length) {
+        // The page of the server is taken over instead of being put out, so
+        // that the visitor does not see the page twice.
+        patchChildren(el, nodes);
+      } else {
+        el.replaceChildren.apply(el, nodes);
+        // The nodes of the first writing of the page say hello as well.
+        for (var i = 0; i < nodes.length; i++) {
+          sayHello(nodes[i]);
+        }
       }
+      el.__veyMount = { nodes: nodes };
+      mounted = { element: el, nodes: nodes };
+      flushMounts();
+    } finally {
+      restoreScroll(scrolled);
+      restoreFocus(el, focused);
     }
-    el.__veyMount = { nodes: nodes };
-    mounted = { element: el, nodes: nodes };
-    flushMounts();
   }
 
   // A page is written in a place of the page.
@@ -346,8 +455,25 @@ function veyMount(ctx) {
       }
       drawing = true;
       try {
-        var tree = isFunction ? node() : node;
+        // The page begins at its root, so that the place of every
+        // component is the same every time the page is written.
+        ctx.currentPath = "";
+        ctx.childIndex = 0;
+        // The values that the root of the page shares with the ones
+        // under it.
+        ctx.contexts.push(new Map());
+        // The portals of the page that was there are waited for, so that
+        // the ones of the new page take their place.
+        if (typeof ctx.beginPortals === "function") ctx.beginPortals();
+        var tree;
+        try {
+          tree = isFunction ? node() : node;
+        } finally {
+          ctx.contexts.pop();
+        }
         render(el, flatten([tree]).map(toDom));
+        // A portal that the new page does not hold is taken away.
+        if (typeof ctx.endPortals === "function") ctx.endPortals();
       } finally {
         drawing = false;
       }
@@ -359,12 +485,22 @@ function veyMount(ctx) {
 
     var stop = null;
     if (isFunction) {
-      // The effect listens to the values the page reads.
-      stop = ctx.effect(function () {
-        draw();
-      });
+      // The effect listens to the values the page reads. The changes are
+      // gathered, so that ten changes of ten values write the page once.
+      stop = ctx.effect(
+        function () {
+          draw();
+        },
+        { defer: true }
+      );
     } else {
       draw();
+    }
+
+    // The route that fits the address of the page is shown, when the page
+    // is put out after the route is written.
+    if (typeof ctx.showRoute === "function") {
+      ctx.showRoute();
     }
 
     return {
@@ -382,8 +518,12 @@ function veyMount(ctx) {
           stop();
           stop = null;
         }
-        while (el.firstChild) el.removeChild(el.firstChild);
+        while (el.firstChild) {
+          sayGoodbye(el.firstChild);
+          el.removeChild(el.firstChild);
+        }
         el.__veyMount = null;
+        if (typeof ctx.clearPortals === "function") ctx.clearPortals();
         if (mounted && mounted.element === el) mounted = null;
         runDestroys();
         return this;
@@ -399,6 +539,7 @@ function veyMount(ctx) {
   }
 
   ctx.mount = mount;
+  ctx.patchChildren = patchChildren;
   ctx.renderMounted = renderMounted;
   ctx.queueMount = queueMount;
   ctx.queueDestroy = queueDestroy;

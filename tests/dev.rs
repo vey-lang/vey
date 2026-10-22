@@ -6,27 +6,40 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+static USED_PORTS: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+
 fn temp_dir(label: &str) -> PathBuf {
+    // The folder of a test has a name of its own, so that two tests that
+    // run at the same time do not write in the same place. The clock of
+    // the machine is not enough, because it may say the same time twice.
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
+    let index = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
-        "vey-dev-{}-{}-{}",
+        "vey-dev-{}-{}-{}-{}",
         label,
         std::process::id(),
-        nanos
+        nanos,
+        index
     ));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
 
 fn free_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    let mut used = USED_PORTS.lock().unwrap();
+    loop {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        if !used.contains(&port) {
+            used.push(port);
+            return port;
+        }
+    }
 }
 
 struct Server(Child);

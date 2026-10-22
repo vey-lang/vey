@@ -10,7 +10,7 @@ function veySession(ctx) {
   var COOKIE = "vey.sid";
 
   // The sessions that are open, by their name.
-  var sessions = {};
+  var sessions = Object.create(null);
 
   // The storage of the request, which keeps the session of a request with
   // its answer even when the handler waits for something.
@@ -58,6 +58,15 @@ function veySession(ctx) {
     }
   }
 
+  // The session begins and gets a name of its own.
+  function begin(store) {
+    store.id = newId();
+    store.data = Object.create(null);
+    sessions[store.id] = store.data;
+    store.started = true;
+    return store.id;
+  }
+
   var session = {
     // The session begins, and the answer carries its name.
     start: function () {
@@ -65,13 +74,22 @@ function veySession(ctx) {
       if (!store) {
         throw veyError("session.start() is only available while a request is handled.");
       }
-      if (!store.id) {
-        store.id = newId();
-        store.data = {};
-        sessions[store.id] = store.data;
-        store.started = true;
-      }
+      if (!store.id) return begin(store);
       return store.id;
+    },
+
+    // The session gets a new name, and the old one is forgotten.
+    //
+    // A name that a visitor knows may not be used again, so that a
+    // visitor who takes the name of another one cannot step into the
+    // session of that other one.
+    regenerate: function () {
+      var store = current();
+      if (!store) {
+        throw veyError("session.regenerate() is only available while a request is handled.");
+      }
+      if (store.id) delete sessions[store.id];
+      return begin(store);
     },
 
     // The value of a key of the session.
@@ -115,10 +133,19 @@ function veySession(ctx) {
     cookie: COOKIE,
 
     // The session of a request, from the cookies of the request.
-    open: function (cookies) {
+    //
+    // The second argument says whether the request came over a secure
+    // connection, so that the cookie of the answer may say so too.
+    open: function (cookies, secure) {
       var id = cookies && cookies[COOKIE] ? String(cookies[COOKIE]) : null;
       var data = id && sessions[id] ? sessions[id] : null;
-      return { id: data ? id : null, data: data, started: false, ended: false };
+      return {
+        id: data ? id : null,
+        data: data,
+        started: false,
+        ended: false,
+        secure: !!secure
+      };
     },
 
     // The work of a request is done with its session at hand.
@@ -128,10 +155,23 @@ function veySession(ctx) {
     header: function (store) {
       if (!store) return null;
       if (store.ended) {
-        return cookieHeader(COOKIE, "", { maxAge: 0, expires: new Date(0).toUTCString() });
+        return cookieHeader(COOKIE, "", {
+          maxAge: 0,
+          expires: new Date(0).toUTCString(),
+          path: "/",
+          httpOnly: true,
+          sameSite: "Lax"
+        });
       }
       if (store.started && store.id) {
-        return cookieHeader(COOKIE, store.id, { httpOnly: true, sameSite: "Lax" });
+        // The cookie is only sent over a secure connection when the
+        // request came over one.
+        return cookieHeader(COOKIE, store.id, {
+          httpOnly: true,
+          sameSite: "Lax",
+          path: "/",
+          secure: store.secure
+        });
       }
       return null;
     }

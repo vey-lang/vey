@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::cli::args::parse_args;
+use crate::cli::json::{self, Value};
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_add(args: &[String]) -> i32 {
@@ -45,7 +46,13 @@ pub(crate) fn cmd_add(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let updated = add_dependency(&text, package);
+    let updated = match add_dependency(&text, package) {
+        Ok(updated) => updated,
+        Err(err) => {
+            eprintln!("cannot update {}: {}", manifest.display(), err);
+            return 1;
+        }
+    };
     if let Err(err) = fs::write(&manifest, &updated) {
         eprintln!("cannot write {}: {}", manifest.display(), err);
         return 1;
@@ -60,58 +67,45 @@ pub(crate) fn cmd_add(args: &[String]) -> i32 {
         Ok(_) => {
             eprintln!("npm could not install {}", package);
             eprintln!("run 'npm install' yourself");
+            return 1;
         }
         Err(err) => {
             eprintln!("cannot start npm: {}", err);
             eprintln!("install {} yourself", package);
+            return 1;
         }
     }
     0
 }
 
-/// Add the dependencies to a manifest that has none.
-fn add_dependencies(text: &str, package: &str) -> String {
-    // The object of the manifest ends with a brace.
-    let Some(brace) = text.rfind('}') else {
-        return text.to_string();
-    };
-    let head = text[..brace].trim_end();
-    let comma = if head.ends_with(',') { "" } else { "," };
-    let mut out = String::new();
-    out.push_str(head);
-    out.push_str(comma);
-    out.push_str(&format!(
-        "\n  \"dependencies\": {{\n    \"{}\": \"latest\"\n  }}",
-        package
-    ));
-    out.push_str(&text[brace..]);
-    out
-}
-
 /// Add a package to the dependencies of a manifest.
 ///
-/// The manifest is JSON, and the name of the package is written in the
-/// place where the other dependencies are.
-fn add_dependency(text: &str, package: &str) -> String {
-    let key = format!("\"{}\"", package);
-    if text.contains(&key) {
-        return text.to_string();
+/// The manifest is parsed as JSON so package names in unrelated values do not
+/// affect where the dependency is written.
+fn add_dependency(text: &str, package: &str) -> Result<String, String> {
+    let (value, rest) =
+        json::read(text).ok_or_else(|| "package.json is not valid JSON".to_string())?;
+    if !rest.trim().is_empty() {
+        return Err("package.json has text after its JSON value".to_string());
     }
-    // The dependencies are the last object of the manifest, and the
-    // dependencies of the program are the first of them.
-    let marker = "\"dependencies\"";
-    let Some(start) = text.find(marker) else {
-        // The manifest has no dependencies yet, so they are added.
-        return add_dependencies(text, package);
+    let Value::Object(mut manifest) = value else {
+        return Err("package.json must contain an object".to_string());
     };
-    let Some(brace) = text[start..].find('{') else {
-        return text.to_string();
-    };
-    let brace = start + brace;
-    let insert = brace + 1;
-    let mut out = String::new();
-    out.push_str(&text[..insert]);
-    out.push_str(&format!("\n    \"{}\": \"latest\",", package));
-    out.push_str(&text[insert..]);
-    out
+
+    if let Some((_, dependencies)) = manifest.iter_mut().find(|(key, _)| key == "dependencies") {
+        let Value::Object(dependencies) = dependencies else {
+            return Err("package.json dependencies must be an object".to_string());
+        };
+        if dependencies.iter().any(|(name, _)| name == package) {
+            return Ok(text.to_string());
+        }
+        dependencies.push((package.to_string(), json::text("latest")));
+    } else {
+        manifest.push((
+            "dependencies".to_string(),
+            Value::Object(vec![(package.to_string(), json::text("latest"))]),
+        ));
+    }
+
+    Ok(format!("{}\n", Value::Object(manifest).to_json()))
 }

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
+use crate::cli::config::Config;
 use crate::cli::entry::{collect_files, collect_folders, default_title, entry_from, project_root};
 use crate::cli::error::BuildError;
 use crate::cli::output::{html_document, print_command_help};
@@ -79,14 +80,19 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
         }
     };
 
+    // The settings of the project may say where the server listens and
+    // what the title of the site is.
+    let config = Config::find(&project_root(&entry));
     let host = parsed
         .host
         .clone()
+        .or_else(|| config.host.clone())
         .unwrap_or_else(|| "127.0.0.1".to_string());
-    let port = parsed.port.unwrap_or(DEFAULT_PORT);
+    let port = parsed.port.or(config.port).unwrap_or(DEFAULT_PORT);
     let title = parsed
         .title
         .clone()
+        .or_else(|| config.title.clone())
         .unwrap_or_else(|| default_title(&entry));
 
     serve(&entry, &title, &host, port, true)
@@ -246,9 +252,9 @@ pub(crate) fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<DevState
     if path == "/__vey/events" {
         let _ = stream.set_read_timeout(None);
         let headers = "HTTP/1.1 200 OK\r\n\
-                       Content-Type: text/event-stream\r\n\
-                       Cache-Control: no-store\r\n\
-                       Connection: keep-alive\r\n\r\n";
+                   Content-Type: text/event-stream\r\n\
+                   Cache-Control: no-store\r\n\
+                   Connection: keep-alive\r\n\r\n";
         if stream.write_all(headers.as_bytes()).is_err() {
             return;
         }
@@ -438,9 +444,9 @@ pub(crate) fn inject_reload(html: &str, version: u64) -> String {
     // changes. The stylesheets are changed in place, so that the state of
     // the page is kept.
     let snippet = format!(
-        "<script>(function(){{var v={};var source=new EventSource('/__vey/events');source.onmessage=function(event){{if(event.data===String(v))return;v=event.data;var links=document.querySelectorAll('link[rel=\"stylesheet\"]');if(!links.length){{location.reload();return;}}var left=links.length;for(var i=0;i<links.length;i++){{(function(link){{var fresh=link.cloneNode();fresh.href=link.href.split('?')[0]+'?v='+v;fresh.onload=function(){{if(--left===0)location.reload();}};link.parentNode.replaceChild(fresh,link);}})(links[i]);}}}});}})();</script>",
-        version
-    );
+            "<script>(function(){{var v={};var source=new EventSource('/__vey/events');source.onmessage=function(event){{if(event.data===String(v))return;v=event.data;var links=document.querySelectorAll('link[rel=\"stylesheet\"]');if(!links.length){{location.reload();return;}}var left=links.length;for(var i=0;i<links.length;i++){{(function(link){{var fresh=link.cloneNode();fresh.href=link.href.split('?')[0]+'?v='+v;fresh.onload=function(){{if(--left===0)location.reload();}};link.parentNode.replaceChild(fresh,link);}})(links[i]);}}}};}})();</script>",
+            version
+        );
     match html.rfind("</body>") {
         Some(index) => format!("{}{}{}", &html[..index], snippet, &html[index..]),
         None => format!("{}{}", html, snippet),
@@ -627,4 +633,71 @@ fn content_hash(path: &Path) -> u64 {
         hash = hash.wrapping_mul(0x100_0000_01b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inject_reload;
+
+    #[test]
+        fn injected_reload_script_reloads_when_the_version_changes() {
+        let html = inject_reload("<html><body></body></html>", 1);
+        let script = html
+            .split_once("<script>")
+            .and_then(|(_, html)| html.split_once("</script>"))
+            .map(|(script, _)| script)
+            .expect("reload script should be injected");
+                let harness = r#"
+const assert = require("node:assert/strict");
+let messageHandler;
+let links = [];
+let reloads = 0;
+class EventSource {
+    constructor(url) { assert.equal(url, "/__vey/events"); }
+    set onmessage(handler) { messageHandler = handler; }
+}
+const document = { querySelectorAll: () => links };
+const location = { reload: () => { reloads += 1; } };
+new Function("EventSource", "document", "location", process.argv[1])(
+    EventSource, document, location
+);
+assert.equal(typeof messageHandler, "function");
+messageHandler({ data: "1" });
+assert.equal(reloads, 0, "the initial version must not reload");
+messageHandler({ data: "2" });
+assert.equal(reloads, 1, "a changed version without stylesheets must reload");
+let replacement;
+const parent = {
+    replaceChild(fresh, old) {
+        assert.equal(old, stylesheet);
+        replacement = fresh;
+    }
+};
+const stylesheet = {
+    href: "http://localhost/site.css?theme=dark",
+    parentNode: parent,
+    cloneNode() { return { href: this.href, parentNode: this.parentNode }; }
+};
+links = [stylesheet];
+messageHandler({ data: "3" });
+assert.equal(reloads, 1, "reload waits for the refreshed stylesheet");
+assert.equal(replacement.href, "http://localhost/site.css?v=3");
+replacement.onload();
+assert.equal(reloads, 2, "the page reloads after the stylesheet loads");
+messageHandler({ data: "3" });
+assert.equal(reloads, 2, "a duplicate version must not reload again");
+"#;
+        let output = std::process::Command::new("node")
+            .arg("-e")
+                        .arg(harness)
+            .arg(script)
+            .output()
+            .expect("Node.js should be available for the JavaScript tests");
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

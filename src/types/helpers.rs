@@ -40,42 +40,6 @@ pub(crate) fn stmt_always_exits(stmt: &Stmt) -> bool {
     }
 }
 
-/// Whether every path through the block returns a value.
-#[allow(dead_code)]
-pub(crate) fn block_always_returns(block: &Block) -> bool {
-    match block.body.last() {
-        Some(Stmt::Return(_)) => true,
-        Some(Stmt::If(decl)) => {
-            let then_returns = block_always_returns(&decl.then_block);
-            let else_returns = decl
-                .else_branch
-                .as_ref()
-                .is_some_and(|branch| stmt_always_returns(branch));
-            then_returns && else_returns
-        }
-        Some(Stmt::Block(inner, _)) => block_always_returns(inner),
-        _ => false,
-    }
-}
-
-/// Whether every path through the statement returns a value.
-#[allow(dead_code)]
-pub(crate) fn stmt_always_returns(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Return(_) => true,
-        Stmt::If(decl) => {
-            let then_returns = block_always_returns(&decl.then_block);
-            let else_returns = decl
-                .else_branch
-                .as_ref()
-                .is_some_and(|branch| stmt_always_returns(branch));
-            then_returns && else_returns
-        }
-        Stmt::Block(block, _) => block_always_returns(block),
-        _ => false,
-    }
-}
-
 pub(crate) fn set_object_field(fields: &mut Vec<ObjectField>, field: ObjectField) {
     if let Some(existing) = fields.iter_mut().find(|item| item.name == field.name) {
         *existing = field;
@@ -342,6 +306,152 @@ pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
     }
 }
 
+// The helpers that say whether a piece of code waits for something. They
+// live here, and not in the code generator, because the checker has to know
+// that a function waits, so that its type is a promise.
+
+pub(crate) fn block_has_await(block: &Block) -> bool {
+    block.body.iter().any(stmt_has_await)
+}
+
+pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Var(decl) => decl.init.as_ref().map(expr_has_await).unwrap_or(false),
+        Stmt::Fn(_) | Stmt::Component(_) => false,
+        Stmt::If(decl) => {
+            expr_has_await(&decl.test)
+                || block_has_await(&decl.then_block)
+                || decl
+                    .else_branch
+                    .as_ref()
+                    .map(|s| stmt_has_await(s))
+                    .unwrap_or(false)
+        }
+        Stmt::IfLet(decl) => {
+            expr_has_await(&decl.value)
+                || block_has_await(&decl.then_block)
+                || decl
+                    .else_branch
+                    .as_ref()
+                    .map(|s| stmt_has_await(s))
+                    .unwrap_or(false)
+        }
+        Stmt::While(decl) => expr_has_await(&decl.test) || block_has_await(&decl.body),
+        Stmt::WhileLet(decl) => expr_has_await(&decl.value) || block_has_await(&decl.body),
+        Stmt::LetElse(decl) => expr_has_await(&decl.value) || block_has_await(&decl.otherwise),
+        Stmt::Defer(decl) => expr_has_await(&decl.value),
+        Stmt::Throw(decl) => expr_has_await(&decl.value),
+        Stmt::For(decl) => expr_has_await(&decl.iter) || block_has_await(&decl.body),
+        Stmt::Repeat(decl) => expr_has_await(&decl.count) || block_has_await(&decl.body),
+        Stmt::Return(decl) => decl.value.as_ref().map(expr_has_await).unwrap_or(false),
+        Stmt::Break(_, _)
+        | Stmt::Continue(_, _)
+        | Stmt::Use(_)
+        | Stmt::Style(_)
+        | Stmt::Type(_)
+        | Stmt::Interface(_)
+        | Stmt::Impl(_)
+        | Stmt::Enum(_) => false,
+        Stmt::Try(decl) => {
+            block_has_await(&decl.body)
+                || decl.catch.as_ref().is_some_and(block_has_await)
+                || decl.finally.as_ref().is_some_and(block_has_await)
+        }
+        Stmt::Expr(decl) => expr_has_await(&decl.expr),
+        Stmt::Assign(decl) => expr_has_await(&decl.target) || expr_has_await(&decl.value),
+        Stmt::Block(block, _) => block_has_await(block),
+    }
+}
+
+/// Whether an expression uses `await`.
+pub(crate) fn expr_has_await(expr: &Expr) -> bool {
+    walk(expr, &|expr| matches!(expr, Expr::Await(_, _)))
+}
+
+/// Walk an expression and its parts.
+///
+/// A function of its own is not walked, because it has a scope of its own.
+pub(crate) fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
+    if test(expr) {
+        return true;
+    }
+    match expr {
+        Expr::Fn(..) | Expr::Arrow(_, _, _, _, _) => false,
+        Expr::Number(_, _) | Expr::Bool(_, _) | Expr::Null(_) | Expr::Ident(_, _) => false,
+        Expr::String(parts, _) => parts
+            .iter()
+            .any(|part| part.expr.as_ref().map(|expr| walk(expr, test)).unwrap_or(false)),
+        Expr::Array(items, _) => items.iter().any(|item| walk(item, test)),
+        Expr::Object(props, _) => props.iter().any(|prop| match prop {
+            ObjectProp::Field(_, value) => walk(value, test),
+            ObjectProp::Spread(value) => walk(value, test),
+        }),
+        Expr::Unary(_, arg, _) => walk(arg, test),
+        Expr::Binary(_, left, right, _)
+        | Expr::Logical(_, left, right, _)
+        | Expr::Nullish(left, right, _)
+        | Expr::Range(left, right, _) => walk(left, test) || walk(right, test),
+        Expr::Ternary(test_value, cons, alt, _) => {
+            walk(test_value, test) || walk(cons, test) || walk(alt, test)
+        }
+        Expr::Call(callee, args, _, _) => {
+            walk(callee, test) || args.iter().any(|arg| walk(arg, test))
+        }
+        Expr::CallGeneric(callee, _, args, _, _) => {
+            walk(callee, test) || args.iter().any(|arg| walk(arg, test))
+        }
+        Expr::Member(object, prop, _, _) => {
+            walk(object, test)
+                || match prop {
+                    MemberProp::Computed(index) => walk(index, test),
+                    MemberProp::Name(_) => false,
+                }
+        }
+        Expr::Match(subject, arms, _) => {
+            walk(subject, test)
+                || arms.iter().any(|arm| {
+                    arm.guard.as_ref().map(|guard| walk(guard, test)).unwrap_or(false)
+                        || walk(&arm.body, test)
+                })
+        }
+        Expr::Await(inner, _) => walk(inner, test),
+        Expr::Try(inner, _) => walk(inner, test),
+        Expr::Yield(inner, _) => walk(inner, test),
+        Expr::As(inner, _, _) | Expr::Is(inner, _, _) => walk(inner, test),
+        Expr::Spread(arg, _) => walk(arg, test),
+    }
+}
+
+
+/// Whether the markup of a component waits for something.
+pub(crate) fn markup_has_await(nodes: &[MarkupNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        MarkupNode::Expr(expr) => expr_has_await(expr),
+        MarkupNode::Element(element) => {
+            element.attrs.iter().any(|(_, value)| expr_has_await(value))
+                || element.args.iter().any(expr_has_await)
+                || markup_has_await(&element.children)
+        }
+        MarkupNode::If(branch) => {
+            expr_has_await(&branch.test)
+                || markup_has_await(&branch.then_nodes)
+                || markup_has_await(&branch.else_nodes)
+        }
+        MarkupNode::For(loop_node) => {
+            expr_has_await(&loop_node.iter)
+                || loop_node.key.as_ref().is_some_and(expr_has_await)
+                || markup_has_await(&loop_node.body)
+        }
+        MarkupNode::Match(m) => {
+            expr_has_await(&m.subject)
+                || m.arms.iter().any(|arm| {
+                    arm.guard.as_ref().map(|guard| expr_has_await(guard)).unwrap_or(false)
+                        || markup_has_await(&arm.body)
+                })
+        }
+    })
+}
+
 /// The name of a type of another module, with the name of the module in
 /// front of it.
 ///
@@ -371,6 +481,7 @@ pub(crate) fn extra_field(source: &Type, target: &Type) -> Option<String> {
     let (source_fields, target_fields) = match (source, target) {
         (Type::Object(source), Type::Object(target)) => (source, target),
         (Type::Object(source), Type::Named(_, target)) => (source, target),
+        (Type::Object(source), Type::Interface(_, target)) => (source, target),
         _ => return None,
     };
     source_fields

@@ -21,6 +21,34 @@ pub(crate) fn builtin_rest(param: Type, ret: Type) -> Type {
     builtin_signature(vec![param], 0, true, ret)
 }
 
+/// A helper with type parameters of its own.
+///
+/// `loose` says that a type parameter the arguments do not settle stands for
+/// `any`, instead of being a mistake. The helpers of the runtime are called
+/// without the value that would tell their type (`store("name")`), and that
+/// call has to keep working.
+pub(crate) fn builtin_generic(
+    type_params: &[&str],
+    params: Vec<Type>,
+    required: usize,
+    ret: Type,
+    loose: bool,
+) -> Type {
+    let count = params.len();
+    Type::Function(FunctionType {
+        params,
+        required,
+        rest: false,
+        ret: Box::new(ret),
+        checked: true,
+        constraints: Vec::new(),
+        type_params: type_params.iter().map(|name| name.to_string()).collect(),
+        param_names: Vec::new(),
+        defaults: vec![false; count],
+        loose,
+    })
+}
+
 fn builtin_signature(params: Vec<Type>, required: usize, rest: bool, ret: Type) -> Type {
     let count = params.len();
     Type::Function(FunctionType {
@@ -33,6 +61,7 @@ fn builtin_signature(params: Vec<Type>, required: usize, rest: bool, ret: Type) 
         type_params: Vec::new(),
         param_names: Vec::new(),
         defaults: vec![false; count],
+        loose: false,
     })
 }
 
@@ -49,6 +78,115 @@ pub(crate) fn builtin_object(fields: Vec<(&str, Type)>) -> Type {
     )
 }
 
+/// A type parameter, by its name.
+fn type_var(name: &str) -> Type {
+    Type::Var(name.to_string())
+}
+
+/// The options of a signal and of a store: the way two values are asked
+/// whether they are the same.
+fn state_options() -> Type {
+    Type::Object(vec![ObjectField {
+        name: "equals".to_string(),
+        ty: union(vec![
+            builtin_function(vec![Type::Any, Type::Any], Type::Bool),
+            Type::String,
+        ]),
+        optional: true,
+    }])
+}
+
+/// A function of no arguments.
+fn thunk(ret: Type) -> Type {
+    builtin_function(Vec::new(), ret)
+}
+
+/// The values of a signal: what it holds, and the ways it is read, changed
+/// and listened to.
+///
+/// The shape is a type of its own, so that a signal that is a `const` keeps
+/// the type of the value it was given.
+pub(crate) fn signal_type(value: Type) -> Type {
+    Type::Interface("Signal".to_string(), signal_fields(value))
+}
+
+/// The values of a store: the state it holds, and the ways it is read,
+/// changed and listened to.
+pub(crate) fn store_type(state: Type) -> Type {
+    Type::Interface("Store".to_string(), store_fields(state))
+}
+
+fn signal_fields(value: Type) -> Vec<ObjectField> {
+    let fields = vec![
+        ("value", value.clone()),
+        ("set", builtin_function(vec![value.clone()], value.clone())),
+        (
+            "update",
+            builtin_function(
+                vec![builtin_function(vec![value.clone()], value.clone())],
+                value.clone(),
+            ),
+        ),
+        ("peek", thunk(value.clone())),
+        (
+            "subscribe",
+            builtin_function(vec![builtin_function(vec![value], Type::Void)], thunk(Type::Void)),
+        ),
+        ("toString", thunk(Type::String)),
+    ];
+    object_fields(fields)
+}
+
+fn store_fields(state: Type) -> Vec<ObjectField> {
+    let fields = vec![
+        ("value", state.clone()),
+        // One field of the state is changed by its name; the value of a
+        // field is not the state itself, so it stays `any`.
+        ("set", builtin_function(vec![Type::String, Type::Any], state.clone())),
+        ("replace", builtin_function(vec![state.clone()], state.clone())),
+        (
+            "update",
+            builtin_function(
+                vec![builtin_function(vec![state.clone()], state.clone())],
+                state.clone(),
+            ),
+        ),
+        ("peek", thunk(state.clone())),
+        (
+            "subscribe",
+            builtin_function(vec![builtin_function(vec![state], Type::Void)], thunk(Type::Void)),
+        ),
+        ("toString", thunk(Type::String)),
+    ];
+    object_fields(fields)
+}
+
+/// The fields of a shape, by name and type.
+fn object_fields(fields: Vec<(&str, Type)>) -> Vec<ObjectField> {
+    fields
+        .into_iter()
+        .map(|(name, ty)| ObjectField {
+            name: name.to_string(),
+            ty,
+            optional: false,
+        })
+        .collect()
+}
+
+/// The values of a signal that a `computed` makes: the same, and the way the
+/// work that follows the values is let go.
+fn computed_type(value: Type) -> Type {
+    let Type::Interface(name, mut fields) = signal_type(value) else {
+        return Type::Any;
+    };
+    fields.push(ObjectField {
+        name: "dispose".to_string(),
+        ty: thunk(Type::Void),
+        optional: false,
+    });
+    Type::Interface(name, fields)
+}
+
 pub(crate) fn builtin_type(name: &str) -> Option<Type> {
     let number = || Type::Number;
     let string = || Type::String;
@@ -58,14 +196,16 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
     // The list helpers also accept text, which they read as a list of
     // characters.
     let list_or_text = || union(vec![list(any()), string()]);
-    let promise = || Type::Any;
+    // A value that will be there later.
+    let promise = |inner: Type| Type::Promise(Box::new(inner));
+    let promise_any = || promise(any());
 
     match name {
         "print" => Some(builtin_rest(any(), Type::Void)),
         "undefined" => Some(Type::Undefined),
         "bind" => Some(builtin_function(vec![any(), any()], any())),
         "input" => Some(builtin_optional(vec![string()], 0, string())),
-        "sleep" => Some(builtin_function(vec![number()], promise())),
+        "sleep" => Some(builtin_function(vec![number()], promise(Type::Void))),
         "str" => Some(builtin_function(vec![any()], string())),
         "num" | "int" => Some(builtin_function(vec![any()], number())),
         "bool" => Some(builtin_function(vec![any()], bool_ty())),
@@ -194,7 +334,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "assertThrows" => Some(builtin_optional(vec![any(), string()], 1, Type::Void)),
         "assertMatch" => Some(builtin_optional(vec![any(), any(), string()], 2, Type::Void)),
         "test" => Some(builtin_function(vec![string(), any()], Type::Void)),
-        "all" | "race" => Some(builtin_function(vec![list(any())], promise())),
+        "all" => Some(builtin_function(vec![list(any())], promise(list(any())))),
+        "race" => Some(builtin_function(vec![list(any())], promise_any())),
         "env" => Some(builtin_optional(
             vec![string(), string()],
             1,
@@ -221,8 +362,9 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "title" => Some(builtin_function(vec![any()], Type::Void)),
         "clipboard" => Some(builtin_object(vec![(
             "write",
-            builtin_function(vec![string()], any()),
+            builtin_function(vec![string()], promise(Type::Void)),
         )])),
+        "onShutdown" => Some(builtin_function(vec![any()], any())),
         "process" => Some(builtin_object(vec![
             ("cwd", builtin_function(vec![], string())),
             ("argv", builtin_function(vec![], list(string()))),
@@ -257,12 +399,12 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("iso", builtin_function(vec![], string())),
         ])),
         "http" => Some(builtin_object(vec![
-            ("get", builtin_optional(vec![string(), any()], 1, promise())),
+            ("get", builtin_optional(vec![string(), any()], 1, promise(response_type()))),
             (
                 "post",
-                builtin_optional(vec![string(), any(), any()], 2, promise()),
+                builtin_optional(vec![string(), any(), any()], 2, promise(response_type())),
             ),
-            ("fetch", builtin_optional(vec![string(), any()], 1, promise())),
+            ("fetch", builtin_optional(vec![string(), any()], 1, promise(response_type()))),
             ("Request", builtin_optional(vec![string(), any()], 1, any())),
             ("Response", builtin_optional(vec![any(), any()], 1, any())),
             ("Headers", builtin_optional(vec![any()], 0, any())),
@@ -344,16 +486,53 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("text", builtin_function(vec![list(number())], string())),
         ])),
         "deepCopy" => Some(builtin_function(vec![any()], any())),
-        "signal" => Some(builtin_optional(vec![any()], 0, any())),
-        "store" => Some(builtin_optional(vec![any(), any()], 0, any())),
+        // The state of a page: typed by the value it is given, so that a
+        // wrong `set` is said and the fields of a store are known.
+        "signal" => Some(builtin_generic(
+            &["T"],
+            vec![type_var("T"), state_options()],
+            0,
+            signal_type(type_var("T")),
+            true,
+        )),
+        "store" => Some(builtin_generic(
+            &["T"],
+            vec![
+                // The state may be given on its own, or after a name that
+                // shares it between the parts of a page.
+                union(vec![Type::String, type_var("T")]),
+                union(vec![state_options(), type_var("T")]),
+                state_options(),
+            ],
+            0,
+            store_type(type_var("T")),
+            true,
+        )),
+        // The values of a form, and what is wrong with them.
+        "form" => Some(builtin_optional(vec![any(), any()], 0, any())),
         "effect" => Some(builtin_function(vec![any()], any())),
-        "computed" => Some(builtin_function(vec![any()], any())),
+        "computed" => Some(builtin_generic(
+            &["T"],
+            vec![builtin_function(Vec::new(), type_var("T"))],
+            1,
+            computed_type(type_var("T")),
+            true,
+        )),
         "mount" => Some(builtin_function(vec![any(), any()], any())),
         "route" => Some(builtin_function(vec![string(), any()], any())),
         "navigate" => Some(builtin_function(vec![string()], any())),
         "currentRoute" => Some(builtin_function(vec![], any())),
         "routeParams" => Some(builtin_function(vec![], any())),
         "on" => Some(builtin_function(vec![any(), string(), any()], any())),
+        // The component that catches the mistakes of the ones under it.
+        "Boundary" => Some(builtin_function(vec![any()], any())),
+        // The values that the components share.
+        "provide" => Some(builtin_function(vec![string(), any()], any())),
+        "inject" => Some(builtin_function(vec![string()], any())),
+        // A value that is written in another place of the page.
+        "portal" => Some(builtin_optional(vec![any(), any(), string()], 2, any())),
+        // The way a node comes to the page and goes from it.
+        "transition" => Some(builtin_optional(vec![number(), any()], 0, any())),
         "delegate" => Some(builtin_function(
             vec![any(), string(), string(), any()],
             any(),
@@ -369,7 +548,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             Some(builtin_function(vec![any()], Type::Void))
         }
         "requestAnimationFrame" => Some(builtin_function(vec![any()], number())),
-        "fetch" => Some(builtin_optional(vec![string(), any()], 1, promise())),
+        "fetch" => Some(builtin_optional(vec![string(), any()], 1, promise(response_type()))),
         "Request" => Some(builtin_optional(vec![string(), any()], 1, any())),
         "Response" => Some(builtin_optional(vec![any(), any()], 1, any())),
         "Headers" => Some(builtin_optional(vec![any()], 0, any())),
@@ -420,9 +599,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("deflate", builtin_function(vec![any()], list(number()))),
             ("inflate", builtin_function(vec![any()], string())),
         ])),
-        "logger" | "cors" | "compress" | "errorHandler" => {
-            Some(builtin_optional(vec![any()], 0, any()))
-        }
+        "logger" | "cors" | "compress" | "errorHandler" | "security"
+        | "rateLimit" | "csrf" => Some(builtin_optional(vec![any()], 0, any())),
         "bodyLimit" => Some(builtin_function(vec![number()], any())),
         "session" => Some(builtin_object(vec![
             ("start", builtin_function(vec![], string())),
@@ -433,6 +611,25 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         ])),
         _ => None,
     }
+}
+
+/// The type of the answer of a request.
+///
+/// The answer of a request has the marks of it, the text of it and the
+/// value that is in it.
+fn response_type() -> Type {
+    builtin_object(vec![
+        ("status", Type::Number),
+        ("statusText", Type::String),
+        ("ok", Type::Bool),
+        ("url", Type::String),
+        ("redirected", Type::Bool),
+        ("body", Type::Any),
+        ("headers", Type::Any),
+        ("text", builtin_function(vec![], Type::Promise(Box::new(Type::String)))),
+        ("json", builtin_function(vec![], Type::Promise(Box::new(Type::Any)))),
+        ("clone", builtin_function(vec![], Type::Any)),
+    ])
 }
 
 /// The type of a map of the runtime.

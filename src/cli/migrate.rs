@@ -5,6 +5,7 @@
 //! to the version of this compiler, and says what it changed.
 
 use std::fs;
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 use vey::parser::Parser;
@@ -75,6 +76,29 @@ pub(crate) fn cmd_migrate(args: &[String]) -> i32 {
             }
         };
 
+        if let Some(version) = program.version.as_deref() {
+            match compare_versions(version, current) {
+                Some(Ordering::Greater) => {
+                    eprintln!(
+                        "cannot migrate {}: version {} is newer than this compiler ({})",
+                        file.display(),
+                        version,
+                        current
+                    );
+                    return 1;
+                }
+                None => {
+                    eprintln!(
+                        "cannot migrate {}: cannot compare version '{}'",
+                        file.display(),
+                        version
+                    );
+                    return 1;
+                }
+                Some(Ordering::Less | Ordering::Equal) => {}
+            }
+        }
+
         let migrated = migrate_source(&source, program.version.as_deref(), current);
         if migrated == source {
             continue;
@@ -102,6 +126,28 @@ pub(crate) fn cmd_migrate(args: &[String]) -> i32 {
         eprintln!("pass --write to write them.");
     }
     0
+}
+
+fn compare_versions(left: &str, right: &str) -> Option<Ordering> {
+    let left: Vec<u64> = left
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let right: Vec<u64> = right
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    for index in 0..left.len().max(right.len()) {
+        let left_part = left.get(index).copied().unwrap_or(0);
+        let right_part = right.get(index).copied().unwrap_or(0);
+        match left_part.cmp(&right_part) {
+            Ordering::Equal => {}
+            ordering => return Some(ordering),
+        }
+    }
+    Some(Ordering::Equal)
 }
 
 /// Bring a source to the version of this compiler.

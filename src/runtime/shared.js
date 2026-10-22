@@ -42,6 +42,12 @@ function veyShared(ctx) {
   function toText(value) {
     if (typeof value === "string") return value;
     if (value === null || value === undefined) return "";
+    // A signal is written as the value it has, so that a state may be
+    // written in the page without its value being taken out of it.
+    if (typeof value === "object" && typeof value.subscribe === "function"
+        && typeof value.peek === "function") {
+      return toText(value.peek());
+    }
     if (typeof value === "object") {
       try {
         return JSON.stringify(value, null, 2);
@@ -231,7 +237,9 @@ function veyShared(ctx) {
       } else if (isBuffer(body)) {
         size = body.length;
       }
-      headers["Content-Length"] = String(size);
+      if (!hasHeader(headers, "content-length")) {
+        headers["Content-Length"] = String(size);
+      }
       response.writeHead(status, headers);
       response.end();
       return;
@@ -242,11 +250,51 @@ function veyShared(ctx) {
 
   // The answer of a request, as the middle pieces and the routes see it.
   function makeResponse(response) {
-    var state = { status: 200, headers: {}, finished: false, finish: [], transform: null, head: false };
+    var state = {
+      status: 200,
+      headers: {},
+      finished: false,
+      finish: [],
+      // Whether the answer is written in parts.
+      streaming: false,
+      // Whether the head of the answer is already written.
+      sent: false,
+      // The work that runs just before the body is written, so that a mark
+      // of the answer may still be added.
+      before: [],
+      transform: null,
+      head: false
+    };
 
     function answer(body) {
       if (state.finished) return;
       state.finished = true;
+      // The parts of the answer that were written are the answer, so it
+      // is only ended.
+      if (state.streaming) {
+        if (!state.sent) {
+          state.sent = true;
+          response.writeHead(state.status, state.headers);
+        }
+        response.end();
+        for (var s = 0; s < state.finish.length; s++) {
+          try {
+            state.finish[s]();
+          } catch (err) {
+            // A mistake in a cleanup must not take the answer away.
+          }
+        }
+        return;
+      }
+      // The marks of the answer are added before the body is written, so
+      // that they are not lost when the answer ends by itself.
+      for (var j = 0; j < state.before.length; j++) {
+        try {
+          state.before[j]();
+        } catch (err) {
+          // A mistake in a mark must not take the answer away.
+        }
+      }
       if (state.transform) {
         // The body of the answer is written in another shape, such as the
         // compressed form of it.
@@ -307,6 +355,54 @@ function veyShared(ctx) {
         answer(body);
         return res;
       },
+      // Another address is shown.
+      redirect: function (location, status) {
+        state.status = status === undefined ? 302 : Number(status);
+        state.headers["Location"] = String(location);
+        answer("");
+        return res;
+      },
+      // The answer is only the number of it.
+      sendStatus: function (code) {
+        state.status = Number(code);
+        answer("");
+        return res;
+      },
+      // The kind of the body of the answer.
+      type: function (kind) {
+        state.headers["Content-Type"] = String(kind);
+        return res;
+      },
+      // The answer depends on the head of the request.
+      vary: function (name) {
+        var key = headerKey(state.headers, "vary");
+        var current = key === null ? null : state.headers[key];
+        if (current === null || current === "") {
+          state.headers["Vary"] = String(name);
+        } else if (String(current).indexOf(String(name)) === -1) {
+          state.headers[key] = String(current) + ", " + String(name);
+        }
+        return res;
+      },
+      // Where the answer points.
+      location: function (url) {
+        state.headers["Location"] = String(url);
+        return res;
+      },
+      // A part of the answer is written, and the answer is not finished.
+      //
+      // The parts are written as they come, so that a big answer does
+      // not have to be in the memory of the server.
+      write: function (text) {
+        if (state.finished) return res;
+        state.streaming = true;
+        if (!state.sent) {
+          state.sent = true;
+          response.writeHead(state.status, state.headers);
+        }
+        response.write(String(text));
+        return res;
+      },
       json: function (value) {
         if (!hasHeader(state.headers, "content-type")) {
           state.headers["Content-Type"] = "application/json; charset=utf-8";
@@ -335,9 +431,44 @@ function veyShared(ctx) {
         state.finish.push(fn);
         return res;
       },
+      // The work that runs just before the body is written.
+      //
+      // A mark of the answer that is only known when the answer ends, such
+      // as the cookie of a session, is written here.
+      beforeFinish: function (fn) {
+        state.before.push(fn);
+        return res;
+      },
       // The body of the answer is written in another shape.
+      //
+      // Two pieces may want to change the body, so the changes are made one
+      // after the other and none of them is lost.
       transform: function (fn) {
-        state.transform = fn;
+        var before = state.transform;
+        if (!before) {
+          state.transform = fn;
+        } else {
+          state.transform = function (body) {
+            return fn(before(body));
+          };
+        }
+        return res;
+      },
+      // A mark of the answer is added to the one that is already there.
+      //
+      // The marks that may be written more than once, such as `Vary`, are
+      // joined with a comma.
+      append: function (name, value) {
+        var key = headerKey(state.headers, name);
+        var current = key === null ? null : state.headers[key];
+        if (current === null || current === undefined || current === "") {
+          return res.set(name, value);
+        }
+        if (Array.isArray(current)) {
+          current.push(String(value));
+          return res;
+        }
+        state.headers[key] = String(current) + ", " + String(value);
         return res;
       },
       // The answer of a HEAD has the marks of the page, but no body.

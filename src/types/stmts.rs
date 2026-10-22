@@ -14,8 +14,8 @@ use crate::VeyError;
 use super::checker::{ComponentParam, TypeChecker};
 use super::helpers::{
     place_path,
-    argument_label, block_always_exits, block_assigns_name, block_has_yield, extra_field,
-    markup_assigns_name, name_alias, stmt_assigns_name,
+    argument_label, block_always_exits, block_assigns_name, block_has_await, block_has_yield,
+    expr_has_await, extra_field, markup_assigns_name, name_alias, stmt_assigns_name,
 };
 
 impl TypeChecker<'_> {
@@ -74,7 +74,15 @@ impl TypeChecker<'_> {
                     self.declare(&decl.name, ty?);
                 }
                 Stmt::Component(decl) => {
-                    let params = self.component_params(decl)?;
+                    let mut params = self.component_params(decl)?;
+                    // A slot of the component has content of its own, so
+                    // the caller may leave it out.
+                    let slots = slot_names(&decl.children);
+                    for param in params.iter_mut() {
+                        if slots.contains(&param.name) {
+                            param.has_slot = true;
+                        }
+                    }
                     self.components.insert(decl.name.clone(), params);
                     self.declare(&decl.name, Type::Any);
                 }
@@ -107,6 +115,7 @@ impl TypeChecker<'_> {
                             type_params: Vec::new(),
                             param_names: Vec::new(),
                             defaults: vec![false],
+                            loose: false,
                         }),
                     );
                 }
@@ -161,11 +170,24 @@ impl TypeChecker<'_> {
             let ty = ty.clone();
             self.declare_pattern_typed(&decl.pattern, &ty);
         } else if decl.kind == VarKind::Const {
-            // A constant never changes, so a simple value keeps the type it
-            // was given. An object and a list stay dynamic, so that they may
-            // be written to later.
+            // A constant never changes, so it keeps the type of the value it
+            // was given: a value that may be nothing keeps that as well. An
+            // object and a list stay dynamic, because their fields and items
+            // may be written to later.
             let ty = match &init_ty {
-                Some(ty @ (Type::Number | Type::String | Type::Bool)) => ty.clone(),
+                Some(
+                    ty @ (Type::Number
+                    | Type::String
+                    | Type::Bool
+                    | Type::Null
+                    | Type::Union(_)
+                    | Type::Named(_, _)
+                    | Type::Interface(_, _)
+                    | Type::Enum(_, _)
+                    | Type::EnumUnion(_)
+                    | Type::Promise(_)
+                    | Type::Result(_, _)),
+                ) => ty.clone(),
                 _ => Type::Any,
             };
             self.declare_pattern_typed(&decl.pattern, &ty);
@@ -234,6 +256,17 @@ impl TypeChecker<'_> {
         let bindings = self.type_param_bindings.last().cloned().unwrap_or_default();
         if !bindings.is_empty() {
             ty = substitute_bound(&ty, &bindings);
+            // The type that was settled is a constraint of the type
+            // parameter, so that a type argument that is given by hand is
+            // checked against it instead of being ignored.
+            if let Type::Function(function) = &mut ty {
+                for (name, bound) in &bindings {
+                    let known = function.constraints.iter().any(|(other, _)| other == name);
+                    if !known {
+                        function.constraints.push((name.clone(), bound.clone()));
+                    }
+                }
+            }
         }
         // The type of the result is known even when it was not written.
         if decl.ret.is_none() && !matches!(inferred, Type::Void) {
@@ -258,6 +291,7 @@ impl TypeChecker<'_> {
                     ty: self.param_type(param)?,
                     has_default: param.default.is_some(),
                     rest: param.rest,
+                    has_slot: false,
                 }),
                 None => {
                     let ty = self.param_type(param)?;
@@ -267,6 +301,7 @@ impl TypeChecker<'_> {
                             ty: ty.clone(),
                             has_default: !required,
                             rest: false,
+                            has_slot: false,
                         });
                     }
                 }
@@ -307,7 +342,23 @@ impl TypeChecker<'_> {
         self.components.insert(decl.name.clone(), params);
         self.set_binding(&decl.name, Type::Any);
         self.push_scope();
-        self.declare_params(&decl.params)?;
+        self.declare_params(&decl.params, None)?;
+        // The values of the component are known by its markup.
+        for stmt in &decl.body {
+            self.check_stmt(stmt)?;
+        }
+        // A slot of the component has content of its own, so the caller
+        // may leave it out.
+        let slots = slot_names(&decl.children);
+        if !slots.is_empty() {
+            if let Some(params) = self.components.get_mut(&decl.name) {
+                for param in params.iter_mut() {
+                    if slots.contains(&param.name) {
+                        param.has_slot = true;
+                    }
+                }
+            }
+        }
         // The markup of a component is written at once, so it may not wait
         // for something: the page would be given a promise.
         let before = self.in_markup;
@@ -588,9 +639,22 @@ impl TypeChecker<'_> {
         Ok(())
     }
 
-    pub(crate) fn declare_params(&mut self, params: &[Param]) -> Result<(), VeyError> {
-        for param in params {
-            let ty = self.param_type(param)?;
+    pub(crate) fn declare_params(
+        &mut self,
+        params: &[Param],
+        expected: Option<&[Type]>,
+    ) -> Result<(), VeyError> {
+        for (index, param) in params.iter().enumerate() {
+            let mut ty = self.param_type(param)?;
+            // A parameter without a type takes the type of the function
+            // that is given, so that a callback knows what it receives.
+            if param.ty.is_none() {
+                if let Some(want) = expected.and_then(|list| list.get(index)) {
+                    if !matches!(want, Type::Any) {
+                        ty = want.clone();
+                    }
+                }
+            }
             self.check_pattern_defaults(&param.pattern)?;
             // A parameter that takes the value apart gives every name the
             // type of its own place.
@@ -720,13 +784,26 @@ impl TypeChecker<'_> {
         ret_ann: Option<&TypeExpr>,
         pos: Pos,
     ) -> Result<(Type, Vec<Type>), VeyError> {
+        self.check_function_against(params, body, ret_ann, pos, None)
+    }
+
+    /// The same, but the types of the parameters are known by the function
+    /// that is given.
+    pub(crate) fn check_function_against(
+        &mut self,
+        params: &[Param],
+        body: &Block,
+        ret_ann: Option<&TypeExpr>,
+        pos: Pos,
+        expected: Option<&[Type]>,
+    ) -> Result<(Type, Vec<Type>), VeyError> {
         // The names that are narrowed inside a function stay narrowed for
         // the code inside it, and not for the code around it: the function
         // may run later, and what it does says nothing about the value that
         // is there by then.
         let outer = self.scopes.clone();
         let outer_members = self.member_narrowings.clone();
-        let result = self.check_function_inner(params, body, ret_ann, pos);
+        let result = self.check_function_inner(params, body, ret_ann, pos, expected);
         self.scopes = outer;
         self.member_narrowings = outer_members;
         result
@@ -738,12 +815,22 @@ impl TypeChecker<'_> {
         body: &Block,
         ret_ann: Option<&TypeExpr>,
         pos: Pos,
+        expected_params: Option<&[Type]>,
     ) -> Result<(Type, Vec<Type>), VeyError> {
         self.push_scope();
-        self.declare_params(params)?;
+        self.declare_params(params, expected_params)?;
+        // A function that waits hands back a promise, so the type that is
+        // written is the type of the value that will be there.
+        let waits = block_has_await(body);
         let expected = match ret_ann {
             Some(ty) => Some(self.resolve_type(ty)?),
             None => None,
+        };
+        let expected = match &expected {
+            // The type that is written may already be a promise, and then
+            // the value that is there is the one inside it.
+            Some(Type::Promise(inner)) if waits => Some((**inner).clone()),
+            other => other.clone(),
         };
         self.expected_returns.push(expected.clone());
         self.collected_returns.push(Vec::new());
@@ -798,7 +885,8 @@ impl TypeChecker<'_> {
             });
         }
 
-        if let Some(expected) = &expected {
+        // The type of the value that the function hands back.
+        let value = if let Some(expected) = &expected {
             // A function that hands its values back one by one does not
             // return, so it does not have to return on every path.
             let generator = block_has_yield(body);
@@ -819,12 +907,21 @@ impl TypeChecker<'_> {
                     format!("function must return {} on every path", expected.display()),
                 ));
             }
-            Ok((expected.clone(), param_types))
+            expected.clone()
         } else if collected.is_empty() {
-            Ok((Type::Void, param_types))
+            Type::Void
         } else {
-            Ok((union(collected), param_types))
-        }
+            union(collected)
+        };
+
+        // A function that waits hands back a promise, so the caller may
+        // wait for the value that will be there.
+        let value = if waits && !matches!(value, Type::Promise(_)) {
+            Type::Promise(Box::new(value))
+        } else {
+            value
+        };
+        Ok((value, param_types))
     }
 
     /// Check a returned value against the declared return type.
@@ -855,10 +952,23 @@ impl TypeChecker<'_> {
         ret_ann: Option<&TypeExpr>,
         pos: Pos,
     ) -> Result<(Type, Vec<Type>), VeyError> {
+        self.check_arrow_against(params, body, ret_ann, pos, None)
+    }
+
+    /// The same, but the types of the parameters are known by the function
+    /// that is given.
+    pub(crate) fn check_arrow_against(
+        &mut self,
+        params: &[Param],
+        body: &ArrowBody,
+        ret_ann: Option<&TypeExpr>,
+        pos: Pos,
+        expected: Option<&[Type]>,
+    ) -> Result<(Type, Vec<Type>), VeyError> {
         match body {
             ArrowBody::Expr(expr) => {
                 self.push_scope();
-                self.declare_params(params)?;
+                self.declare_params(params, expected)?;
                 let ty = self.infer_expr(expr)?;
                 self.pop_scope();
                 // The type that is written is the type of the value.
@@ -867,8 +977,20 @@ impl TypeChecker<'_> {
                     if !self.fits(&ty, &wanted) {
                         return Err(self.type_error(expr.pos(), &ty, &wanted));
                     }
+                    // An arrow that waits hands back a promise.
+                    let wanted = if expr_has_await(expr) && !matches!(wanted, Type::Promise(_)) {
+                        Type::Promise(Box::new(wanted))
+                    } else {
+                        wanted
+                    };
                     return Ok((wanted, Vec::new()));
                 }
+                // An arrow that waits hands back a promise.
+                let ty = if expr_has_await(expr) && !matches!(ty, Type::Promise(_)) {
+                    Type::Promise(Box::new(ty))
+                } else {
+                    ty
+                };
                 Ok((ty, Vec::new()))
             }
             ArrowBody::Block(block) => self.check_function(params, block, ret_ann, pos),
@@ -890,16 +1012,33 @@ impl TypeChecker<'_> {
                                 let env = self.imports.get(module).ok_or_else(|| {
                                     self.error(element.pos, format!("unknown module '{}'", module))
                                 })?;
-                                let params = env.components.get(name).ok_or_else(|| {
-                                    self.error(
-                                        element.pos,
-                                        format!("unknown component '{}.{}'", module, name),
-                                    )
-                                })?;
-                                Some(params.clone())
+                                match env.components.get(name) {
+                                    Some(params) => Some(params.clone()),
+                                    // A value of the module may be a component
+                                    // of its own, such as the one of `memo`.
+                                    None if env.values.contains_key(name) => None,
+                                    None => {
+                                        return Err(self.error(
+                                            element.pos,
+                                            format!("unknown component '{}.{}'", module, name),
+                                        ))
+                                    }
+                                }
                             }
                             None => {
-                                if !self.components.contains_key(&element.tag) {
+                                // The boundary is a component of the
+                                // runtime, so it is always known.
+                                if element.tag == "Boundary" {
+                                    None
+                                } else if let Some(params) = self.components.get(&element.tag) {
+                                    Some(params.clone())
+                                } else if self.lookup(&element.tag).is_some() {
+                                    // A name that the program holds may be a
+                                    // component of its own, such as the one
+                                    // that `memo` gives back, so its props are
+                                    // not known here.
+                                    None
+                                } else {
                                     let mut error = self.error(
                                         element.pos,
                                         format!("unknown component '{}'", element.tag),
@@ -914,7 +1053,6 @@ impl TypeChecker<'_> {
                                     }
                                     return Err(error);
                                 }
-                                self.components.get(&element.tag).cloned()
                             }
                         }
                     };
@@ -927,6 +1065,11 @@ impl TypeChecker<'_> {
                                 }
                             }
                         }
+                    }
+                    // The props that are spread may be of any shape, so they
+                    // are not checked against the parameters.
+                    for spread in &element.spreads {
+                        self.infer_expr(spread)?;
                     }
                     if let Some(params) = &signature {
                         // Positional arguments fill the parameters in order.
@@ -999,12 +1142,15 @@ impl TypeChecker<'_> {
                         // Every parameter without a default needs a value.
                         // `children` is filled by the markup itself.
                         for (index, param) in params.iter().enumerate() {
-                            if param.has_default || param.name == "children" {
+                            if param.has_default || param.has_slot || param.name == "children" {
                                 continue;
                             }
                             let given = element.args.len() > index
                                 || element.attrs.iter().any(|(attr, _)| *attr == param.name)
-                                || slots.iter().any(|(slot, _)| *slot == param.name);
+                                || slots.iter().any(|(slot, _)| *slot == param.name)
+                                // The props that are spread may hold the
+                                // argument, so it is not missing.
+                                || !element.spreads.is_empty();
                             if !given {
                                 return Err(self.error(
                                     element.pos,
@@ -1155,6 +1301,68 @@ fn prop_bindings(pattern: &BindingPattern) -> Vec<(String, bool)> {
             if let Some(rest) = rest {
                 out.push((rest.clone(), false));
             }
+        }
+    }
+    out
+}
+
+
+/// The names of the slots of a component.
+///
+/// A slot is written `slot name="body" { ... }`, so that the content
+/// that is given by the caller takes the place of the content of the
+/// slot.
+fn slot_names(nodes: &[MarkupNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    for node in nodes {
+        match node {
+            MarkupNode::Element(element) => {
+                if element.tag == "slot" {
+                    if let Some((_, value)) = element.attrs.iter().find(|(name, _)| name == "name") {
+                        if let Expr::String(parts, _) = value {
+                            if let Some(part) = parts.first() {
+                                if part.expr.is_none() && !out.contains(&part.text) {
+                                    out.push(part.text.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                for name in slot_names(&element.children) {
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+            }
+            MarkupNode::If(branch) => {
+                for name in slot_names(&branch.then_nodes) {
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+                for name in slot_names(&branch.else_nodes) {
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+            }
+            MarkupNode::For(loop_node) => {
+                for name in slot_names(&loop_node.body) {
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+            }
+            MarkupNode::Match(m) => {
+                for arm in &m.arms {
+                    for name in slot_names(&arm.body) {
+                        if !out.contains(&name) {
+                            out.push(name);
+                        }
+                    }
+                }
+            }
+            MarkupNode::Expr(_) => {}
         }
     }
     out

@@ -9,7 +9,7 @@ use crate::types::core::{
     rest_element_type, Alias, EnumFieldInfo, EnumInfo, EnumVariantInfo, FunctionType, ImplInfo,
     InterfaceInfo, ResolvedCalls, Type,
 };
-use crate::types::helpers::name_alias;
+use crate::types::helpers::{block_has_await, name_alias};
 use crate::types::rules::{assignable_with, Opening};
 use crate::VeyError;
 
@@ -54,16 +54,20 @@ pub struct ModuleTypeEnv {
     pub resolved: ResolvedCalls,
 }
 
-pub fn check(
+/// A checker that knows the types of a program.
+///
+/// Every place that checks a program builds it here, so that the fields of a
+/// checker are set in one place only.
+fn build_checker<'a>(
     program: &Program,
-    file: &str,
+    file: &'a str,
     imports: &HashMap<String, ModuleTypeEnv>,
-) -> Result<ModuleTypeEnv, VeyError> {
+) -> Result<TypeChecker<'a>, VeyError> {
     let enums = collect_enums(program, file)?;
     let aliases = collect_aliases(program, file, &enums)?;
     let interfaces = collect_interfaces(program, file, &enums, &aliases)?;
     let impls = collect_impls(program, file, &aliases)?;
-    let mut checker = TypeChecker {
+    Ok(TypeChecker {
         file,
         aliases,
         alias_types: HashMap::new(),
@@ -76,7 +80,6 @@ pub fn check(
         in_markup: false,
         type_param_scopes: Vec::new(),
         type_param_bindings: Vec::new(),
-        type_param_constraints: Vec::new(),
         components: HashMap::new(),
         param_scopes: Vec::new(),
         resolved: HashMap::new(),
@@ -85,7 +88,15 @@ pub fn check(
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
         yielded: Vec::new(),
-    };
+    })
+}
+
+pub fn check(
+    program: &Program,
+    file: &str,
+    imports: &HashMap<String, ModuleTypeEnv>,
+) -> Result<ModuleTypeEnv, VeyError> {
+    let mut checker = build_checker(program, file, imports)?;
     checker.check_program(program)?;
     // build the module's exported type environment
     let mut env = ModuleTypeEnv::default();
@@ -96,8 +107,6 @@ pub fn check(
     env.interfaces = checker.interfaces.keys().cloned().collect();
     // The names the module keeps to itself.
     env.private = program.private.iter().cloned().collect();
-    // The calls whose arguments are given by name.
-    env.resolved = checker.resolved.clone();
     // The calls whose arguments are given by name.
     env.resolved = checker.resolved.clone();
     for stmt in &program.body {
@@ -190,6 +199,7 @@ pub fn check(
                         type_params: Vec::new(),
                         param_names: vec![decl.type_name.clone()],
                         defaults: vec![false],
+                        loose: false,
                     }),
                 );
             }
@@ -466,6 +476,9 @@ pub struct ComponentParam {
     pub has_default: bool,
     /// Whether the component takes the rest of the arguments.
     pub rest: bool,
+    /// Whether the component has a slot of this name, so that the caller
+    /// may leave it out.
+    pub has_slot: bool,
 }
 
 pub(crate) struct TypeChecker<'a> {
@@ -489,8 +502,7 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) type_param_scopes: Vec<HashMap<String, Type>>,
     /// The types the type parameters of the current scope were bound to.
     pub(crate) type_param_bindings: Vec<HashMap<String, Type>>,
-    /// The constraints of the type parameters of the current scope.
-    pub(crate) type_param_constraints: Vec<Vec<(String, Option<Type>)>>,
+
     pub(crate) components: HashMap<String, Vec<ComponentParam>>,
     /// The types that the parameters of the functions that are being checked
     /// are known to have.
@@ -549,34 +561,9 @@ impl TypeChecker<'_> {
     pub(crate) fn for_explain<'a>(
         program: &Program,
         file: &'a str,
+        imports: &HashMap<String, ModuleTypeEnv>,
     ) -> Result<TypeChecker<'a>, VeyError> {
-        let enums = collect_enums(program, file)?;
-        let aliases = collect_aliases(program, file, &enums)?;
-        let interfaces = collect_interfaces(program, file, &enums, &aliases)?;
-        let impls = collect_impls(program, file, &aliases)?;
-        let mut checker = TypeChecker {
-            file,
-            aliases,
-            alias_types: HashMap::new(),
-            enums,
-            interfaces,
-            impls,
-            imports: HashMap::new(),
-            scopes: vec![HashMap::new()],
-            member_narrowings: vec![HashMap::new()],
-        in_markup: false,
-            type_param_scopes: Vec::new(),
-            type_param_bindings: Vec::new(),
-            type_param_constraints: Vec::new(),
-            components: HashMap::new(),
-            param_scopes: Vec::new(),
-            resolved: HashMap::new(),
-            try_depth: 0,
-            yielded: Vec::new(),
-            shadowed: HashSet::new(),
-            expected_returns: Vec::new(),
-            collected_returns: Vec::new(),
-        };
+        let mut checker = build_checker(program, file, imports)?;
         checker.predeclare_top_level(program)?;
         Ok(checker)
     }
@@ -621,22 +608,17 @@ impl TypeChecker<'_> {
 
         // The constraints are resolved with the parameters in scope, so that
         // a constraint may mention another parameter.
-        let mut constraints = Vec::new();
         for param in params {
-            let constraint = match &param.constraint {
-                Some(expr) => Some(self.resolve_type(expr)?),
-                None => None,
-            };
-            constraints.push((param.name.clone(), constraint));
+            if let Some(expr) = &param.constraint {
+                self.resolve_type(expr)?;
+            }
         }
-        self.type_param_constraints.push(constraints);
         Ok(())
     }
 
     pub(crate) fn pop_type_params(&mut self) {
         self.type_param_scopes.pop();
         self.type_param_bindings.pop();
-        self.type_param_constraints.pop();
     }
 
     pub(crate) fn lookup_type_param(&self, name: &str) -> Option<Type> {
@@ -866,6 +848,7 @@ impl TypeChecker<'_> {
             type_params: type_params.iter().map(|param| param.name.clone()).collect(),
             param_names,
             defaults,
+            loose: false,
         }))
     }
 
@@ -873,6 +856,14 @@ impl TypeChecker<'_> {
         let ret = match &decl.ret {
             Some(ty) => self.resolve_type(ty)?,
             None => Type::Any,
+        };
+        // A function that waits hands back a promise, so the caller may
+        // wait for the value that will be there.
+        let waits = block_has_await(&decl.body);
+        let ret = if waits && !matches!(ret, Type::Promise(_)) {
+            Type::Promise(Box::new(ret))
+        } else {
+            ret
         };
         self.function_type_from_parts(&decl.params, ret, decl.ret.is_some(), &decl.type_params, &[])
     }

@@ -1,6 +1,6 @@
 //! Parsing of markup.
 
-use super::html::is_html_tag;
+use super::html::is_known_tag;
 use super::Parser;
 use crate::ast::*;
 use crate::lexer::TokKind;
@@ -61,7 +61,7 @@ impl Parser {
 
     /// The name of a tag that is not a tag of HTML and not a component.
     fn unknown_tag(&mut self) -> Result<Option<String>, VeyError> {
-        if self.tok.kind != TokKind::Ident {
+        if self.tok.kind != TokKind::Ident && self.tok.kind != TokKind::Keyword {
             return Ok(None);
         }
         let name = self.tok.value.clone();
@@ -72,7 +72,7 @@ impl Parser {
         {
             return Ok(None);
         }
-        if is_html_tag(&name) {
+        if is_known_tag(&name) {
             return Ok(None);
         }
         let next = self.peek()?;
@@ -87,7 +87,9 @@ impl Parser {
     }
 
     pub(crate) fn is_element_start(&mut self) -> Result<bool, VeyError> {
-        if self.tok.kind != TokKind::Ident {
+        // A word of the language may be the name of a tag, such as the
+        // `use` of SVG.
+        if self.tok.kind != TokKind::Ident && self.tok.kind != TokKind::Keyword {
             return Ok(false);
         }
         let first = self.tok.value.chars().next();
@@ -102,11 +104,17 @@ impl Parser {
         if next.kind == TokKind::Punct
             && (next.value == "{" || next.value == "." || next.value == "#")
         {
-            return Ok(is_html_tag(&self.tok.value));
+            return Ok(is_known_tag(&self.tok.value));
+        }
+        if next.kind == TokKind::Op && next.value == "=" {
+            // The tag has an attribute of its own, such as the name of a
+            // slot: `slot="body"`.
+            return Ok(is_known_tag(&self.tok.value));
         }
         if self.attr_ahead()? {
-            // A tag of HTML is a tag of HTML, with attributes or without.
-            return Ok(is_html_tag(&self.tok.value));
+            // A tag that the markup knows is a tag, with attributes or
+            // without.
+            return Ok(is_known_tag(&self.tok.value));
         }
         Ok(false)
     }
@@ -147,13 +155,14 @@ impl Parser {
         if self.peek()?.kind != TokKind::Ident {
             return Ok(false);
         }
+        // The name of an attribute may have parts, such as `xlink:href` or
+        // `data-value`.
         let mut k = 2;
         loop {
-            let dash = self.peek_n(k)?;
-            if dash.kind == TokKind::Op
-                && dash.value == "-"
-                && self.peek_n(k + 1)?.kind == TokKind::Ident
-            {
+            let part = self.peek_n(k)?;
+            let is_part = (part.kind == TokKind::Op && part.value == "-")
+                || (part.kind == TokKind::Punct && part.value == ":");
+            if is_part && self.peek_n(k + 1)?.kind == TokKind::Ident {
                 k += 2;
                 continue;
             }
@@ -167,10 +176,14 @@ impl Parser {
         if self.tok.kind != TokKind::Ident {
             return Ok(false);
         }
+        // The name of an attribute may have parts, such as `xlink:href` or
+        // `data-value`.
         let mut k = 1;
         loop {
             let token = self.peek_n(k)?;
-            if token.kind == TokKind::Op && token.value == "-" {
+            let is_part = (token.kind == TokKind::Op && token.value == "-")
+                || (token.kind == TokKind::Punct && token.value == ":");
+            if is_part {
                 if self.peek_n(k + 1)?.kind == TokKind::Ident {
                     k += 2;
                     continue;
@@ -194,6 +207,7 @@ impl Parser {
             classes: Vec::new(),
             id: None,
             attrs: Vec::new(),
+            spreads: Vec::new(),
             args: Vec::new(),
             slot: None,
             children: Vec::new(),
@@ -209,6 +223,12 @@ impl Parser {
         }
 
         loop {
+            // The props may be spread into the element.
+            if self.is_op("...") {
+                self.advance()?;
+                element.spreads.push(self.parse_expression()?);
+                continue;
+            }
             if self.is_punct(".") || self.is_punct("#") {
                 let selector = self.advance()?.value;
                 let name = self.parse_attr_name()?;
@@ -296,10 +316,22 @@ impl Parser {
 
     pub(crate) fn parse_attr_name(&mut self) -> Result<String, VeyError> {
         let mut name = self.expect_ident("attribute name")?;
-        while self.is_op("-") {
-            self.advance()?;
-            name.push('-');
-            name.push_str(&self.expect_ident("attribute name part")?);
+        // The name of an attribute may have parts, such as `xlink:href` or
+        // `data-value`.
+        loop {
+            if self.is_op("-") {
+                self.advance()?;
+                name.push('-');
+                name.push_str(&self.expect_ident("attribute name part")?);
+                continue;
+            }
+            if self.is_punct(":") {
+                self.advance()?;
+                name.push(':');
+                name.push_str(&self.expect_ident("attribute name part")?);
+                continue;
+            }
+            break;
         }
         Ok(name)
     }

@@ -1,4 +1,7 @@
 /target
 *.cjs
+# The tests read the fixtures of the browser from this folder, so they are
+# part of the project.
+!/tests/fixtures/*.cjs
 .DS_Store
 /.vey

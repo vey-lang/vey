@@ -56,12 +56,28 @@ function veyEvents(ctx) {
   }
 
   // The work that is done when the page is there.
+  //
+  // The work belongs to the component that is written now, so that it is
+  // done once, and not once for every writing of the page.
   function onMount(fn) {
+    var works = ctx.currentComponent;
+    if (works) {
+      works.mount.push(fn);
+      return function () { };
+    }
     return queueMount(fn);
   }
 
   // The work that is done when the page is taken away.
+  //
+  // The work belongs to the component that is written now, so that it is
+  // done when the nodes of the component are taken away.
   function onDestroy(fn) {
+    var works = ctx.currentComponent;
+    if (works) {
+      works.destroy.push(fn);
+      return function () { };
+    }
     return queueDestroy(fn);
   }
 

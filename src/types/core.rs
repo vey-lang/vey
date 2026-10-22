@@ -136,6 +136,14 @@ pub struct FunctionType {
     /// The parameters that have a value of their own, so that a caller may
     /// leave them out.
     pub(crate) defaults: Vec<bool>,
+    /// Whether a type parameter that could not be inferred stands for `any`
+    /// instead of being a mistake.
+    ///
+    /// The helpers of the runtime are typed loosely this way: `store("name")`
+    /// says nothing about the state, and that is not worth a refusal. A
+    /// function of the program is checked strictly, because there the answer
+    /// of the call is wanted.
+    pub(crate) loose: bool,
 }
 
 impl Type {

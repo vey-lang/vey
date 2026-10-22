@@ -253,9 +253,23 @@ pub fn check_file(path: &Path, text: Option<&str>) -> Result<FileProblems, VeyEr
     }
 
     // The types of the modules, in the order they are loaded.
+    let (_, errors) = type_environments(&modules, entry_id);
+
+    Ok(FileProblems { warnings, errors })
+}
+
+/// The type environment of every module, in the order they are loaded.
+///
+/// The modules that a file uses are checked as well, so that the types of
+/// another module are known. The mistake of the entry file is given back,
+/// so that the editor may show it.
+fn type_environments(
+    modules: &[Module],
+    _entry_id: usize,
+) -> (Vec<types::ModuleTypeEnv>, Vec<VeyError>) {
     let mut envs: Vec<types::ModuleTypeEnv> = Vec::with_capacity(modules.len());
-    let mut error = None;
-    for module in &modules {
+    let mut errors: Vec<VeyError> = Vec::new();
+    for module in modules {
         let mut imports: HashMap<String, types::ModuleTypeEnv> = HashMap::new();
         for (alias, id) in &module.deps {
             if let Some(env) = envs.get(*id) {
@@ -263,35 +277,76 @@ pub fn check_file(path: &Path, text: Option<&str>) -> Result<FileProblems, VeyEr
             }
         }
         let label = module.path.display().to_string();
-        match types::check(&module.ast, &label, &imports) {
-            Ok(env) => {
-                while envs.len() < module.id {
-                    envs.push(types::ModuleTypeEnv::default());
-                }
-                if envs.len() == module.id {
-                    envs.push(env);
-                } else {
-                    envs[module.id] = env;
-                }
-            }
+        // The mistake of a module is said even when the module is not the
+        // one that was asked about: the editor shows the mistakes of the
+        // whole project.
+        let env = match types::check(&module.ast, &label, &imports) {
+            Ok(env) => env,
             Err(err) => {
-                if module.id == entry_id {
-                    error = Some(err);
-                }
-                // A module with a mistake is not known to the ones that
-                // use it, so the check stops here.
-                break;
+                errors.push(err);
+                // The module is not known to the ones that use it, so its
+                // members are taken as they are and are not checked again.
+                let mut empty = types::ModuleTypeEnv::default();
+                empty.unchecked = true;
+                empty
             }
+        };
+        while envs.len() < module.id {
+            envs.push(types::ModuleTypeEnv::default());
+        }
+        if envs.len() == module.id {
+            envs.push(env);
+        } else {
+            envs[module.id] = env;
+        }
+    }
+    (envs, errors)
+}
+
+/// The type of the expression at a place of a file.
+///
+/// The modules that the file uses are checked as well, so that the types of
+/// another module are known and the answer is the real one.
+pub fn explain_file(path: &Path, line: usize, col: usize) -> Result<String, VeyError> {
+    explain_source(path, None, line, col)
+}
+
+/// The type of the expression at a place of a file.
+///
+/// The text of the file may be another one than the one on the disk, which
+/// is what a language server needs.
+pub fn explain_source(
+    path: &Path,
+    text: Option<&str>,
+    line: usize,
+    col: usize,
+) -> Result<String, VeyError> {
+    let mut modules: Vec<Module> = Vec::new();
+    let mut ids: HashMap<PathBuf, usize> = HashMap::new();
+    let mut stack: Vec<PathBuf> = Vec::new();
+    let mut styles: Vec<StyleFile> = Vec::new();
+    let entry_id = load_module(path, &mut modules, &mut ids, &mut stack, &mut styles, text)?;
+
+    let (envs, _) = type_environments(&modules, entry_id);
+
+    // The types of the modules that the file uses.
+    let mut imports: HashMap<String, types::ModuleTypeEnv> = HashMap::new();
+    let entry = &modules[entry_id];
+    for (alias, id) in &entry.deps {
+        if let Some(env) = envs.get(*id) {
+            imports.insert(alias.clone(), env.clone());
         }
     }
 
-    Ok(FileProblems { warnings, error })
+    let label = entry.path.display().to_string();
+    types::explain(&entry.ast, &label, line, col, &imports)
 }
 
-/// The problems of a file: the warnings and the mistake, if there is one.
+/// The problems of a file: the warnings and the mistakes of the file and
+/// of the modules that it uses.
 pub struct FileProblems {
     pub warnings: Vec<Warning>,
-    pub error: Option<VeyError>,
+    pub errors: Vec<VeyError>,
 }
 
 /// The folder the cache of a project is written in.

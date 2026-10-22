@@ -95,6 +95,9 @@ pub struct FnDecl {
 pub struct ComponentDecl {
     pub name: String,
     pub params: Vec<Param>,
+    /// The values of the component, which are kept when the page is
+    /// written again.
+    pub body: Vec<Stmt>,
     pub children: Vec<MarkupNode>,
     pub exported: bool,
     pub pos: Pos,

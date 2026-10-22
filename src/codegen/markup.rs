@@ -8,6 +8,25 @@ use super::js::{event_attr, js_key, js_string};
 use super::Codegen;
 
 impl Codegen {
+    /// Whether the expression is a call to a helper that does work, such as
+    /// `onMount`.
+    ///
+    /// The work of such a helper is not a child of the page, so it is
+    /// written in another way. A name of the program that hides the helper
+    /// is a value of its own, so it is not one of them.
+    fn is_effect_call(&self, expr: &Expr) -> bool {
+        let Expr::Call(callee, _, _, _) = expr else {
+            return false;
+        };
+        let Expr::Ident(name, _) = &**callee else {
+            return false;
+        };
+        if !matches!(name.as_str(), "onMount" | "onDestroy") {
+            return false;
+        }
+        !self.lookup(name)
+    }
+
     pub(crate) fn gen_markup_nodes(&mut self, nodes: &[MarkupNode]) -> Result<String, VeyError> {
         let mut parts = Vec::new();
         for node in nodes {
@@ -16,9 +35,40 @@ impl Codegen {
         Ok(format!("[{}]", parts.join(", ")))
     }
 
+    /// The boundary of the mistakes.
+    ///
+    /// The children are written inside a piece of code that holds them, so
+    /// that a mistake in one of them does not take the whole page away.
+    fn gen_boundary(&mut self, element: &Element) -> Result<String, VeyError> {
+        let mut entries: Vec<String> = Vec::new();
+        let mut fallback = "null".to_string();
+        for (name, value) in &element.attrs {
+            if name == "fallback" {
+                fallback = self.gen_expr(value)?;
+                continue;
+            }
+            let value = self.gen_expr(value)?;
+            entries.push(format!("{}: {}", js_key(name), value));
+        }
+        let children = self.gen_markup_nodes(&element.children)?;
+        Ok(format!(
+            "V.__h(function () {{ var kids; try {{ kids = {}; }} catch (err) {{ kids = V.__fallback(err, {}); }} return kids; }}, null, [])",
+            children, fallback
+        ))
+    }
+
     pub(crate) fn gen_markup_node(&mut self, node: &MarkupNode) -> Result<String, VeyError> {
         match node {
-            MarkupNode::Expr(expr) => self.gen_expr(expr),
+            MarkupNode::Expr(expr) => {
+                // The work that is done when the page is there is not a
+                // child of the page. It is written as a pair of values, so
+                // that the work is done and the child is nothing.
+                if self.is_effect_call(expr) {
+                    let call = self.gen_expr(expr)?;
+                    return Ok(format!("({}, null)", call));
+                }
+                self.gen_expr(expr)
+            }
             MarkupNode::Element(element) => self.gen_element(element),
             MarkupNode::If(branch) => {
                 let test = self.gen_expr(&branch.test)?;
@@ -144,6 +194,23 @@ impl Codegen {
     }
 
     pub(crate) fn gen_element(&mut self, element: &Element) -> Result<String, VeyError> {
+        // The boundary catches the mistakes of the ones under it, so the
+        // children are written inside a piece of code that holds them.
+        if element.tag == "Boundary" && element.component {
+            return self.gen_boundary(element);
+        }
+        // A slot takes the place of the content that the caller gives, and
+        // the content of the slot is there when the caller gives nothing.
+        if element.tag == "slot" && !element.component {
+            if let Some(name) = slot_name(element) {
+                let children = self.gen_markup_nodes(&element.children)?;
+                return Ok(format!(
+                    "V.__slot(__veyProps[{}], {})",
+                    js_string(&name),
+                    children
+                ));
+            }
+        }
         let tag = if element.component {
             // A component of another module, such as `ui.Card`, is a member
             // of the module.
@@ -213,6 +280,13 @@ impl Codegen {
             }
         }
 
+        // The props that are spread into the element are put after the
+        // ones that are named, so that they may change them.
+        for spread in &element.spreads {
+            let spread = self.gen_expr(spread)?;
+            entries.push(format!("...{}", spread));
+        }
+
         let props = if entries.is_empty() {
             "null".to_string()
         } else {
@@ -235,4 +309,18 @@ impl Codegen {
         }
         Ok(format!("V.__h({}, {}, {})", tag, props, children))
     }
+}
+
+
+/// The name of a slot, when the element is one.
+fn slot_name(element: &Element) -> Option<String> {
+    let (_, value) = element.attrs.iter().find(|(name, _)| name == "name")?;
+    let Expr::String(parts, _) = value else {
+        return None;
+    };
+    let part = parts.first()?;
+    if part.expr.is_some() {
+        return None;
+    }
+    Some(part.text.clone())
 }

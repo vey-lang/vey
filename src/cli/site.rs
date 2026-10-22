@@ -7,7 +7,9 @@ use vey::compiler::{compile_project, Bundle};
 
 use crate::cli::entry::{collect_vey_files, default_title, project_root};
 use crate::cli::error::BuildError;
-use crate::cli::output::{browser_script, escape_html, html_document, html_document_with_script};
+use crate::cli::output::{
+    browser_script, escape_html, html_document, html_document_with_script, report_warnings,
+};
 
 pub(crate) struct SiteReport {
     /// The pages that were written.
@@ -15,6 +17,91 @@ pub(crate) struct SiteReport {
     pub(crate) assets: usize,
     /// The pages that could not be built.
     pub(crate) failed: Vec<(String, BuildError)>,
+}
+
+/// The name of the file that says what the build wrote.
+///
+/// The build only takes away the files that it wrote itself, so that a
+/// folder that holds something else keeps it.
+const MANIFEST: &str = ".vey-manifest";
+
+/// Take away the files of the last build, and nothing else.
+///
+/// The folder of the build holds a list of the files that were written. A
+/// folder without that list is not touched, because it may hold the files
+/// of the one that made it.
+fn clean_output(output: &Path, force: bool) -> Result<(), BuildError> {
+    if !output.exists() {
+        return Ok(());
+    }
+    let manifest = output.join(MANIFEST);
+    let written = match fs::read_to_string(&manifest) {
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .collect::<Vec<PathBuf>>(),
+        Err(_) => Vec::new(),
+    };
+    // A folder that holds something else is not emptied, unless the one
+    // who asks for it says so.
+    if written.is_empty() {
+        let others = fs::read_dir(output)
+            .map_err(|err| {
+                BuildError::from(format!("cannot read {}: {}", output.display(), err))
+            })?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name() != std::ffi::OsStr::new(MANIFEST))
+            .count();
+        if others > 0 && !force {
+            return Err(BuildError::from(format!(
+                "refusing to empty {}: it holds {} file(s) that the build did not write. \
+                 Use --force to empty it anyway.",
+                output.display(),
+                others
+            )));
+        }
+        if others > 0 {
+            fs::remove_dir_all(output).map_err(|err| {
+                BuildError::from(format!("cannot clean {}: {}", output.display(), err))
+            })?;
+        }
+        return Ok(());
+    }
+    // Only the files of the last build are taken away.
+    for name in &written {
+        let path = output.join(name);
+        if path.is_file() || path.is_symlink() {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    // The folders that are empty now are taken away as well.
+    let mut folders = written
+        .iter()
+        .filter_map(|name| name.parent().map(|parent| parent.to_path_buf()))
+        .collect::<Vec<PathBuf>>();
+    folders.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+    folders.dedup();
+    for folder in folders {
+        let path = output.join(&folder);
+        if path.is_dir() {
+            let _ = fs::remove_dir(&path);
+        }
+    }
+    Ok(())
+}
+
+/// Write the list of the files that the build wrote.
+fn write_manifest(output: &Path, files: &HashMap<String, Vec<u8>>) -> Result<(), BuildError> {
+    let mut names = files
+        .keys()
+        .map(|name| name.replace('\\', "/"))
+        .collect::<Vec<String>>();
+    names.sort();
+    let text = names.join("\n");
+    fs::write(output.join(MANIFEST), text)
+        .map_err(|err| BuildError::from(format!("cannot write the manifest: {}", err)))
 }
 
 /// The path without any `.` or `..` in it, with links resolved.
@@ -56,6 +143,7 @@ pub(crate) fn write_site(
     entry: &Path,
     output: &Path,
     title: Option<&str>,
+    force: bool,
 ) -> Result<SiteReport, BuildError> {
     // The paths are compared after they are resolved, so that a relative path
     // or a `..` cannot point at a directory that holds the project.
@@ -91,11 +179,9 @@ pub(crate) fn write_site(
     let mut watch = Vec::new();
     let site = site_files(entry, title, &mut watch, true)?;
     let (files, failed) = (site.files, site.failed);
-    if output.exists() {
-        fs::remove_dir_all(&output).map_err(|err| {
-            BuildError::from(format!("cannot clean {}: {}", output.display(), err))
-        })?;
-    }
+    // Only the files of the last build are taken away, so that a folder
+    // that holds something else keeps it.
+    clean_output(&output, force)?;
     fs::create_dir_all(&output)
         .map_err(|err| BuildError::from(format!("cannot create {}: {}", output.display(), err)))?;
 
@@ -119,6 +205,9 @@ pub(crate) fn write_site(
         }
     }
     pages.sort();
+    // The list of the files that were written, so that the next build
+    // knows which files are its own.
+    write_manifest(&output, &files)?;
 
     Ok(SiteReport {
         pages,
@@ -148,26 +237,10 @@ pub(crate) fn site_files(
 
     let bundle = compile_for_site(entry, watch)?;
     let favicon = root.join("public/favicon.svg").is_file();
-    // The files that are written after the pages, so that a page always
-    // wins over a file of the same name.
-    let mut files_later: Vec<(String, Vec<u8>)> = Vec::new();
     let not_found_body = match not_found_page(entry, &root) {
         Some(not_found) => {
             let bundle = compile_for_site(&not_found, watch)?;
-            if split {
-                files_later.push((
-                    "404.js".to_string(),
-                    browser_script(&bundle).into_bytes(),
-                ));
-                html_document_with_script(
-                    &bundle,
-                    &format!("{} · 404", page_title),
-                    favicon,
-                    "404.js",
-                )
-            } else {
-                html_document(&bundle, &format!("{} · 404", page_title), favicon)
-            }
+            html_document(&bundle, &format!("{} · 404", page_title), favicon)
         }
         None => default_404_page(&page_title),
     };
@@ -204,10 +277,6 @@ pub(crate) fn site_files(
         if split {
             files.insert(script.0, script.1);
         }
-    }
-
-    for (name, bytes) in files_later {
-        files.insert(name, bytes);
     }
 
     Ok(SiteOutput { files, failed })
@@ -425,6 +494,9 @@ pub(crate) fn compile_for_site(
     watch.push(entry.clone());
     match compile_project(&entry) {
         Ok(bundle) => {
+            // The warnings of the program are said, the same way the
+            // build of a script says them.
+            report_warnings(&bundle.warnings);
             // A package of npm needs Node, and a page of a site runs in the
             // browser.
             let package = bundle

@@ -1,5 +1,6 @@
 // The server of a program.
 function veyServer(ctx) {
+  var isNode = ctx.isNode;
   var query = ctx.query;
   var print = ctx.print;
   var log = ctx.log;
@@ -34,6 +35,9 @@ function veyServer(ctx) {
   });
 
   // How long a file that is served is kept by the browser.
+  // The time that a file of a folder is kept in the browser.
+  var staticMaxAge = 0;
+
   function cacheControlOf(ext) {
     if (ext === ".html") return "no-cache";
     if (
@@ -42,6 +46,7 @@ function veyServer(ctx) {
     ) {
       return "public, max-age=31536000, immutable";
     }
+    if (staticMaxAge) return "public, max-age=" + staticMaxAge;
     return "public, max-age=3600";
   }
 
@@ -131,20 +136,47 @@ function veyServer(ctx) {
     var sockets = [];
     var streams = [];
     var errorHandler = null;
+    var middlewareErrorHandler = null;
     var staticDir = null;
+    // The name of the file of a folder that is served.
+    var staticIndex = "index.html";
     var notFoundHandler = null;
     var actualPort = port === undefined ? 3000 : port;
     // The body of a request is read into the memory, so it has a limit.
     var limit = opts.bodyLimit === undefined ? 10 * 1024 * 1024 : Number(opts.bodyLimit);
+    // The time that a request may take, before it is refused.
+    var requestTimeout = opts.timeout === undefined ? 0 : Number(opts.timeout);
+    // Whether a proxy is in front of the server.
+    //
+    // The heads that a proxy writes are only read when the program says
+    // so, because a visitor may write them as well.
+    var trustProxy = opts.trustProxy === true || opts.trustProxy === "true";
+    // Whether the reason of a mistake is told to the visitor.
+    //
+    // The reason may tell something about the machine of the server, so it
+    // is only told when the program says that it may be.
+    var exposeErrors = opts.exposeErrors === true || opts.exposeErrors === "true";
     // The requests that are running now.
     var running = 0;
 
     function add(method, pattern, handler, extra) {
+      // A middle piece may ask for a smaller body. The limit of the route
+      // is known here, so that the body is not read at all when it is too
+      // large.
+      var routeLimit = undefined;
+      var list = extra || [];
+      for (var i = 0; i < list.length; i++) {
+        var asked = list[i] && list[i].bodyLimit;
+        if (typeof asked === "number" && isFinite(asked)) {
+          routeLimit = routeLimit === undefined ? asked : Math.min(routeLimit, asked);
+        }
+      }
       routes.push({
         method: method,
         pattern: pattern,
         handler: handler,
-        middlewares: extra || []
+        middlewares: list,
+        limit: routeLimit
       });
     }
 
@@ -185,33 +217,43 @@ function veyServer(ctx) {
       return pathname.indexOf(pattern + "/") === 0;
     }
 
-    function readBody(request) {
+    function readBody(request, max) {
       return new Promise(function (resolve, reject) {
         var chunks = [];
         var size = 0;
         var tooLarge = false;
+        var limitValue = max === undefined ? limit : max;
         request.on("data", function (chunk) {
+          if (tooLarge) return;
           size += chunk.length;
-          if (size > limit) {
+          if (size > limitValue) {
+            // The body is too large, so it is not kept and the reading
+            // stops while the server sends the 413 response.
             tooLarge = true;
-            return;
-          }
-          chunks.push(chunk);
-        });
-        request.on("end", function () {
-          if (tooLarge) {
+            chunks.length = 0;
+            request.pause();
             var error = veyError("the request is too large");
             error.tooLarge = true;
             reject(error);
             return;
           }
+          chunks.push(chunk);
+        });
+        request.on("end", function () {
+          if (tooLarge) return;
           var buffer = Buffer.concat(chunks);
           var raw = buffer.toString("utf8");
           var parsed = raw;
           var files = {};
           var contentType = request.headers["content-type"] || "";
           if (contentType.indexOf("json") !== -1 && raw.trim()) {
-            try { parsed = JSON.parse(raw); } catch (err) { parsed = raw; }
+            try {
+              parsed = JSON.parse(raw);
+            } catch (err) {
+              err.badRequest = true;
+              reject(err);
+              return;
+            }
           } else if (contentType.indexOf("multipart/form-data") !== -1) {
             // A form with files, which the visitor sends.
             var form = parseMultipart(buffer, contentType);
@@ -229,19 +271,48 @@ function veyServer(ctx) {
       });
     }
 
+    function isWithinStaticRoot(root, file) {
+      var relative = pathModule.relative(root, file);
+      return relative === "" || (
+        relative !== ".." &&
+        relative.indexOf(".." + pathModule.sep) !== 0 &&
+        !pathModule.isAbsolute(relative)
+      );
+    }
+
     // The file of a folder is served, with the marks of the cache.
     function serveStatic(request, res, pathname, status) {
       var relative = safeDecode(pathname).replace(/^\/+/, "");
-      var file = pathModule.resolve(staticDir, relative);
-      if (file !== staticDir && file.indexOf(staticDir + pathModule.sep) !== 0) {
-        res.status(403);
-        res.send("Forbidden");
-        return true;
-      }
       try {
+        var root = fs.realpathSync(staticDir);
+        var file = pathModule.resolve(root, relative);
+        if (!isWithinStaticRoot(root, file)) {
+          res.status(403);
+          res.send("Forbidden");
+          return true;
+        }
+        file = fs.realpathSync(file);
+        if (!isWithinStaticRoot(root, file)) {
+          res.status(403);
+          res.send("Forbidden");
+          return true;
+        }
         var stat = fs.statSync(file);
-        if (stat.isDirectory()) file = pathModule.join(file, "index.html");
-        if (!fs.existsSync(file)) return false;
+        if (stat.isDirectory()) {
+          file = pathModule.resolve(file, staticIndex);
+          if (!isWithinStaticRoot(root, file)) {
+            res.status(403);
+            res.send("Forbidden");
+            return true;
+          }
+          if (!fs.existsSync(file)) return false;
+          file = fs.realpathSync(file);
+          if (!isWithinStaticRoot(root, file)) {
+            res.status(403);
+            res.send("Forbidden");
+            return true;
+          }
+        }
         var info = fs.statSync(file);
         var ext = pathModule.extname(file).toLowerCase();
         var etag = '"' + info.size.toString(16) + "-" + info.mtimeMs.toString(16) + '"';
@@ -249,6 +320,7 @@ function veyServer(ctx) {
         res.set("ETag", etag);
         res.set("Last-Modified", new Date(info.mtime).toUTCString());
         res.set("Cache-Control", cacheControlOf(ext));
+        res.set("Accept-Ranges", "bytes");
         // The file is not sent again when the visitor has it already.
         var match = request.headers["if-none-match"];
         if (match && match === etag) {
@@ -261,6 +333,32 @@ function veyServer(ctx) {
           res.status(304);
           res.end();
           return true;
+        }
+        // A part of the file may be asked for, so that a big file may be
+        // played without being read whole.
+        var range = request.headers["range"];
+        if (range) {
+          var wanted = parseRange(range, info.size);
+          if (wanted === false) {
+            res.status(416);
+            res.set("Content-Range", "bytes */" + info.size);
+            res.end();
+            return true;
+          }
+          if (wanted) {
+            res.status(206);
+            res.set(
+              "Content-Range",
+              "bytes " + wanted.start + "-" + wanted.end + "/" + info.size
+            );
+            res.set("Content-Length", String(wanted.end - wanted.start + 1));
+            if (request.method === "HEAD") {
+              res.end();
+              return true;
+            }
+            res.send(readPart(file, wanted.start, wanted.end));
+            return true;
+          }
         }
         res.status(status === undefined ? 200 : status);
         if (request.method === "HEAD") {
@@ -275,17 +373,64 @@ function veyServer(ctx) {
       }
     }
 
+    // The part of a file that is asked for.
+    //
+    // The answer is false when the range is not one that may be given,
+    // and null when there is no range.
+    function parseRange(header, size) {
+      var text = String(header).trim();
+      var match = /^bytes=(\d*)-(\d*)$/.exec(text);
+      if (!match) return false;
+      var from = match[1] === "" ? null : Number(match[1]);
+      var to = match[2] === "" ? null : Number(match[2]);
+      if (from === null && to === null) return false;
+      var start;
+      var end;
+      if (from === null) {
+        // The last parts of the file are asked for.
+        var length = to;
+        start = Math.max(0, size - length);
+        end = size - 1;
+      } else {
+        start = from;
+        end = to === null ? size - 1 : Math.min(to, size - 1);
+      }
+      if (start > end || start >= size) return false;
+      return { start: start, end: end };
+    }
+
+    // A part of a file.
+    function readPart(file, start, end) {
+      var length = end - start + 1;
+      var buffer = Buffer.alloc(length);
+      var opened = fs.openSync(file, "r");
+      try {
+        fs.readSync(opened, buffer, 0, length, start);
+      } finally {
+        fs.closeSync(opened);
+      }
+      return buffer;
+    }
+
     // The address of the visitor.
-    function ipOf(request) {
-      var forwarded = request.headers["x-forwarded-for"];
-      if (forwarded) return String(forwarded).split(",")[0].trim();
+    //
+    // The head of a proxy in front of the server says who the visitor is,
+    // but a visitor may write that head as well. It is only read when the
+    // program says that a proxy is in front of it.
+    function ipOf(request, trust) {
+      if (trust) {
+        var forwarded = request.headers["x-forwarded-for"];
+        if (forwarded) return String(forwarded).split(",")[0].trim();
+      }
       if (request.socket && request.socket.remoteAddress) return request.socket.remoteAddress;
       return "";
     }
 
-    function protocolOf(request) {
-      var forwarded = request.headers["x-forwarded-proto"];
-      if (forwarded) return String(forwarded).split(",")[0].trim();
+    function protocolOf(request, trust) {
+      if (trust) {
+        var forwarded = request.headers["x-forwarded-proto"];
+        if (forwarded) return String(forwarded).split(",")[0].trim();
+      }
       if (request.socket && request.socket.encrypted) return "https";
       return "http";
     }
@@ -309,14 +454,19 @@ function veyServer(ctx) {
           var value = headers[String(name).toLowerCase()];
           return value === undefined ? null : value;
         },
-        ip: ipOf(request),
+        ip: ipOf(request, trustProxy),
         host: headers.host || "",
-        protocol: protocolOf(request)
+        protocol: protocolOf(request, trustProxy)
       };
     }
 
     // A mistake is answered.
     function fail(info, res, err) {
+      if (err && err.badRequest) {
+        res.status(400);
+        res.send("Invalid JSON request body.");
+        return;
+      }
       if (err && err.tooLarge) {
         res.status(413);
         res.send("The request is too large.");
@@ -324,7 +474,7 @@ function veyServer(ctx) {
       }
       // The catch of the mistakes is either the one of the server, or the
       // one of a middle piece.
-      var catcher = errorHandler || ctx.catchMistakes;
+      var catcher = errorHandler || middlewareErrorHandler;
       if (catcher) {
         try {
           catcher(err, info, res);
@@ -335,7 +485,14 @@ function veyServer(ctx) {
       }
       log.error(err);
       res.status(500);
-      res.send("Server error: " + (err && err.message ? err.message : err));
+      // The reason of the mistake is only told to the visitor when the
+      // program says that it may be, because it may tell something about
+      // the machine of the server.
+      if (exposeErrors) {
+        res.send("Server error: " + (err && err.message ? err.message : err));
+      } else {
+        res.send("Server error");
+      }
     }
 
     // The middle pieces are run, one after the other.
@@ -388,8 +545,14 @@ function veyServer(ctx) {
     // The socket of a visitor, which stays open.
     function makeSocket(socket) {
       var buffer = Buffer.alloc(0);
+      // The biggest frame that is read, so that a visitor cannot fill the
+      // memory of the server with one message.
+      var maxFrame = opts.maxFrame === undefined ? 8 * 1024 * 1024 : Number(opts.maxFrame);
       var messageHandlers = [];
       var closeHandlers = [];
+      var messageOpcode = 0;
+      var messageParts = [];
+      var messageLength = 0;
       var open = true;
 
       function frame(opcode, data) {
@@ -431,7 +594,12 @@ function veyServer(ctx) {
           var first = buffer[0];
           var second = buffer[1];
           var opcode = first & 0x0f;
+          var final = (first & 0x80) !== 0;
           var masked = (second & 0x80) !== 0;
+          if ((first & 0x70) !== 0 || !masked) {
+            close();
+            return;
+          }
           var length = second & 0x7f;
           var offset = 2;
           if (length === 126) {
@@ -440,8 +608,23 @@ function veyServer(ctx) {
             offset += 2;
           } else if (length === 127) {
             if (buffer.length < offset + 8) return;
-            length = buffer.readUInt32BE(offset + 4);
+            // The length of a frame is written in eight bytes, so that a
+            // frame may be bigger than four gigabytes. Both halves are
+            // read, or the frame would be cut short.
+            var high = buffer.readUInt32BE(offset);
+            var low = buffer.readUInt32BE(offset + 4);
+            length = high * 4294967296 + low;
             offset += 8;
+          }
+          // A frame that is too big is refused, so that a visitor cannot
+          // fill the memory of the server.
+          if (length > maxFrame) {
+            close();
+            return;
+          }
+          if (opcode >= 0x8 && (!final || length > 125)) {
+            close();
+            return;
           }
           var mask = null;
           if (masked) {
@@ -464,7 +647,39 @@ function veyServer(ctx) {
             if (open) frame(0x8a, payload);
             continue;
           }
-          if (opcode === 0x1 || opcode === 0x2 || opcode === 0x0) {
+          if (opcode === 0x0) {
+            if (!messageOpcode) {
+              close();
+              return;
+            }
+            messageLength += payload.length;
+            if (messageLength > maxFrame) {
+              close();
+              return;
+            }
+            messageParts.push(payload);
+            if (!final) continue;
+            payload = Buffer.concat(messageParts, messageLength);
+            opcode = messageOpcode;
+            messageOpcode = 0;
+            messageParts = [];
+            messageLength = 0;
+          } else if (opcode === 0x1 || opcode === 0x2) {
+            if (messageOpcode) {
+              close();
+              return;
+            }
+            if (!final) {
+              messageOpcode = opcode;
+              messageParts = [payload];
+              messageLength = payload.length;
+              continue;
+            }
+          } else if (opcode !== 0x8 && opcode !== 0xa) {
+            close();
+            return;
+          }
+          if (opcode === 0x1 || opcode === 0x2) {
             var text = payload.toString("utf8");
             for (var j = 0; j < messageHandlers.length; j++) messageHandlers[j](text);
           }
@@ -499,6 +714,21 @@ function veyServer(ctx) {
       headers["Connection"] = "keep-alive";
       headers["X-Accel-Buffering"] = "no";
       response.writeHead(200, headers);
+      // The visitor may go away at any time. When that happens the stream
+      // is closed, so that the server does not wait for it for ever.
+      var ended = function () {
+        if (!open) return;
+        open = false;
+        if (onClose) onClose();
+      };
+      if (response.on) {
+        response.on("close", ended);
+        response.on("error", ended);
+      }
+      if (response.socket) {
+        response.socket.on("close", ended);
+        response.socket.on("error", ended);
+      }
       return {
         send: function (data) {
           if (!open) return;
@@ -512,7 +742,7 @@ function veyServer(ctx) {
         close: function () {
           if (!open) return;
           open = false;
-          response.end();
+          try { response.end(); } catch (ignored) { }
           if (onClose) onClose();
         }
       };
@@ -530,6 +760,35 @@ function veyServer(ctx) {
         } catch (ignored) {
           response.end();
         }
+      }
+    });
+
+    // The times that the server waits for the visitor.
+    if (opts.requestTimeout !== undefined) {
+      serverInstance.requestTimeout = Number(opts.requestTimeout);
+    }
+    if (opts.headersTimeout !== undefined) {
+      serverInstance.headersTimeout = Number(opts.headersTimeout);
+    }
+    if (opts.keepAliveTimeout !== undefined) {
+      serverInstance.keepAliveTimeout = Number(opts.keepAliveTimeout);
+    }
+
+    // A mistake of the server itself must not take the whole process down
+    // without a word. The port may be taken, or the socket may be broken.
+    var serverError = null;
+    var onServerError = null;
+    serverInstance.on("error", function (err) {
+      serverError = err;
+      log.error("the server stopped: " + (err && err.message ? err.message : err));
+      if (err && err.code === "EADDRINUSE") {
+        log.error("the port " + actualPort + " is taken by another program.");
+      }
+      if (onServerError) {
+        try { onServerError(err); } catch (ignored) { }
+      }
+      if (isNode) {
+        try { ctx.nodeModule("node:process").exitCode = 1; } catch (ignored) { }
       }
     });
 
@@ -592,17 +851,56 @@ function veyServer(ctx) {
 
       running += 1;
       res.onFinish(function () { running -= 1; });
-      readBody(request).then(function (body) {
+      // A request that takes too long is refused, so that a handler that
+      // waits for ever does not keep the connection open.
+      if (requestTimeout > 0) {
+        var timer = hostSetTimeout(function () {
+          if (res.isFinished()) return;
+          res.status(408);
+          res.send("The request took too long.");
+        }, requestTimeout);
+        res.onFinish(function () { hostClearTimeout(timer); });
+      }
+      // The files of the folder of the server are served before the
+      // routes, so that a program may put a file of its own in front of
+      // them.
+      if (staticDir && serveStatic(request, res, url.pathname)) return;
+      // The limit of the body of this request.
+      var max = limit;
+      if (found && found.route.limit !== undefined) {
+        max = Math.min(max, found.route.limit);
+      }
+      for (var pieceIndex = 0; pieceIndex < pieces.length; pieceIndex++) {
+        if (pieces[pieceIndex].bodyLimit !== undefined) {
+          max = Math.min(max, pieces[pieceIndex].bodyLimit);
+        }
+      }
+      // A body that says how big it is is refused before it is read, so
+      // that a large body never takes the memory of the server.
+      var declared = request.headers["content-length"];
+      if (declared !== undefined && Number(declared) > max) {
+        var tooBig = veyError("the request is too large");
+        tooBig.tooLarge = true;
+        fail(makeRequest(request, url, found ? found.params : {}), res, tooBig);
+        return;
+      }
+      readBody(request, max).then(function (body) {
         var info = makeRequest(request, url, found ? found.params : {});
         info.body = body.parsed;
         info.text = body.raw;
         info.files = body.files;
-        var store = sessions.open(info.cookies);
+        var store = sessions.open(info.cookies, info.protocol === "https");
+        // The cookie of the session is written just before the body, so
+        // that it is there even when the handler ends the answer by itself.
+        res.beforeFinish(function () {
+          var header = sessions.header(store);
+          if (header) res.set("Set-Cookie", header);
+        });
         sessions.run(store, function () {
           runChain(pieces, 0, info, res, function () {
             if (res.isFinished()) return;
             // The question of the methods of an address is answered.
-            if (method === "OPTIONS") {
+            if (method === "OPTIONS" && !found) {
               res.set("Allow", allowedMethods(url.pathname));
               res.status(204);
               res.end();
@@ -623,8 +921,6 @@ function veyServer(ctx) {
             }
             Promise.resolve(found.route.handler(info, res)).then(function (result) {
               if (res.isFinished()) return;
-              var header = sessions.header(store);
-              if (header) res.set("Set-Cookie", header);
               res.send(result);
             }).catch(function (err) {
               fail(info, res, err);
@@ -671,10 +967,21 @@ function veyServer(ctx) {
       },
       // A middle piece of the server.
       use: function (path, fn) {
+        var piece = typeof path === "function" ? path : fn;
+        if (piece && piece.errorHandler) {
+          middlewareErrorHandler = piece.errorHandler;
+        }
         if (typeof path === "function") {
           middlewares.push({ path: null, fn: path });
         } else {
           middlewares.push({ path: String(path), fn: fn });
+        }
+        // A middle piece that asks for a smaller body makes the limit of
+        // the whole server smaller, so that the body is not read at all
+        // when it is too large.
+        var asked = fn && fn.bodyLimit;
+        if (typeof asked === "number" && isFinite(asked) && asked < limit) {
+          limit = asked;
         }
         return this;
       },
@@ -683,8 +990,13 @@ function veyServer(ctx) {
         errorHandler = handler;
         return this;
       },
-      static: function (dir) {
+      static: function (dir, options) {
+        var opts = options || {};
         staticDir = pathModule.resolve(dir);
+        staticIndex = opts.index === undefined ? "index.html" : String(opts.index);
+        if (opts.maxAge !== undefined) {
+          staticMaxAge = Number(opts.maxAge);
+        }
         return this;
       },
       notFound: function (handler) {
@@ -706,6 +1018,16 @@ function veyServer(ctx) {
         });
         return this;
       },
+      // The mistake of the server is given to the program, so that it may
+      // answer it in its own way.
+      onError: function (fn) {
+        onServerError = fn;
+        return this;
+      },
+      // The mistake of the server, when there was one.
+      lastError: function () {
+        return serverError;
+      },
       // The port the server listens on.
       port: function () {
         var address = serverInstance.address();
@@ -717,6 +1039,10 @@ function veyServer(ctx) {
           for (var i = 0; i < sockets.length; i++) sockets[i].close();
           for (var j = 0; j < streams.length; j++) streams[j].close();
           var closed = false;
+          // The time that the requests that are running may take.
+          var deadline = Date.now() + (opts.shutdownTimeout === undefined
+            ? 10000
+            : Number(opts.shutdownTimeout));
           function finish() {
             if (closed) return;
             closed = true;
@@ -726,6 +1052,14 @@ function veyServer(ctx) {
             if (running === 0) {
               serverInstance.close(finish);
               if (serverInstance.closeIdleConnections) serverInstance.closeIdleConnections();
+              if (serverInstance.closeAllConnections) serverInstance.closeAllConnections();
+              return;
+            }
+            // The requests that are running take too long, so the server
+            // is closed anyway.
+            if (Date.now() > deadline) {
+              if (serverInstance.closeAllConnections) serverInstance.closeAllConnections();
+              serverInstance.close(finish);
               return;
             }
             hostSetTimeout(wait, 20);

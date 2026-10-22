@@ -132,6 +132,16 @@ function veyRouter(ctx) {
     return show(parsed.pathname, parsed.search);
   }
 
+  // The route that fits the address of the page is shown.
+  //
+  // The page may be put out after the route is written, so the route is
+  // shown again when the page is there.
+  function showRoute() {
+    var location = (doc && doc.defaultView && doc.defaultView.location) || scope.location;
+    if (!location) return null;
+    return show(location.pathname, location.search);
+  }
+
   // The route that is shown now, with its parameters.
   function currentRoute() {
     return {
@@ -148,6 +158,7 @@ function veyRouter(ctx) {
 
   ctx.route = route;
   ctx.navigate = navigate;
+  ctx.showRoute = showRoute;
   ctx.currentRoute = currentRoute;
   ctx.routeParams = routeParams;
 

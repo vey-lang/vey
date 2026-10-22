@@ -13,20 +13,28 @@ function veyHighlight(ctx) {
   // The names of the types of the language.
   var types = ["number", "string", "bool", "any", "null", "void", "never"];
 
-  // The tags of HTML, which are the names that the markup of a program may
-  // use.
+  // The tags of HTML and of SVG, which are the names that the markup of a
+  // program may use.
   //
   // The list is the one of the parser, so that a name that is not a tag of
-  // HTML is never painted as one.
+  // the markup is never painted as one.
   var htmlTags = (
-    "a abbr address article aside audio b bdi bdo blockquote br button canvas " +
-    "caption cite code col colgroup data datalist dd del details dfn dialog " +
-    "div dl dt em fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 " +
-    "header hgroup hr html head i iframe img input ins kbd label legend li " +
-    "link main mark menu meta meter nav noscript ol optgroup option output p " +
-    "picture pre progress q s samp script section select small span strong " +
-    "style sub summary sup table tbody td textarea tfoot th thead time tr u " +
-    "ul var video wbr title"
+    "a abbr address animate animateMotion animateTransform article aside audio " +
+    "b bdi bdo blockquote br button canvas caption circle cite clipPath code " +
+    "col colgroup data datalist dd defs del desc details dfn dialog div dl dt " +
+    "ellipse em feBlend feColorMatrix feComponentTransfer feComposite " +
+    "feConvolveMatrix feDiffuseLighting feDisplacementMap feDistantLight " +
+    "feDropShadow feFlood feFuncA feFuncB feFuncG feFuncR feGaussianBlur " +
+    "feImage feMerge feMergeNode feMorphology feOffset fePointLight " +
+    "feSpecularLighting feSpotLight feTile feTurbulence fieldset figcaption " +
+    "figure filter footer foreignObject form g h1 h2 h3 h4 h5 h6 head header " +
+    "hgroup hr html i iframe image img input ins kbd label legend li line " +
+    "linearGradient link main mark marker mask menu meta metadata meter mpath " +
+    "nav noscript ol optgroup option output p path pattern picture polygon " +
+    "polyline pre progress q radialGradient rect s samp script section select " +
+    "set slot small span stop strong style sub summary sup svg switch symbol table " +
+    "tbody td text textPath textarea tfoot th thead time title tr tspan u ul use " +
+    "var video view wbr"
   ).split(" ");
 
   // The marks of the language that are not names.

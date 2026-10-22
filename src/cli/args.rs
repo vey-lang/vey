@@ -19,6 +19,8 @@ pub(crate) struct ParsedArgs {
     pub(crate) target: Option<String>,
     /// The files are written even when they are there.
     pub(crate) write: bool,
+    /// The command writes over what is there.
+    pub(crate) force: bool,
 }
 
 impl ParsedArgs {
@@ -36,6 +38,7 @@ impl ParsedArgs {
             template: None,
             target: None,
             write: false,
+            force: false,
         }
     }
 }
@@ -65,6 +68,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             "--template" => parsed.template = Some(value_of(args, &mut index, arg)?),
             "--target" => parsed.target = Some(value_of(args, &mut index, arg)?),
             "--write" => parsed.write = true,
+            "--force" => parsed.force = true,
             _ => {
                 if let Some(value) = arg.strip_prefix("--out=") {
                     parsed.output = Some(value.to_string());
@@ -103,7 +107,6 @@ pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 pub(crate) fn wants_force(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--force")
 }
-
 /// The value of an option.
 fn value_of(args: &[String], index: &mut usize, option: &str) -> Result<String, String> {
     *index += 1;

@@ -19,7 +19,9 @@ function veyMap(ctx) {
       return map;
     };
     map.get = function (key) {
-      return store.has(key) ? store.get(key) : undefined;
+      // A key that is not there is `null`, the way the rest of the runtime
+      // says it, and not `undefined`.
+      return store.has(key) ? store.get(key) : null;
     };
     map.has = function (key) {
       return store.has(key);

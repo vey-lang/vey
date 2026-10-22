@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use vey::compiler::compile_project;
 
 use crate::cli::args::{parse_args, ParsedArgs};
+use crate::cli::config::Config;
 use crate::cli::entry::{entry_from, project_root};
 use crate::cli::output::{node_script, print_command_help, replace_extension, report, report_warnings};
 use crate::cli::site::write_site;
@@ -43,12 +44,22 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
     };
 
     let root = project_root(&entry);
+    // The settings of the project may say where the site is written and
+    // what its title is.
+    let config = Config::find(&root);
     let output = parsed
         .output
         .map(PathBuf::from)
+        .or_else(|| config.out.as_ref().map(PathBuf::from))
         .unwrap_or_else(|| root.join(OUTPUT_FOLDER));
+    let title = parsed.title.clone().or_else(|| config.title.clone());
 
-    match write_site(&entry, &output, parsed.title.as_deref()) {
+    match write_site(
+        &entry,
+        &output,
+        title.as_deref(),
+        parsed.force,
+    ) {
         Ok(report) => {
             println!(
                 "built {} page(s) into {}",
@@ -87,8 +98,13 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
 /// Build the site of a project into a folder.
 ///
 /// The command returns 1 when a page could not be built.
-pub(crate) fn build_site(entry: &std::path::Path, output: &std::path::Path, title: Option<&str>) -> i32 {
-    match write_site(entry, output, title) {
+pub(crate) fn build_site(
+    entry: &std::path::Path,
+    output: &std::path::Path,
+    title: Option<&str>,
+    force: bool,
+) -> i32 {
+    match write_site(entry, output, title, force) {
         Ok(report) => {
             for page in &report.pages {
                 println!("  {}", output.join(page).display());
@@ -139,6 +155,17 @@ pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
         .output
         .clone()
         .unwrap_or_else(|| replace_extension(&file.to_string_lossy(), "cjs"));
+    // The folder the file goes into may not be there yet, so it is made.
+    // `vey build --node -o .dist/server.cjs` is the way a container is
+    // built, and `.dist` does not exist before the site is built.
+    if let Some(parent) = std::path::Path::new(&output).parent() {
+        if !parent.as_os_str().is_empty() {
+            if let Err(err) = fs::create_dir_all(parent) {
+                eprintln!("cannot create {}: {}", parent.display(), err);
+                return 1;
+            }
+        }
+    }
     if let Err(err) = fs::write(&output, node_script(&bundle)) {
         eprintln!("cannot write {}: {}", output, err);
         return 1;

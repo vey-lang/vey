@@ -171,6 +171,11 @@ impl Codegen {
         if self.module {
             self.emit("const __exports = {};");
         }
+        // The names of the top level are known before the code is written,
+        // so that a function may use a name that is written below it. A
+        // name of the top level hides the helper of the runtime with the
+        // same name, the way the checker says it does.
+        self.declare_top_level(program);
         for stmt in &program.body {
             if matches!(stmt, Stmt::Use(_)) {
                 self.gen_stmt(stmt)?;
@@ -198,6 +203,34 @@ impl Codegen {
             self.emit("return __exports;");
         }
         Ok(())
+    }
+
+    /// The names of the top level of the program.
+    ///
+    /// They are known before the body is written, because a function is
+    /// hoisted: it may use a value that is written below it, and a name
+    /// that is written below it still hides the helper of the runtime.
+    fn declare_top_level(&mut self, program: &Program) {
+        for stmt in &program.body {
+            match stmt {
+                Stmt::Use(decl) => {
+                    // A stylesheet has no name of its own.
+                    if !decl.path.ends_with(".css") {
+                        self.declare(&decl.alias);
+                    }
+                }
+                Stmt::Var(decl) => {
+                    for (name, _) in decl.pattern.bindings() {
+                        self.declare(name);
+                    }
+                }
+                Stmt::Fn(decl) => self.declare(&decl.name),
+                Stmt::Component(decl) => self.declare(&decl.name),
+                Stmt::Enum(decl) => self.declare(&decl.name),
+                Stmt::Impl(decl) => self.declare(&decl.type_name),
+                _ => {}
+            }
+        }
     }
 
     /// Whether a declaration is written into the bundle.
@@ -334,6 +367,30 @@ impl Codegen {
                      ? __veyRest \
                      : (__veyFirst === undefined ? [] : [__veyFirst, ...__veyRest]);",
                 );
+                // The values of the component are kept, so that they are the
+                // same when the page is written again.
+                for (index, stmt) in decl.body.iter().enumerate() {
+                    match stmt {
+                        Stmt::Var(var) => {
+                            let pattern = self.gen_binding_pattern(&var.pattern)?;
+                            let init = match &var.init {
+                                Some(expr) => {
+                                    let expr = self.gen_expr(expr)?;
+                                    format!("function () {{ return {}; }}", expr)
+                                }
+                                None => "function () { return undefined; }".to_string(),
+                            };
+                            self.emit(&format!(
+                                "const {} = V.__state({}, {});",
+                                pattern, index, init
+                            ));
+                            for (name, _) in var.pattern.bindings() {
+                                self.declare(name);
+                            }
+                        }
+                        other => self.gen_stmt(other)?,
+                    }
+                }
                 for (index, param) in decl.params.iter().enumerate() {
                     match &param.pattern {
                         BindingPattern::Name { name, .. } => {

@@ -8,6 +8,7 @@ use crate::types::core::{rest_element_type, union, FunctionType, ObjectField, Ty
 use crate::types::rules::{assignable, substitute};
 use crate::VeyError;
 
+use super::builtins::{signal_type, store_type};
 use super::checker::TypeChecker;
 use super::helpers::{name_alias, qualified_type, type_argument_label};
 
@@ -308,6 +309,7 @@ impl TypeChecker<'_> {
                     type_params: Vec::new(),
                     param_names: Vec::new(),
                     defaults: vec![false; count],
+                    loose: false,
                 }))
             }
         }
@@ -379,6 +381,7 @@ impl TypeChecker<'_> {
                             type_params: Vec::new(),
                             param_names: Vec::new(),
                             defaults,
+                            loose: false,
                         }),
                         optional: false,
                     });
@@ -386,6 +389,28 @@ impl TypeChecker<'_> {
             }
         }
         Ok(Type::Interface(name.to_string(), fields))
+    }
+
+    /// The one type argument of a type that takes one.
+    fn one_type_argument(
+        &self,
+        name: &str,
+        args: &[TypeExpr],
+        pos: crate::lexer::Pos,
+        stack: &mut Vec<String>,
+        vars: &HashMap<String, Type>,
+    ) -> Result<Type, VeyError> {
+        if args.len() != 1 {
+            return Err(self.error(
+                pos,
+                format!(
+                    "type '{}' expects 1 type argument, got {}",
+                    name,
+                    args.len()
+                ),
+            ));
+        }
+        self.resolve_type_with(&args[0], stack, vars)
     }
 
     /// The types of the language that take type arguments.
@@ -423,6 +448,16 @@ impl TypeChecker<'_> {
                 let inner = self.resolve_type_with(&args[0], stack, vars)?;
                 // A value that may be there is the value or nothing.
                 Ok(Some(union(vec![inner, Type::Null])))
+            }
+            // The state of a page: a value that tells when it changes, and a
+            // state that is shared between the parts of a page.
+            "Signal" => {
+                let inner = self.one_type_argument(name, args, pos, stack, vars)?;
+                Ok(Some(signal_type(inner)))
+            }
+            "Store" => {
+                let inner = self.one_type_argument(name, args, pos, stack, vars)?;
+                Ok(Some(store_type(inner)))
             }
             "Result" => {
                 if args.len() != 2 {

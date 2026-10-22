@@ -14,7 +14,10 @@ function veyCollections(ctx) {
   }
 
   function find(list, fn) {
-    return toList(list).find(function (item, index) { return fn(item, index); });
+    var found = toList(list).find(function (item, index) { return fn(item, index); });
+    // A value that is not there is `null`, the way the rest of the runtime
+    // says it, and not `undefined`.
+    return found === undefined ? null : found;
   }
 
   function defaultCompare(a, b) {

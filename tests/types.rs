@@ -730,3 +730,399 @@ fn an_arrow_may_name_its_type_parameters() {
         "let identity = <T>(value: T) => value\nlet n: number = identity(42)\nlet s: string = identity(\"text\")\n",
     );
 }
+
+#[test]
+fn a_function_that_waits_gives_back_a_promise() {
+    // The type of the value is the type that is written, and the function
+    // gives back a promise of it.
+    check_ok(
+        "async-return",
+        r#"
+fn load() -> number {
+  await sleep(10)
+  return 1
+}
+let n: number = await load()
+"#,
+    );
+    // The promise may also be written by hand.
+    check_ok(
+        "async-return-written",
+        r#"
+fn load() -> Promise<number> {
+  await sleep(10)
+  return 1
+}
+let n: number = await load()
+"#,
+    );
+}
+
+#[test]
+fn the_value_of_an_await_is_the_value_that_will_be_there() {
+    let error = check_err(
+        "async-value",
+        r#"
+fn load() -> number {
+  await sleep(10)
+  return 1
+}
+let n: string = await load()
+"#,
+    );
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn the_helpers_that_wait_give_back_a_promise() {
+    let error = check_err(
+        "async-sleep",
+        r#"
+fn main() {
+  let n: number = await sleep(10)
+  print(n)
+}
+"#,
+    );
+    assert!(error.contains("expected number, found void"), "{error}");
+
+    check_ok(
+        "async-http",
+        r#"
+fn main() {
+  let answer = await http.get("https://example.com")
+  let status: number = answer.status
+  print(status)
+}
+"#,
+    );
+}
+
+#[test]
+fn an_arrow_that_waits_gives_back_a_promise() {
+    check_ok(
+        "async-arrow",
+        r#"
+fn main() {
+  let load = () => await sleep(10)
+  let n: void = await load()
+  print(n)
+}
+"#,
+    );
+}
+
+#[test]
+fn a_union_of_the_variants_of_an_enum_may_be_taken_apart() {
+    check_ok(
+        "union-exhaustive",
+        r#"
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+fn name(c: Color | null) -> string {
+  return match c {
+    Color.Red => "red"
+    Color.Green => "green"
+    Color.Blue => "blue"
+    null => "none"
+  }
+}
+"#,
+    );
+    // A variant that is not there is named.
+    let error = check_err(
+        "union-missing",
+        r#"
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+fn name(c: Color | null) -> string {
+  return match c {
+    Color.Red => "red"
+    Color.Green => "green"
+    null => "none"
+  }
+}
+"#,
+    );
+    assert!(error.contains("missing: Color.Blue"), "{error}");
+}
+
+#[test]
+fn a_type_argument_that_is_given_by_hand_is_checked() {
+    // A type parameter that is settled by the value that is returned is
+    // not generic any more, so a type argument that does not fit is a
+    // mistake and not something that is ignored.
+    let error = check_err(
+        "settled-type-argument",
+        r#"
+fn parse<T>(text: string) -> T { return num(text) }
+let n: string = parse<string>("42")
+"#,
+    );
+    assert!(error.contains("type argument 'T' expects number, found string"), "{error}");
+}
+
+#[test]
+fn a_callback_knows_the_type_of_what_it_receives() {
+    check_ok(
+        "contextual-callback",
+        r#"
+fn each(items: [string], f: (string) -> void) {
+  for item in items { f(item) }
+}
+fn main() {
+  each(["a", "b"], fn(item) {
+    let n: number = item.length
+    print(n)
+  })
+}
+"#,
+    );
+    let error = check_err(
+        "contextual-callback-wrong",
+        r#"
+fn each(items: [string], f: (string) -> void) {
+  for item in items { f(item) }
+}
+fn main() {
+  each(["a"], fn(item) {
+    let n: number = item
+    print(n)
+  })
+}
+"#,
+    );
+    assert!(error.contains("expected number, found string"), "{error}");
+}
+
+#[test]
+fn a_dictionary_gives_the_type_of_its_values() {
+    check_ok(
+        "dict-member",
+        r#"
+fn f(d: {[string]: number}) -> number {
+  return d["a"] + d.b
+}
+"#,
+    );
+    // The key of a dictionary has to be of the type that it says.
+    let error = check_err(
+        "dict-key",
+        r#"
+fn f(d: {[string]: number}) -> number {
+  return d[true]
+}
+"#,
+    );
+    assert!(error.contains("expected string, found bool"), "{error}");
+}
+
+#[test]
+fn a_value_of_an_unknown_type_is_narrowed_by_is() {
+    check_ok(
+        "is-unknown",
+        r#"
+fn show(value: unknown) -> string {
+  if value is string { return value }
+  if value is symbol { return "a symbol" }
+  if value is bigint { return "a bigint" }
+  if value is void { return "nothing" }
+  return "another one"
+}
+"#,
+    );
+    // A kind that the value cannot be is a mistake, not a silent no.
+    let error = check_err(
+        "is-impossible",
+        r#"
+fn show(text: string) -> bool {
+  return text is number
+}
+"#,
+    );
+    assert!(error.contains("expected number, found string"), "{error}");
+}
+
+#[test]
+fn a_constant_of_a_value_that_may_be_nothing_keeps_that() {
+    check_ok(
+        "const-union",
+        r#"
+type User = { name: string }
+fn find() -> User | null { return null }
+const user = find()
+if user != null { print(user.name) }
+"#,
+    );
+    // The type is kept, so a member that the value does not have is a
+    // mistake.
+    let error = check_err(
+        "const-union-member",
+        r#"
+type User = { name: string }
+fn find() -> User | null { return null }
+const user = find()
+print(user.age)
+"#,
+    );
+    assert!(error.contains("has no field 'age'"), "{error}");
+}
+
+#[test]
+fn a_field_that_an_interface_does_not_have_is_named() {
+    let error = check_err(
+        "interface-extra-field",
+        r#"
+interface Point { x: number }
+fn show(point: Point) -> number { return point.x }
+show({ x: 1, y: 2 })
+"#,
+    );
+    assert!(error.contains("'y' is not a field of Point"), "{error}");
+}
+
+#[test]
+fn a_component_may_be_held_in_a_name() {
+    check_ok(
+        "component-alias",
+        r#"
+component Card(title) {
+  div.card { title }
+}
+
+let Box = Card
+
+component App() {
+  let Also = Card
+  div {
+    Box("one")
+    Also("two")
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn a_signal_is_typed_by_the_value_it_is_given() {
+    check_ok(
+        "signal-typed",
+        r#"
+const count = signal(0)
+count.set(1)
+let shown: number = count.value
+let back: number = count.update(fn(value) { return value + 1 })
+let read: number = count.peek()
+count.subscribe(fn(value) { print(value) })
+"#,
+    );
+    let error = check_err(
+        "signal-wrong-set",
+        r#"
+const count = signal(0)
+count.set("text")
+"#,
+    );
+    assert!(
+        error.contains("argument 1 expects number, found string"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_signal_may_be_given_its_type_argument() {
+    check_ok(
+        "signal-explicit",
+        r#"
+let count: Signal<number> = signal(0)
+count.set(1)
+"#,
+    );
+    let error = check_err(
+        "signal-explicit-wrong",
+        r#"
+let count: Signal<number> = signal("text")
+"#,
+    );
+    assert!(error.contains("Signal"), "{error}");
+}
+
+#[test]
+fn a_signal_takes_the_way_two_values_are_compared() {
+    check_ok(
+        "signal-options",
+        r#"
+const count = signal(0, { equals: fn(a, b) { return a == b } })
+const deep = signal({ a: 1 }, { equals: "deep" })
+print(count.value, deep.value)
+"#,
+    );
+}
+
+#[test]
+fn a_store_is_typed_by_the_state_it_is_given() {
+    check_ok(
+        "store-typed",
+        r#"
+const state = store({ a: 1 })
+let a: number = state.value.a
+state.set("a", 2)
+state.replace({ a: 3 })
+state.update(fn(now) { return { a: now.a + 1 } })
+let read: number = state.peek().a
+"#,
+    );
+    let error = check_err(
+        "store-wrong-replace",
+        r#"
+const state = store({ a: 1 })
+state.replace({ a: "text" })
+"#,
+    );
+    assert!(
+        error.contains("argument 1 expects { a: number }, found { a: string }"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_store_may_be_asked_for_by_its_name_alone() {
+    check_ok(
+        "store-by-name",
+        r#"
+const shared = store("shared", { a: 1 })
+let a: number = shared.value.a
+const later = store("shared")
+print(later.value)
+"#,
+    );
+}
+
+#[test]
+fn a_computed_keeps_the_type_of_the_value_it_returns() {
+    check_ok(
+        "computed-typed",
+        r#"
+const count = signal(1)
+const total = computed(fn() { return count.value + 1 })
+let shown: number = total.value
+total.dispose()
+"#,
+    );
+    let error = check_err(
+        "computed-wrong-value",
+        r#"
+const total = computed(fn() { return "text" })
+let shown: number = total.value
+"#,
+    );
+    assert!(error.contains("expected number, found string"), "{error}");
+}

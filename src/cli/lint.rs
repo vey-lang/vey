@@ -14,8 +14,9 @@ use vey::parser::Parser;
 use vey::suggest::edit_distance;
 
 use crate::cli::args::parse_args;
+use crate::cli::config::Config;
 use crate::cli::entry::collect_tool_files;
-use crate::cli::output::print_command_help;
+use crate::cli::output::{print_command_help, report};
 
 /// The length of a line that is still easy to read.
 const MAX_LINE: usize = 100;
@@ -51,6 +52,11 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
         return 1;
     }
 
+    // The length of a line that is still easy to read may be given by the
+    // settings of the project.
+    let config = Config::find(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let max_line = config.max_line.unwrap_or(MAX_LINE);
+
     let mut found = 0;
     for file in &files {
         let source = match fs::read_to_string(file) {
@@ -64,13 +70,13 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
 
         // The lines that are too long.
         for (index, line) in source.lines().enumerate() {
-            if line.chars().count() > MAX_LINE {
+            if line.chars().count() > max_line {
                 println!(
                     "{}:{}:1: the line is {} characters long, and {} is the most that is easy to read",
                     label,
                     index + 1,
                     line.chars().count(),
-                    MAX_LINE
+                    max_line
                 );
                 found += 1;
             }
@@ -79,14 +85,14 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
         let mut parser = match Parser::new(&source, &label) {
             Ok(parser) => parser,
             Err(err) => {
-                eprintln!("{}", err);
+                report(&err);
                 return 1;
             }
         };
         let program = match parser.parse_program() {
             Ok(program) => program,
             Err(err) => {
-                eprintln!("{}", err);
+                report(&err);
                 return 1;
             }
         };
@@ -101,10 +107,13 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
 
     if found == 0 {
         println!("no smells were found");
+        0
     } else {
         println!("{} smell(s) were found", found);
+        // The command fails when there is a smell, so that a pipeline that
+        // runs it notices the program that has one.
+        1
     }
-    0
 }
 
 /// The files that are named, or every file of the project.

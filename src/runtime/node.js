@@ -8,6 +8,33 @@ function veyNode(ctx) {
   var utf8Decode = ctx.utf8Decode;
   var veyError = ctx.veyError;
 
+  // Whether two texts are the same, in the same time.
+  //
+  // The time an answer takes must not tell how much of a secret was
+  // right, so the texts are compared without leaving early.
+  function sameText(a, b) {
+    var left = String(a);
+    var right = String(b);
+    if (left.length !== right.length) return false;
+    var module_ = nodeModule("node:crypto");
+    if (module_ && module_.timingSafeEqual) {
+      try {
+        var one = Buffer.from(left, "utf8");
+        var two = Buffer.from(right, "utf8");
+        if (one.length !== two.length) return false;
+        return module_.timingSafeEqual(one, two);
+      } catch (err) {
+        // The host has no safe comparison, so the texts are compared one
+        // by one.
+      }
+    }
+    var diff = 0;
+    for (var i = 0; i < left.length; i++) {
+      diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+    }
+    return diff === 0;
+  }
+
   function env(name, fallback) {
     if (!isNode) {
       // The other helpers of Node say so, and so does this one.
@@ -307,7 +334,9 @@ function veyNode(ctx) {
         }
       }
       var expected = module_.createHmac("sha256", secret).update(text).digest("hex");
-      return expected === given;
+      // The two texts are compared in the same time, so that the time the
+      // answer takes does not tell how much of the signature was right.
+      return sameText(expected, given);
     },
 
     // A pair of keys, one that is open and one that is not.
@@ -325,6 +354,28 @@ function veyNode(ctx) {
       };
     }
   };
+
+  // The work that is done when the program is told to stop.
+  //
+  // The work is done when the program is asked to stop, so that a server
+  // may take the requests that are running and let the connections go.
+  function onShutdown(fn) {
+    if (!isNode) return function () { };
+    var proc = nodeModule("node:process");
+    var handler = function () {
+      try {
+        fn();
+      } catch (err) {
+        log.error(err);
+      }
+    };
+    proc.on("SIGINT", handler);
+    proc.on("SIGTERM", handler);
+    return function () {
+      proc.off("SIGINT", handler);
+      proc.off("SIGTERM", handler);
+    };
+  }
 
   // The files that are smaller when they are compressed.
   var zlib = {
@@ -389,6 +440,7 @@ function veyNode(ctx) {
   ctx.require = require;
   ctx.hash = hash;
   ctx.process = nodeProcess;
+  ctx.onShutdown = onShutdown;
   ctx.crypto = crypto;
   ctx.zlib = zlib;
 
@@ -401,5 +453,6 @@ function veyNode(ctx) {
     process: nodeProcess,
     crypto: crypto,
     zlib: zlib,
+    onShutdown: onShutdown,
   };
 }

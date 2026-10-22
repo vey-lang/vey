@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::lexer::Pos;
-use crate::types::builtins::builtin_type;
+use crate::types::builtins::{builtin_type, is_builtin_type};
 use crate::types::ModuleTypeEnv;
 use crate::types::core::{
     union, without_empty, without_nullish, EnumInfo, EnumVariantInfo, FunctionType, ObjectField, Type,
@@ -17,8 +17,8 @@ use crate::VeyError;
 
 use super::checker::TypeChecker;
 use super::helpers::{
-    argument_label, literal_number, operand_type, place_path, qualified_type, set_object_field,
-    type_argument_label,
+    argument_label, extra_field, literal_number, operand_type, place_path, qualified_type,
+    set_object_field, type_argument_label,
 };
 use crate::types::helpers::expr_has_yield;
 use crate::parser::exprs::NAMED_MARKER;
@@ -236,6 +236,8 @@ impl TypeChecker<'_> {
                 let mut covered = std::collections::HashSet::new();
                 // The two values of a bool that the arms take.
                 let mut covered_bools = std::collections::HashSet::new();
+                // The values that the arms take, by the way they are shown.
+                let mut covered_values = std::collections::HashSet::new();
                 let mut has_wildcard = false;
                 for arm in arms {
                     self.push_scope();
@@ -289,6 +291,7 @@ impl TypeChecker<'_> {
                                     if let Expr::Bool(value, _) = expr {
                                         covered_bools.insert(*value);
                                     }
+                                    covered_values.insert(literal.display());
                                 }
                             }
                             _ => {
@@ -370,13 +373,69 @@ impl TypeChecker<'_> {
                                 .iter()
                                 .map(|item| item.display())
                                 .collect();
-                            return Err(self.error(
-                                subject.pos(),
-                                format!(
-                                    "match on '{}' is not exhaustive: a name or a _ is needed",
-                                    parts.join(" | ")
-                                ),
-                            ));
+                            // A union of the variants of an enum may be
+                            // taken apart by the variants, so the match may
+                            // be exhaustive. A value of another kind cannot
+                            // be taken apart, so the match needs a name or a
+                            // _.
+                            let mut missing: Vec<String> = Vec::new();
+                            let mut whole = false;
+                            for item in items {
+                                match item {
+                                    Type::Enum(name, variant) => {
+                                        let key = format!("{}.{}", name, variant);
+                                        if !covered.contains(&key) {
+                                            missing.push(key);
+                                        }
+                                    }
+                                    Type::EnumUnion(name) => {
+                                        match self.enum_info(name) {
+                                            Some(info) => {
+                                                for variant in &info.variants {
+                                                    let key =
+                                                        format!("{}.{}", name, variant.name);
+                                                    if !covered.contains(&key) {
+                                                        missing.push(key);
+                                                    }
+                                                }
+                                            }
+                                            None => whole = true,
+                                        }
+                                    }
+                                    Type::Bool => {
+                                        if !covered_bools.contains(&true)
+                                            || !covered_bools.contains(&false)
+                                        {
+                                            missing.push("bool".to_string());
+                                        }
+                                    }
+                                    Type::Null => {
+                                        if !covered_values.contains("null") {
+                                            missing.push("null".to_string());
+                                        }
+                                    }
+                                    _ => whole = true,
+                                }
+                            }
+                            if whole {
+                                return Err(self.error(
+                                    subject.pos(),
+                                    format!(
+                                        "match on '{}' is not exhaustive: a name or a _ is needed",
+                                        parts.join(" | ")
+                                    ),
+                                ));
+                            }
+                            if !missing.is_empty() {
+                                return Err(self.error(
+                                    subject.pos(),
+                                    format!(
+                                        "match on '{}' is not exhaustive, missing: {}",
+                                        parts.join(" | "),
+                                        missing.join(", ")
+                                    ),
+                                ));
+                            }
                         }
                         _ => {}
                     }
@@ -465,7 +524,11 @@ impl TypeChecker<'_> {
                     ));
                 }
                 let wanted = self.resolve_type(ty)?;
-                if !self.fits(&actual, &wanted) && !self.fits(&wanted, &actual) {
+                // A value whose type is not known may be of any kind, so
+                // the check is the way to find out which one it is.
+                let open = matches!(actual, Type::Any | Type::Unknown | Type::Var(_))
+                    || matches!(wanted, Type::Any | Type::Unknown);
+                if !open && !self.fits(&actual, &wanted) && !self.fits(&wanted, &actual) {
                     return Err(self.type_error(*pos, &actual, &wanted));
                 }
                 Ok(Type::Bool)
@@ -764,7 +827,54 @@ impl TypeChecker<'_> {
                 }
                 self.infer_expr(expr)
             }
+            // A function that is given to another one takes the types of
+            // its parameters from it, so that a callback knows what it
+            // receives.
+            Expr::Fn(params, body, ret_ann, pos) => {
+                let (ret, param_types) = match expected {
+                    Some(Type::Function(wanted)) => {
+                        self.check_function_against(params, body, ret_ann.as_ref(), *pos, Some(&wanted.params))?
+                    }
+                    _ => self.check_function(params, body, ret_ann.as_ref(), *pos)?,
+                };
+                let type_params = &[];
+                self.function_type_from_parts(params, ret, ret_ann.is_some(), type_params, &param_types)
+            }
+            Expr::Arrow(type_params, params, body, ret_ann, pos) => {
+                // The type parameters of the arrow are in scope while its
+                // body is checked.
+                self.push_type_params(type_params)?;
+                let result = self
+                    .check_arrow_against(
+                        params,
+                        body,
+                        ret_ann.as_ref(),
+                        *pos,
+                        Self::expected_params(expected),
+                    )
+                    .and_then(|(ret, param_types)| {
+                        // The type of the arrow is made while its type
+                        // parameters are still in scope.
+                        self.function_type_from_parts(
+                            params,
+                            ret,
+                            ret_ann.is_some(),
+                            type_params,
+                            &param_types,
+                        )
+                    });
+                self.pop_type_params();
+                result
+            }
             other => self.infer_expr(other),
+        }
+    }
+
+    /// The types of the parameters of a function that is expected.
+    fn expected_params(expected: Option<&Type>) -> Option<&[Type]> {
+        match expected {
+            Some(Type::Function(wanted)) => Some(&wanted.params),
+            _ => None,
         }
     }
 
@@ -913,7 +1023,13 @@ impl TypeChecker<'_> {
                         other => other.clone(),
                     };
                     let mut trial = subst.clone();
-                    if unify_types(arg, &expected, &mut trial) {
+                    // A parameter that is not a type of its own has to take
+                    // the argument as it is written: an object that is given
+                    // to it may not hold fields that it does not have.
+                    let general = has_type_var(&expected);
+                    if unify_types(arg, &expected, &mut trial)
+                        && (general || self.fits(arg, &expected))
+                    {
                         subst = trial;
                         // A type that has functions of its own is only made
                         // by its constructor, which gives the value those
@@ -928,6 +1044,14 @@ impl TypeChecker<'_> {
                             ));
                         }
                     } else if !self.fits(arg, &expected) {
+                        // A field that the parameter does not have is named,
+                        // because it is the mistake that is easy to make.
+                        if let Some(field) = extra_field(arg, &expected) {
+                            return Err(self.error(
+                                pos,
+                                format!("'{}' is not a field of {}", field, expected.display()),
+                            ));
+                        }
                         return Err(self.error(
                             pos,
                             format!(
@@ -973,6 +1097,13 @@ impl TypeChecker<'_> {
                 // the answer of the call would be of an unknown type.
                 let result = substitute(&function.ret, &subst);
                 if has_type_var(&result) {
+                    // A helper of the runtime that is called without the
+                    // value its type is read from keeps the answer it had
+                    // before it was typed: the parts of it that are known
+                    // are kept, and the rest is `any`.
+                    if function.loose {
+                        return Ok(erase_type_vars(&result));
+                    }
                     let mut names = Vec::new();
                     collect_type_vars(&result, &mut names);
                     return Err(self.error(
@@ -1258,8 +1389,15 @@ impl TypeChecker<'_> {
                     Type::Array(_) | Type::String => {
                         return Err(self.type_error(pos, &index_ty, &Type::Number));
                     }
-                    // Every key of a dictionary has the same type of value.
-                    Type::Dict(_, value) => (**value).clone(),
+                    // Every key of a dictionary has the same type of value,
+                    // and the key has to be of the type that the dictionary
+                    // says.
+                    Type::Dict(key, value) => {
+                        if !matches!(index_ty, Type::Any) && !assignable(&index_ty, key) {
+                            return Err(self.type_error(pos, &index_ty, key));
+                        }
+                        (**value).clone()
+                    }
                     _ => Type::Any,
                 }
             }
@@ -1301,6 +1439,7 @@ impl TypeChecker<'_> {
             type_params: Vec::new(),
             param_names: Vec::new(),
             defaults: vec![false; count],
+            loose: false,
         }))
     }
 
@@ -1412,6 +1551,7 @@ impl TypeChecker<'_> {
             type_params: Vec::new(),
             param_names: Vec::new(),
             defaults,
+            loose: false,
         }))
     }
 
@@ -1512,6 +1652,8 @@ impl TypeChecker<'_> {
             }
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
+            // Every key of a dictionary has the same type of value.
+            Type::Dict(_, value) => Ok((**value).clone()),
             // The answer of a function that may fail says whether it
             // worked, and what it was.
             Type::Result(ok, _) if name == "ok" => Ok(Type::Bool),
@@ -1533,6 +1675,7 @@ impl TypeChecker<'_> {
                     type_params: Vec::new(),
                     param_names: Vec::new(),
                     defaults: Vec::new(),
+                    loose: false,
                 },
             )),
             Type::Union(items) => {
@@ -1541,10 +1684,10 @@ impl TypeChecker<'_> {
                     if matches!(item, Type::Null | Type::Void) {
                         continue;
                     }
-                    match self.lookup_member(item, name, pos) {
-                        Ok(ty) => out.push(ty),
-                        Err(_) => return Ok(Type::Any),
-                    }
+                    // A member that does not have the field is a mistake:
+                    // the value may be that member, so the field would not
+                    // always be there.
+                    out.push(self.lookup_member(item, name, pos)?);
                 }
                 if out.is_empty() {
                     Ok(Type::Null)
@@ -1697,18 +1840,11 @@ impl TypeChecker<'_> {
 /// checked with them. A type of the program is not one of them.
 fn is_builtin_kind(ty: &TypeExpr) -> bool {
     match ty {
-        TypeExpr::Name(name, _) => matches!(
-            name.as_str(),
-            "number"
-                | "int"
-                | "string"
-                | "bool"
-                | "boolean"
-                | "null"
-                | "undefined"
-                | "object"
-                | "function"
-        ),
+        // The names of the builtin types are one list, so that a type may be
+        // checked with `is` whenever it may be written.
+        TypeExpr::Name(name, _) => {
+            is_builtin_type(name) || matches!(name.as_str(), "int" | "boolean" | "function")
+        }
         TypeExpr::Array(_, _) | TypeExpr::Tuple(_, _) => true,
         TypeExpr::Object(_, _) => true,
         TypeExpr::Dict(_, _, _) => true,

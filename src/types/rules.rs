@@ -213,8 +213,10 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
         (Type::Interface(_, source), Type::Object(target)) => {
             object_assignable_in(source, target, opening)
         }
+        // A value that is written out is read as the interface it is given
+        // to, so a field that the interface does not have is a mistake.
         (Type::Object(source), Type::Interface(_, target)) => {
-            object_assignable_in(source, target, opening)
+            object_assignable_exact_in(source, target, opening)
         }
         (Type::Named(_, source), Type::Interface(_, target)) => {
             object_assignable_in(source, target, opening)
@@ -450,6 +452,7 @@ pub(crate) fn erase_type_vars(ty: &Type) -> Type {
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
             defaults: function.defaults.clone(),
+            loose: function.loose,
         }),
         Type::Union(items) => union(items.iter().map(erase_type_vars).collect()),
         other => other.clone(),
@@ -529,6 +532,7 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
             defaults: function.defaults.clone(),
+            loose: function.loose,
         }),
         Type::Union(items) => union(
             items
@@ -879,6 +883,7 @@ pub(crate) fn substitute_with(
             type_params: function.type_params.clone(),
             param_names: function.param_names.clone(),
             defaults: function.defaults.clone(),
+            loose: function.loose,
         }),
         Type::Union(items) => union(
             items

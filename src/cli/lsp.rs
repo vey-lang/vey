@@ -10,7 +10,6 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use vey::parser::Parser;
-use vey::types;
 
 use crate::cli::args::parse_args;
 use crate::cli::json::{self, Value};
@@ -140,6 +139,39 @@ impl Server {
                 let (uri, _line, _col) = self.place(message)?;
                 Some(answer(id, self.completion(&uri)))
             }
+            "textDocument/documentSymbol" => {
+                let uri = message
+                    .get("params")
+                    .and_then(|p| p.get("textDocument"))
+                    .and_then(|d| d.text("uri"))?;
+                Some(answer(id, self.document_symbols(&uri)))
+            }
+            "textDocument/definition" => {
+                let (uri, line, col) = self.place(message)?;
+                Some(answer(id, self.definition(&uri, line, col)))
+            }
+            "textDocument/references" => {
+                let (uri, line, col) = self.place(message)?;
+                Some(answer(id, self.references(&uri, line, col)))
+            }
+            "textDocument/rename" => {
+                let (uri, line, col) = self.place(message)?;
+                let new_name = match message.get("params").and_then(|p| p.get("newName")) {
+                    Some(Value::Text(text)) => text.clone(),
+                    _ => return None,
+                };
+                Some(answer(id, self.rename(&uri, line, col, &new_name)))
+            }
+            "textDocument/didClose" => {
+                if let Some(uri) = message
+                    .get("params")
+                    .and_then(|p| p.get("textDocument"))
+                    .and_then(|d| d.text("uri"))
+                {
+                    self.files.remove(uri);
+                }
+                None
+            }
             _ => Some(answer(id, Value::Null)),
         }
     }
@@ -157,6 +189,26 @@ impl Server {
     /// Say what is wrong with a file.
     fn publish(&mut self, uri: &str) {
         let problems = self.problems(uri);
+        // A mistake of another file is said for that file, so that the
+        // editor may show it where it belongs.
+        let mut groups: Vec<(String, Vec<Value>)> = vec![(uri.to_string(), Vec::new())];
+        for (file, problem) in problems {
+            let target = match file {
+                Some(file) if !file.is_empty() => format!("file://{}", file),
+                _ => uri.to_string(),
+            };
+            match groups.iter_mut().find(|(group, _)| *group == target) {
+                Some((_, list)) => list.push(problem),
+                None => groups.push((target, vec![problem])),
+            }
+        }
+        for (target, problems) in groups {
+            self.send_problems(&target, problems);
+        }
+    }
+
+    /// Say the problems of one file.
+    fn send_problems(&self, uri: &str, problems: Vec<Value>) {
         let message = json::object(vec![
             ("jsonrpc", json::text("2.0")),
             ("method", json::text("textDocument/publishDiagnostics")),
@@ -174,18 +226,32 @@ impl Server {
     }
 
     /// The mistakes of a file, in the shape the protocol wants.
-    fn problems(&self, uri: &str) -> Vec<Value> {
+    ///
+    /// Every problem says which file it belongs to, because the file that is
+    /// opened may use a module that is wrong.
+    fn problems(&self, uri: &str) -> Vec<(Option<String>, Value)> {
         let Some(text) = self.files.get(uri) else {
             return Vec::new();
         };
         let path = path_of(uri);
         let label = path.to_string_lossy().to_string();
+        // A problem of the file that is opened belongs to the buffer of the
+        // editor, which may not be written on the disk yet. The places of
+        // the other files are the ones on the disk.
+        let opened = path.canonicalize().ok();
+        let file_of = |file: &str| -> Option<String> {
+            if opened.as_deref() == Some(std::path::Path::new(file)) {
+                None
+            } else {
+                Some(file.to_string())
+            }
+        };
         let mut parser = match Parser::new(text, &label) {
             Ok(parser) => parser,
-            Err(err) => return vec![problem(&err, 1, 1)],
+            Err(err) => return vec![(None, problem(&err, 1, 1))],
         };
         if let Err(err) = parser.parse_program() {
-            return vec![problem(&err, err.line, err.col)];
+            return vec![(None, problem(&err, err.line, err.col))];
         }
 
         // The file is checked with the modules it uses, so that the
@@ -194,15 +260,109 @@ impl Server {
         match vey::compiler::check_file(&path, Some(text)) {
             Ok(problems) => {
                 for warning in &problems.warnings {
-                    out.push(warning_problem(warning));
+                    out.push((file_of(&warning.file), warning_problem(warning)));
                 }
-                if let Some(err) = &problems.error {
-                    out.push(problem(err, err.line, err.col));
+                for err in &problems.errors {
+                    out.push((file_of(&err.file), problem(err, err.line, err.col)));
                 }
             }
-            Err(err) => out.push(problem(&err, err.line, err.col)),
+            Err(err) => out.push((file_of(&err.file), problem(&err, err.line, err.col))),
         }
         out
+    }
+
+    /// The names that are declared in a file.
+    fn names(&self, uri: &str) -> Option<Names> {
+        let text = self.files.get(uri)?;
+        let path = path_of(uri);
+        let label = path.to_string_lossy().to_string();
+        let mut parser = Parser::new(text, &label).ok()?;
+        let program = parser.parse_program().ok()?;
+        Some(Names::of(&program))
+    }
+
+    /// The names of a file, in the shape the protocol wants.
+    fn document_symbols(&self, uri: &str) -> Value {
+        let Some(names) = self.names(uri) else {
+            return Value::List(Vec::new());
+        };
+        let mut out = Vec::new();
+        for (name, pos, kind) in &names.defs {
+            out.push(json::object(vec![
+                ("name", json::text(name)),
+                ("kind", json::number(symbol_kind(kind))),
+                ("range", range(pos, pos)),
+                ("selectionRange", range(pos, pos)),
+            ]));
+        }
+        Value::List(out)
+    }
+
+    /// Where a name is declared.
+    fn definition(&self, uri: &str, line: usize, col: usize) -> Value {
+        let Some(names) = self.names(uri) else {
+            return Value::Null;
+        };
+        let Some(name) = names.name_at(line, col) else {
+            return Value::Null;
+        };
+        for (declared, pos, _) in &names.defs {
+            if *declared == name {
+                return location(uri, pos);
+            }
+        }
+        Value::Null
+    }
+
+    /// Where a name is used.
+    fn references(&self, uri: &str, line: usize, col: usize) -> Value {
+        let Some(names) = self.names(uri) else {
+            return Value::List(Vec::new());
+        };
+        let Some(name) = names.name_at(line, col) else {
+            return Value::List(Vec::new());
+        };
+        let mut out = Vec::new();
+        for (declared, pos, _) in &names.defs {
+            if *declared == name {
+                out.push(location(uri, pos));
+            }
+        }
+        for (used, pos) in &names.uses {
+            if *used == name {
+                out.push(location(uri, pos));
+            }
+        }
+        Value::List(out)
+    }
+
+    /// The places where a name is written, so that it may be changed.
+    fn rename(&self, uri: &str, line: usize, col: usize, new_name: &str) -> Value {
+        let Some(names) = self.names(uri) else {
+            return Value::Null;
+        };
+        let Some(name) = names.name_at(line, col) else {
+            return Value::Null;
+        };
+        let mut changes = Vec::new();
+        let mut places: Vec<vey::lexer::Pos> = Vec::new();
+        for (declared, pos, _) in &names.defs {
+            if *declared == name {
+                places.push(*pos);
+            }
+        }
+        for (used, pos) in &names.uses {
+            if *used == name {
+                places.push(*pos);
+            }
+        }
+        for pos in places {
+            changes.push(json::object(vec![
+                ("range", range(&pos, &pos)),
+                ("newText", json::text(new_name)),
+            ]));
+        }
+        json::object(vec![("changes", json::object(vec![(uri, Value::List(changes))]))])
     }
 
     /// The type of the expression under the cursor.
@@ -216,11 +376,12 @@ impl Server {
             Ok(parser) => parser,
             Err(_) => return Value::Null,
         };
-        let program = match parser.parse_program() {
-            Ok(program) => program,
-            Err(_) => return Value::Null,
-        };
-        let ty = match types::explain(&program, &label, line, col) {
+        if parser.parse_program().is_err() {
+            return Value::Null;
+        }
+        // The modules that the file uses are known, so that the type of a
+        // value of another module is the real one.
+        let ty = match vey::compiler::explain_source(&path, Some(text), line, col) {
             Ok(ty) => ty,
             Err(_) => return Value::Null,
         };
@@ -282,6 +443,10 @@ fn initialize() -> Value {
             ("completionProvider", json::object(vec![
                 ("triggerCharacters", Value::List(vec![json::text(".")])),
             ])),
+            ("documentSymbolProvider", Value::Bool(true)),
+            ("definitionProvider", Value::Bool(true)),
+            ("referencesProvider", Value::Bool(true)),
+            ("renameProvider", Value::Bool(true)),
         ])),
         (
             "serverInfo",
@@ -290,6 +455,392 @@ fn initialize() -> Value {
                 ("version", json::text(env!("CARGO_PKG_VERSION"))),
             ]),
         ),
+    ])
+}
+
+/// The names of a program, and the places they are written.
+///
+/// The names are found by walking the tree of the program, so that the
+/// editor may say where a name is declared and where it is used.
+struct Names {
+    /// The names that are declared.
+    defs: Vec<(String, vey::lexer::Pos, &'static str)>,
+    /// The names that are used.
+    uses: Vec<(String, vey::lexer::Pos)>,
+}
+
+impl Names {
+    fn new() -> Names {
+        Names {
+            defs: Vec::new(),
+            uses: Vec::new(),
+        }
+    }
+
+    /// The names of a program.
+    fn of(program: &vey::ast::Program) -> Names {
+        let mut names = Names::new();
+        names.body(&program.body);
+        names
+    }
+
+    fn body(&mut self, body: &[vey::ast::Stmt]) {
+        for stmt in body {
+            self.stmt(stmt);
+        }
+    }
+
+    fn define(&mut self, name: &str, pos: vey::lexer::Pos, kind: &'static str) {
+        self.defs.push((name.to_string(), pos, kind));
+    }
+
+    fn use_name(&mut self, name: &str, pos: vey::lexer::Pos) {
+        self.uses.push((name.to_string(), pos));
+    }
+
+    fn stmt(&mut self, stmt: &vey::ast::Stmt) {
+        use vey::ast::Stmt;
+        match stmt {
+            Stmt::Var(decl) => {
+                if let Some(init) = &decl.init {
+                    self.expr(init);
+                }
+                self.pattern(&decl.pattern, "variable");
+            }
+            Stmt::Fn(decl) => {
+                self.define(&decl.name, decl.pos, "function");
+                for param in &decl.params {
+                    self.pattern(&param.pattern, "parameter");
+                    if let Some(default) = &param.default {
+                        self.expr(default);
+                    }
+                }
+                self.body(&decl.body.body);
+            }
+            Stmt::Component(decl) => {
+                self.define(&decl.name, decl.pos, "component");
+                for param in &decl.params {
+                    self.pattern(&param.pattern, "parameter");
+                }
+                for inner in &decl.body {
+                    self.stmt(inner);
+                }
+                self.markup(&decl.children);
+            }
+            Stmt::Enum(decl) => {
+                self.define(&decl.name, decl.pos, "enum");
+                for variant in &decl.variants {
+                    self.define(&variant.name, variant.pos, "variant");
+                }
+            }
+            Stmt::Type(decl) => self.define(&decl.name, decl.pos, "type"),
+            Stmt::Interface(decl) => self.define(&decl.name, decl.pos, "interface"),
+            Stmt::Impl(decl) => {
+                self.define(&decl.type_name, decl.pos, "type");
+                for method in &decl.methods {
+                    self.define(&method.name, method.pos, "method");
+                    self.body(&method.body.body);
+                }
+            }
+            Stmt::If(decl) => {
+                self.expr(&decl.test);
+                self.body(&decl.then_block.body);
+                if let Some(branch) = &decl.else_branch {
+                    self.stmt(branch);
+                }
+            }
+            Stmt::IfLet(decl) => {
+                self.expr(&decl.value);
+                self.body(&decl.then_block.body);
+                if let Some(branch) = &decl.else_branch {
+                    self.stmt(branch);
+                }
+            }
+            Stmt::While(decl) => {
+                self.expr(&decl.test);
+                self.body(&decl.body.body);
+            }
+            Stmt::WhileLet(decl) => {
+                self.expr(&decl.value);
+                self.body(&decl.body.body);
+            }
+            Stmt::LetElse(decl) => {
+                self.expr(&decl.value);
+                self.pattern(&decl.pattern, "variable");
+                self.body(&decl.otherwise.body);
+            }
+            Stmt::Defer(decl) => self.expr(&decl.value),
+            Stmt::Throw(decl) => self.expr(&decl.value),
+            Stmt::For(decl) => {
+                self.expr(&decl.iter);
+                self.pattern(&decl.pattern, "variable");
+                self.body(&decl.body.body);
+            }
+            Stmt::Repeat(decl) => {
+                self.expr(&decl.count);
+                self.body(&decl.body.body);
+            }
+            Stmt::Return(decl) => {
+                if let Some(value) = &decl.value {
+                    self.expr(value);
+                }
+            }
+            Stmt::Try(decl) => {
+                self.body(&decl.body.body);
+                if let Some(catch) = &decl.catch {
+                    self.body(&catch.body);
+                }
+                if let Some(finally) = &decl.finally {
+                    self.body(&finally.body);
+                }
+            }
+            Stmt::Expr(decl) => self.expr(&decl.expr),
+            Stmt::Assign(decl) => {
+                self.expr(&decl.target);
+                self.expr(&decl.value);
+            }
+            Stmt::Block(block, _) => self.body(&block.body),
+            Stmt::Use(decl) => self.define(&decl.alias, decl.pos, "module"),
+            Stmt::Break(_, _) | Stmt::Continue(_, _) | Stmt::Style(_) => {}
+        }
+    }
+
+    /// The names of a pattern are the ones that are bound.
+    fn pattern(&mut self, pattern: &vey::ast::BindingPattern, kind: &'static str) {
+        use vey::ast::BindingPattern;
+        match pattern {
+            BindingPattern::Name { name, pos, default } => {
+                self.define(name, *pos, kind);
+                if let Some(default) = default {
+                    self.expr(default);
+                }
+            }
+            BindingPattern::Array { items, rest, .. } => {
+                for item in items {
+                    self.pattern(item, kind);
+                }
+                if let Some(rest) = rest {
+                    self.define(rest, vey::lexer::Pos::new(1, 1), kind);
+                }
+            }
+            BindingPattern::Object { fields, rest, .. } => {
+                for field in fields {
+                    self.pattern(&field.pattern, kind);
+                }
+                if let Some(rest) = rest {
+                    self.define(rest, vey::lexer::Pos::new(1, 1), kind);
+                }
+            }
+        }
+    }
+
+    fn markup(&mut self, nodes: &[vey::ast::MarkupNode]) {
+        use vey::ast::MarkupNode;
+        for node in nodes {
+            match node {
+                MarkupNode::Expr(expr) => self.expr(expr),
+                MarkupNode::Element(element) => {
+                    for (_, value) in &element.attrs {
+                        self.expr(value);
+                    }
+                    for value in &element.args {
+                        self.expr(value);
+                    }
+                    self.markup(&element.children);
+                }
+                MarkupNode::If(branch) => {
+                    self.expr(&branch.test);
+                    self.markup(&branch.then_nodes);
+                    self.markup(&branch.else_nodes);
+                }
+                MarkupNode::For(loop_node) => {
+                    self.expr(&loop_node.iter);
+                    self.markup(&loop_node.body);
+                }
+                MarkupNode::Match(m) => {
+                    self.expr(&m.subject);
+                    for arm in &m.arms {
+                        for pattern in &arm.patterns {
+                            self.pattern_match(pattern);
+                        }
+                        if let Some(guard) = &arm.guard {
+                            self.expr(guard);
+                        }
+                        self.markup(&arm.body);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The names of a pattern of a match are the ones that are bound.
+    fn pattern_match(&mut self, pattern: &vey::ast::Pattern) {
+        use vey::ast::Pattern;
+        match pattern {
+            Pattern::Binding { name, pos } => self.define(name, *pos, "variable"),
+            Pattern::Enum { bindings, .. } => {
+                for binding in bindings {
+                    self.define(&binding.name, binding.pos, "variable");
+                }
+            }
+            Pattern::List(items, _) => {
+                for item in items {
+                    self.pattern_match(item);
+                }
+            }
+            Pattern::Object(fields, _) => {
+                for (_, item) in fields {
+                    self.pattern_match(item);
+                }
+            }
+            other => {
+                let _ = other;
+            }
+        }
+    }
+
+    fn expr(&mut self, expr: &vey::ast::Expr) {
+        use vey::ast::Expr;
+        match expr {
+            Expr::Ident(name, pos) => self.use_name(name, *pos),
+            Expr::String(parts, _) => {
+                for part in parts {
+                    if let Some(value) = &part.expr {
+                        self.expr(value);
+                    }
+                }
+            }
+            Expr::Array(items, _) => {
+                for item in items {
+                    self.expr(item);
+                }
+            }
+            Expr::Object(props, _) => {
+                for prop in props {
+                    match prop {
+                        vey::ast::ObjectProp::Field(_, value) => self.expr(value),
+                        vey::ast::ObjectProp::Spread(value) => self.expr(value),
+                    }
+                }
+            }
+            Expr::Unary(_, value, _) => self.expr(value),
+            Expr::Binary(_, left, right, _)
+            | Expr::Logical(_, left, right, _)
+            | Expr::Nullish(left, right, _)
+            | Expr::Range(left, right, _) => {
+                self.expr(left);
+                self.expr(right);
+            }
+            Expr::Ternary(test, then_value, else_value, _) => {
+                self.expr(test);
+                self.expr(then_value);
+                self.expr(else_value);
+            }
+            Expr::Call(callee, args, _, _) | Expr::CallGeneric(callee, _, args, _, _) => {
+                self.expr(callee);
+                for arg in args {
+                    self.expr(arg);
+                }
+            }
+            Expr::Member(object, prop, _, _) => {
+                self.expr(object);
+                if let vey::ast::MemberProp::Computed(index) = prop {
+                    self.expr(index);
+                }
+            }
+            Expr::Fn(params, body, _, _) => {
+                for param in params {
+                    self.pattern(&param.pattern, "parameter");
+                }
+                self.body(&body.body);
+            }
+            Expr::Arrow(_, params, body, _, _) => {
+                for param in params {
+                    self.pattern(&param.pattern, "parameter");
+                }
+                match body {
+                    vey::ast::ArrowBody::Expr(value) => self.expr(value),
+                    vey::ast::ArrowBody::Block(block) => self.body(&block.body),
+                }
+            }
+            Expr::Match(subject, arms, _) => {
+                self.expr(subject);
+                for arm in arms {
+                    for pattern in &arm.patterns {
+                        self.pattern_match(pattern);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.expr(&arm.body);
+                }
+            }
+            Expr::Await(value, _) | Expr::Try(value, _) | Expr::Spread(value, _) => {
+                self.expr(value)
+            }
+            Expr::As(value, _, _) | Expr::Is(value, _, _) => self.expr(value),
+            Expr::Yield(value, _) => self.expr(value),
+            _ => {}
+        }
+    }
+
+    /// The name that is at a place, if there is one there.
+    fn name_at(&self, line: usize, col: usize) -> Option<String> {
+        for (name, pos) in &self.uses {
+            if pos.line == line && pos.col == col {
+                return Some(name.clone());
+            }
+        }
+        for (name, pos, _) in &self.defs {
+            if pos.line == line && pos.col == col {
+                return Some(name.clone());
+            }
+        }
+        None
+    }
+}
+
+/// The number of a kind of name, in the shape the protocol wants.
+fn symbol_kind(kind: &str) -> f64 {
+    match kind {
+        "function" => 12.0,
+        "component" => 12.0,
+        "method" => 6.0,
+        "type" => 5.0,
+        "interface" => 11.0,
+        "enum" => 10.0,
+        "variant" => 22.0,
+        "parameter" => 13.0,
+        "module" => 2.0,
+        _ => 13.0,
+    }
+}
+
+/// The place of a name, in the shape the protocol wants.
+fn range(start: &vey::lexer::Pos, end: &vey::lexer::Pos) -> Value {
+    json::object(vec![
+        (
+            "start",
+            json::object(vec![
+                ("line", json::number(start.line as f64 - 1.0)),
+                ("character", json::number(start.col as f64 - 1.0)),
+            ]),
+        ),
+        (
+            "end",
+            json::object(vec![
+                ("line", json::number(end.line as f64 - 1.0)),
+                ("character", json::number(end.col as f64)),
+            ]),
+        ),
+    ])
+}
+
+/// The place of a name in a file, in the shape the protocol wants.
+fn location(uri: &str, pos: &vey::lexer::Pos) -> Value {
+    json::object(vec![
+        ("uri", json::text(uri)),
+        ("range", range(pos, pos)),
     ])
 }
 
@@ -317,17 +868,18 @@ fn problem(err: &vey::VeyError, line: usize, col: usize) -> Value {
         ),
         ("severity", json::number(1.0)),
         ("source", json::text("vey")),
-        ("message", json::text(&err.message)),
+        (
+            "message",
+            json::text(&message_with_hint(&err.message, err.hint.as_deref())),
+        ),
     ];
-    if let Some(hint) = &err.hint {
-        items.push(("hint", json::text(hint)));
-    }
+    items.push(("code", json::text("vey")));
     json::object(items)
 }
 
 /// A warning of the compiler, as the protocol wants it.
 fn warning_problem(warning: &vey::warn::Warning) -> Value {
-    let mut items = vec![
+    let items = vec![
         (
             "range",
             json::object(vec![
@@ -349,12 +901,24 @@ fn warning_problem(warning: &vey::warn::Warning) -> Value {
         ),
         ("severity", json::number(2.0)),
         ("source", json::text("vey")),
-        ("message", json::text(&warning.message)),
+        (
+            "message",
+            json::text(&message_with_hint(&warning.message, warning.hint.as_deref())),
+        ),
     ];
-    if let Some(hint) = &warning.hint {
-        items.push(("hint", json::text(hint)));
-    }
     json::object(items)
+}
+
+/// The text of a problem, with the hint of the compiler on a line of its
+/// own.
+///
+/// The protocol has no field of its own for a hint, so it is part of the
+/// message.
+fn message_with_hint(message: &str, hint: Option<&str>) -> String {
+    match hint {
+        Some(hint) if !hint.is_empty() => format!("{}\n\nhint: {}", message, hint),
+        _ => message.to_string(),
+    }
 }
 
 /// The path of a file, from the name the protocol uses.

@@ -143,6 +143,30 @@ pub fn read(source: &str) -> Option<(Value, &str)> {
     read_value(&mut rest)
 }
 
+/// Read four marks of sixteen, and the number they make.
+///
+/// The marks are read one by one, because a mark of a text may be more
+/// than one byte. A text that is not four marks of sixteen is refused.
+fn read_hex(text: &str) -> Option<(u32, usize)> {
+    let mut digits = String::new();
+    let mut taken = 0;
+    for c in text.chars() {
+        if digits.len() >= 4 {
+            break;
+        }
+        if !c.is_ascii_hexdigit() {
+            break;
+        }
+        digits.push(c);
+        taken += c.len_utf8();
+    }
+    if digits.len() < 4 {
+        return None;
+    }
+    let code = u32::from_str_radix(&digits, 16).ok()?;
+    Some((code, taken))
+}
+
 /// Read one value of JSON, and the text that is left.
 fn read_value<'a>(chars: &mut &'a str) -> Option<(Value, &'a str)> {
     let trimmed = chars.trim_start();
@@ -229,12 +253,33 @@ fn read_value<'a>(chars: &mut &'a str) -> Option<(Value, &'a str)> {
                             'b' => text.push('\u{8}'),
                             'f' => text.push('\u{c}'),
                             'u' => {
-                                if rest.len() < 4 {
+                                // The number is four marks of sixteen. A
+                                // mark may be more than one byte, so the
+                                // marks are read one by one and a text
+                                // that is not a number is refused instead
+                                // of taking the server down.
+                                let Some((code, taken)) = read_hex(rest) else {
                                     return None;
+                                };
+                                rest = &rest[taken..];
+                                // A pair of marks that is a letter outside
+                                // the plane of the text is one letter.
+                                if (0xd800..0xdc00).contains(&code) {
+                                    if !rest.starts_with("\\u") {
+                                        return None;
+                                    }
+                                    let Some((low, more)) = read_hex(&rest[2..]) else {
+                                        return None;
+                                    };
+                                    if !(0xdc00..0xe000).contains(&low) {
+                                        return None;
+                                    }
+                                    rest = &rest[2 + more..];
+                                    let together = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
+                                    text.push(char::from_u32(together)?);
+                                } else {
+                                    text.push(char::from_u32(code)?);
                                 }
-                                let code = u32::from_str_radix(&rest[..4], 16).ok()?;
-                                rest = &rest[4..];
-                                text.push(char::from_u32(code)?);
                             }
                             other => text.push(other),
                         }
@@ -278,6 +323,42 @@ fn read_value<'a>(chars: &mut &'a str) -> Option<(Value, &'a str)> {
             let value = text.parse().ok().map(Value::Number)?;
             *chars = &trimmed[end..];
             Some((value, chars))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A text with a mark of sixteen that is followed by a letter of more
+    /// than one byte must not take the reader down.
+    #[test]
+    fn a_broken_mark_of_sixteen_is_refused() {
+        assert!(read("{\"x\":\"\\uab€\"}").is_none());
+        assert!(read("{\"x\":\"\\u12\"}").is_none());
+        assert!(read("{\"x\":\"\\uZZZZ\"}").is_none());
+    }
+
+    /// A mark of sixteen is read, and so is a pair of them that is a
+    /// letter outside the plane of the text.
+    #[test]
+    fn a_mark_of_sixteen_is_read() {
+        let (value, _) = read("{\"x\":\"\\u00e9\"}").expect("the text is read");
+        match value {
+            Value::Object(items) => match items.iter().find(|(key, _)| *key == "x") {
+                Some((_, Value::Text(text))) => assert_eq!(text, "é"),
+                other => panic!("the value is not there: {other:?}"),
+            },
+            other => panic!("the value is not an object: {other:?}"),
+        }
+        let (value, _) = read("{\"x\":\"\\uD83D\\uDE00\"}").expect("the text is read");
+        match value {
+            Value::Object(items) => match items.iter().find(|(key, _)| *key == "x") {
+                Some((_, Value::Text(text))) => assert_eq!(text, "😀"),
+                other => panic!("the value is not there: {other:?}"),
+            },
+            other => panic!("the value is not an object: {other:?}"),
         }
     }
 }

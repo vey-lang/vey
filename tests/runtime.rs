@@ -44,8 +44,9 @@ fn run_runtime(label: &str, script: &str) -> String {
         .expect("failed to start node");
     assert!(
         output.status.success(),
-        "runtime script failed:\n{}",
-        String::from_utf8_lossy(&output.stderr)
+      "runtime script failed:\n{}\nstdout:\n{}",
+      String::from_utf8_lossy(&output.stderr),
+      String::from_utf8_lossy(&output.stdout)
     );
     String::from_utf8_lossy(&output.stdout).to_string()
 }
@@ -542,6 +543,96 @@ app.start(() => {
 }
 
 #[test]
+fn cors_answers_preflight_with_the_configured_headers() {
+    let text = run_runtime(
+        "cors-preflight",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use(runtime.cors({
+  origin: "https://app.example",
+  credentials: true,
+  methods: "GET, OPTIONS",
+  maxAge: 300
+}));
+app.get("/resource", () => "ok");
+app.start(() => {
+  const request = http.request("http://127.0.0.1:" + app.port() + "/resource", {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://app.example",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "X-Token"
+    }
+  }, (res) => {
+    res.resume();
+    res.on("end", async () => {
+      console.log(JSON.stringify({
+        status: res.statusCode,
+        origin: res.headers["access-control-allow-origin"],
+        credentials: res.headers["access-control-allow-credentials"],
+        methods: res.headers["access-control-allow-methods"],
+        headers: res.headers["access-control-allow-headers"],
+        maxAge: res.headers["access-control-max-age"],
+        vary: res.headers.vary
+      }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+  request.end();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":204,"origin":"https://app.example","credentials":"true","methods":"GET, OPTIONS","headers":"X-Token","maxAge":"300","vary":"Origin"}"#)
+    );
+}
+
+#[test]
+fn gzip_compression_sets_vary_and_returns_decodable_bytes() {
+    let text = run_runtime(
+        "gzip-compress",
+        r#"
+const http = require("node:http");
+const zlib = require("node:zlib");
+const app = runtime.server(0);
+app.use(runtime.compress({ threshold: 1 }));
+app.get("/", () => "compress this response body");
+app.start(() => {
+  http.get({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/",
+    headers: { "Accept-Encoding": "gzip" }
+  }, (res) => {
+    const chunks = [];
+    res.on("data", (chunk) => chunks.push(chunk));
+    res.on("end", async () => {
+      const compressed = Buffer.concat(chunks);
+      const decoded = zlib.gunzipSync(compressed).toString("utf8");
+      console.log(JSON.stringify({
+        status: res.statusCode,
+        encoding: res.headers["content-encoding"],
+        vary: res.headers.vary,
+        length: res.headers["content-length"] || null,
+        decoded
+      }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":200,"encoding":"gzip","vary":"Accept-Encoding","length":null,"decoded":"compress this response body"}"#)
+    );
+}
+
+#[test]
 fn the_server_reads_a_form_with_a_file() {
     let text = run_runtime(
         "multipart",
@@ -581,6 +672,44 @@ app.start(() => {
 }
 
 #[test]
+fn a_prototype_named_session_cookie_cannot_pollute_object_prototypes() {
+    let text = run_runtime(
+        "session-prototype-pollution",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.get("/", () => {
+  runtime.session.set("veyPolluted", true);
+  return {
+    value: runtime.session.get("veyPolluted"),
+    polluted: Object.prototype.veyPolluted === true
+  };
+});
+app.start(() => {
+  http.get({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/",
+    headers: { Cookie: "vey.sid=__proto__" }
+  }, (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", async () => {
+      console.log(body);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"value":true,"polluted":false}"#)
+    );
+}
+
+#[test]
 fn the_answer_of_the_server_may_set_a_cookie_and_a_session() {
     let text = run_runtime(
         "session",
@@ -614,6 +743,241 @@ app.start(() => {
 }
 
 #[test]
+fn the_cookie_of_a_session_is_there_when_the_handler_ends_the_answer() {
+    let text = run_runtime(
+        "session-cookie",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.get("/login", (req, res) => {
+  runtime.session.start();
+  runtime.session.set("user", "Ada");
+  // The answer ends here, so the cookie of the session must still be
+  // written.
+  res.send({ user: runtime.session.get("user") });
+});
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/login", (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(body);
+      console.log((res.headers["set-cookie"] || []).some((value) => value.startsWith("vey.sid=")));
+      app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains("\"user\":\"Ada\""), "{text}");
+    assert!(text.contains("true"), "{text}");
+}
+
+#[test]
+fn malformed_json_body_is_rejected_before_the_route_runs() {
+    let text = run_runtime(
+        "invalid-json-body",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+let handled = false;
+app.post("/", (req) => {
+  handled = true;
+  return req.body;
+});
+app.start(() => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/",
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  }, (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", async () => {
+      console.log(JSON.stringify({ status: res.statusCode, body, handled }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+  request.end("{\"name\":");
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":400,"body":"Invalid JSON request body.","handled":false}"#)
+    );
+}
+
+#[test]
+fn session_cookie_security_flags_follow_the_trusted_request_protocol() {
+    let text = run_runtime(
+        "session-cookie-flags",
+        r#"
+const http = require("node:http");
+async function requestCookie(trustProxy) {
+  const app = runtime.server(0, { trustProxy });
+  app.get("/login", () => {
+    runtime.session.start();
+    return "ok";
+  });
+  await new Promise((resolve) => app.start(resolve));
+  const cookie = await new Promise((resolve) => {
+    http.get({
+      host: "127.0.0.1",
+      port: app.port(),
+      path: "/login",
+      headers: { "X-Forwarded-Proto": "https" }
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve((res.headers["set-cookie"] || []).find(value => value.startsWith("vey.sid="))));
+    });
+  });
+  await app.stop();
+  return cookie;
+}
+(async () => {
+  const untrusted = await requestCookie(false);
+  const trusted = await requestCookie(true);
+  const common = ["Path=/", "HttpOnly", "SameSite=Lax"];
+  if (!untrusted || !trusted || common.some(flag => !untrusted.includes(flag) || !trusted.includes(flag))) {
+    throw new Error(JSON.stringify({ untrusted, trusted }));
+  }
+  if (untrusted.includes("Secure") || !trusted.includes("Secure")) {
+    throw new Error(JSON.stringify({ untrusted, trusted }));
+  }
+  console.log("session cookie flags verified");
+  process.exit(0);
+})();
+"#,
+    );
+    assert_eq!(text.lines().last(), Some("session cookie flags verified"));
+}
+
+#[test]
+fn a_body_that_is_too_large_is_refused_before_it_is_read() {
+    let text = run_runtime(
+        "body-limit",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use(runtime.bodyLimit(16));
+app.post("/", (req) => ({ size: req.text.length }));
+app.start(() => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/",
+    method: "POST",
+    headers: { "Content-Type": "text/plain", "Content-Length": "64" }
+  }, (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(res.statusCode);
+      console.log(body);
+      app.stop();
+      process.exit(0);
+    });
+  });
+  request.end("x".repeat(64));
+});
+"#,
+    );
+    assert!(text.contains("413"), "{text}");
+    assert!(text.contains("too large"), "{text}");
+}
+
+#[test]
+fn a_chunked_body_that_is_too_large_gets_a_413_response() {
+    let text = run_runtime(
+        "chunked-body-limit",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+let handled = false;
+app.use(runtime.bodyLimit(16));
+app.post("/", (req) => {
+  handled = true;
+  return { size: req.text.length };
+});
+app.start(() => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/",
+    method: "POST",
+    headers: {
+      "Content-Type": "text/plain",
+      "Transfer-Encoding": "chunked"
+    }
+  }, (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(JSON.stringify({ status: res.statusCode, body, handled }));
+      process.exit(0);
+    });
+  });
+  request.on("error", (error) => {
+    console.log(JSON.stringify({ status: null, error: error.code, handled }));
+    process.exit(0);
+  });
+  request.write("x".repeat(64));
+  request.end();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":413,"body":"The request is too large.","handled":false}"#)
+    );
+}
+
+#[test]
+fn an_explicit_options_route_handles_the_request() {
+    let text = run_runtime(
+        "options-route",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.route("OPTIONS", "/resource", (req, res) => {
+  res.status(202);
+  res.set("X-Options-Route", "handled");
+  return { route: "explicit" };
+});
+app.start(() => {
+  const request = http.request(
+    "http://127.0.0.1:" + app.port() + "/resource",
+    { method: "OPTIONS" },
+    (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", async () => {
+        console.log(JSON.stringify({
+          status: res.statusCode,
+          route: res.headers["x-options-route"],
+          body
+        }));
+        await app.stop();
+        process.exit(0);
+      });
+    }
+  );
+  request.end();
+});
+"#,
+    );
+    assert_eq!(
+      text.lines().last(),
+      Some(r#"{"status":202,"route":"handled","body":"{\"route\":\"explicit\"}"}"#)
+    );
+}
+
+#[test]
 fn a_head_and_an_options_are_answered() {
     let text = run_runtime(
         "head-options",
@@ -643,6 +1007,99 @@ app.start(() => {
     assert!(text.contains("200 0 5"), "{text}");
     assert!(text.contains("204"), "{text}");
     assert!(text.contains("GET"), "{text}");
+}
+
+#[test]
+fn static_files_do_not_follow_symlinks_outside_the_root() {
+    let text = run_runtime(
+        "static-symlink",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const parent = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-link-"));
+const root = path.join(parent, "public");
+const secret = path.join(parent, "secret.txt");
+nodeFs.mkdirSync(root);
+nodeFs.writeFileSync(secret, "private data");
+nodeFs.symlinkSync(secret, path.join(root, "secret.txt"));
+const assets = path.join(root, "assets");
+nodeFs.mkdirSync(assets);
+nodeFs.symlinkSync(secret, path.join(assets, "index.html"));
+const app = runtime.server(0);
+app.static(root);
+app.start(() => {
+  const get = (pathname) => new Promise((resolve) => {
+    http.get("http://127.0.0.1:" + app.port() + pathname, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    });
+  });
+  (async () => {
+    const direct = await get("/secret.txt");
+    const index = await get("/assets/");
+    const traversal = await get("/%2e%2e/secret.txt");
+    console.log(JSON.stringify({ direct, index, traversal }));
+    await app.stop();
+    process.exit(0);
+  })();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"direct":403,"index":403,"traversal":403}"#)
+    );
+}
+
+#[test]
+fn head_and_range_requests_for_static_files_preserve_headers_and_bytes() {
+    let text = run_runtime(
+        "static-head-range",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const root = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-range-"));
+nodeFs.writeFileSync(path.join(root, "data.txt"), "0123456789");
+const app = runtime.server(0);
+app.static(root);
+app.start(() => {
+  const ask = (method, headers) => new Promise((resolve) => {
+    const request = http.request(
+      "http://127.0.0.1:" + app.port() + "/data.txt",
+      { method, headers },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk; });
+        res.on("end", () => resolve({
+          status: res.statusCode,
+          length: res.headers["content-length"],
+          range: res.headers["content-range"] || null,
+          body
+        }));
+      }
+    );
+    request.end();
+  });
+  (async () => {
+    const head = await ask("HEAD", {});
+    const range = await ask("GET", { Range: "bytes=2-5" });
+    console.log(JSON.stringify({ head, range }));
+    await app.stop();
+    process.exit(0);
+  })();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(
+            r#"{"head":{"status":200,"length":"10","range":null,"body":""},"range":{"status":206,"length":"4","range":"bytes 2-5/10","body":"2345"}}"#
+        )
+    );
 }
 
 #[test]
@@ -703,6 +1160,116 @@ app.start(() => {
 }
 
 #[test]
+fn error_handlers_are_isolated_between_server_instances() {
+    let text = run_runtime(
+        "isolated-error-handlers",
+        r#"
+const http = require("node:http");
+const first = runtime.server(0);
+const second = runtime.server(0);
+first.use(runtime.errorHandler((error, req, res) => res.send("first:" + error.message)));
+second.use(runtime.errorHandler((error, req, res) => res.send("second:" + error.message)));
+first.get("/boom", () => new Promise((resolve, reject) => {
+  setTimeout(() => reject(new Error("A")), 40);
+}));
+second.get("/boom", () => { throw new Error("B"); });
+function ask(app) {
+  return new Promise((resolve) => {
+    http.get("http://127.0.0.1:" + app.port() + "/boom", (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => resolve(body));
+    });
+  });
+}
+Promise.all([
+  new Promise((resolve) => first.start(resolve)),
+  new Promise((resolve) => second.start(resolve))
+]).then(async () => {
+  const firstBody = ask(first);
+  const secondBody = ask(second);
+  console.log(JSON.stringify(await Promise.all([firstBody, secondBody])));
+  await first.stop();
+  await second.stop();
+  process.exit(0);
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"["first:A","second:B"]"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn custom_not_found_and_error_handlers_control_their_responses() {
+    let text = run_runtime(
+        "not-found-error-handlers",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.notFound((req) => "missing: " + req.path);
+app.error((error, req, res) => {
+  res.status(503);
+  res.send({ message: error.message, path: req.path });
+});
+app.get("/boom", () => { throw new Error("route failed"); });
+function ask(pathname) {
+  return new Promise((resolve) => {
+    http.get("http://127.0.0.1:" + app.port() + pathname, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+  });
+}
+app.start(() => {
+  (async () => {
+    const missing = await ask("/missing");
+    const failed = await ask("/boom");
+    console.log(JSON.stringify({ missing, failed }));
+    await app.stop();
+    process.exit(0);
+  })();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(
+            r#"{"missing":{"status":404,"body":"missing: /missing"},"failed":{"status":503,"body":"{\"message\":\"route failed\",\"path\":\"/boom\"}"}}"#
+        )
+    );
+}
+
+#[test]
+fn a_port_conflict_is_reported_without_crashing_the_process() {
+    let text = run_runtime(
+        "port-conflict",
+        r#"
+const net = require("node:net");
+const blocker = net.createServer();
+blocker.listen(0, () => {
+  const app = runtime.server(blocker.address().port);
+  app.onError((error) => {
+    console.log(JSON.stringify({ code: error.code, lastError: app.lastError().code }));
+    blocker.close(() => process.exit(0));
+  });
+  app.start(() => {
+    console.log("unexpected server start");
+    process.exit(1);
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"code":"EADDRINUSE","lastError":"EADDRINUSE"}"#)
+    );
+}
+
+#[test]
 fn the_server_waits_for_the_request_that_is_running() {
     let text = run_runtime(
         "stop",
@@ -727,6 +1294,299 @@ app.start(() => {
 "#,
     );
     assert!(text.contains("true"), "{text}");
+}
+
+#[test]
+fn stopping_after_an_sse_client_disconnects_completes() {
+    let text = run_runtime(
+        "sse-disconnect-stop",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0, { shutdownTimeout: 250 });
+app.sse("/events", (req, stream) => stream.send("ready"));
+app.start(() => {
+  const request = http.get("http://127.0.0.1:" + app.port() + "/events", (res) => {
+    res.once("data", () => {
+      res.destroy();
+      res.once("close", async () => {
+        const stopped = await Promise.race([
+          app.stop().then(() => true),
+          new Promise((resolve) => setTimeout(() => resolve(false), 500))
+        ]);
+        console.log(stopped);
+        process.exit(0);
+      });
+    });
+  });
+  request.on("error", () => {});
+});
+"#,
+    );
+    assert_eq!(text.lines().last(), Some("true"), "{text}");
+}
+
+#[test]
+fn websocket_64_bit_lengths_are_checked_before_reading_the_payload() {
+    let text = run_runtime(
+        "websocket-64-bit-length",
+        r#"
+const net = require("node:net");
+const crypto = require("node:crypto");
+const app = runtime.server(0);
+let handled = false;
+app.ws("/echo", (socket) => {
+  socket.onMessage(() => { handled = true; });
+});
+app.start(() => {
+  const client = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0);
+  let upgraded = false;
+  client.on("connect", () => {
+    client.write([
+      "GET /echo HTTP/1.1",
+      "Host: 127.0.0.1:" + app.port(),
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Key: " + crypto.randomBytes(16).toString("base64"),
+      "Sec-WebSocket-Version: 13",
+      "",
+      ""
+    ].join("\r\n"));
+  });
+  client.on("data", (chunk) => {
+    data = Buffer.concat([data, chunk]);
+    if (!upgraded) {
+      const end = data.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      if (!data.toString("ascii", 0, end).startsWith("HTTP/1.1 101")) throw new Error("upgrade failed");
+      upgraded = true;
+      data = data.slice(end + 4);
+      const frame = Buffer.alloc(10);
+      frame[0] = 0x81;
+      frame[1] = 0xff;
+      frame.writeUInt32BE(1, 2);
+      frame.writeUInt32BE(0, 6);
+      client.write(frame);
+    }
+    if (data.length >= 2 && (data[0] & 0x0f) === 0x8) {
+      console.log(JSON.stringify({ close: true, handled }));
+      client.destroy();
+      app.stop().then(() => process.exit(0));
+    }
+  });
+  setTimeout(() => process.exit(2), 1000);
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"close":true,"handled":false}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn websocket_text_fragments_are_delivered_as_one_message() {
+    let text = run_runtime(
+        "websocket-fragments",
+        r#"
+const net = require("node:net");
+const crypto = require("node:crypto");
+const app = runtime.server(0);
+app.ws("/echo", (socket) => {
+  socket.onMessage((message) => socket.send("echo:" + message));
+});
+function clientFrame(fin, opcode, text) {
+  const payload = Buffer.from(text, "utf8");
+  const mask = Buffer.from([9, 3, 7, 1]);
+  const frame = Buffer.alloc(2 + 4 + payload.length);
+  frame[0] = (fin ? 0x80 : 0) | opcode;
+  frame[1] = 0x80 | payload.length;
+  mask.copy(frame, 2);
+  for (let i = 0; i < payload.length; i++) frame[6 + i] = payload[i] ^ mask[i % 4];
+  return frame;
+}
+app.start(() => {
+  const client = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0);
+  let upgraded = false;
+  let replies = [];
+  client.on("connect", () => {
+    const key = crypto.randomBytes(16).toString("base64");
+    client.write([
+      "GET /echo HTTP/1.1",
+      "Host: 127.0.0.1:" + app.port(),
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Key: " + key,
+      "Sec-WebSocket-Version: 13",
+      "",
+      ""
+    ].join("\r\n"));
+  });
+  client.on("data", (chunk) => {
+    if (replies.length > 0) return;
+    data = Buffer.concat([data, chunk]);
+    if (!upgraded) {
+      const end = data.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      const headers = data.toString("ascii", 0, end);
+      if (!headers.startsWith("HTTP/1.1 101")) throw new Error(headers);
+      upgraded = true;
+      data = data.slice(end + 4);
+      client.write(Buffer.concat([
+        clientFrame(false, 0x1, "hel"),
+        clientFrame(true, 0x0, "lo")
+      ]));
+    }
+    while (data.length >= 2) {
+      const opcode = data[0] & 0x0f;
+      const length = data[1] & 0x7f;
+      const headerLength = length < 126 ? 2 : 4;
+      if (data.length < headerLength + length) return;
+      if (opcode === 0x1) {
+        replies.push(data.subarray(headerLength, headerLength + length).toString("utf8"));
+      }
+      data = data.slice(headerLength + length);
+      if (replies.length > 0) {
+        (async () => {
+          client.end();
+          await app.stop();
+          console.log(JSON.stringify(replies));
+          process.exit(0);
+        })();
+        return;
+      }
+    }
+  });
+  setTimeout(() => process.exit(2), 1000);
+});
+"#,
+    );
+    assert_eq!(text.lines().last(), Some(r#"["echo:hello"]"#), "{text}");
+}
+
+#[test]
+fn websocket_fragmented_messages_obey_the_total_size_limit() {
+    let text = run_runtime(
+        "websocket-fragment-limit",
+        r#"
+const net = require("node:net");
+const crypto = require("node:crypto");
+const app = runtime.server(0, { maxFrame: 5 });
+let handled = false;
+app.ws("/echo", (socket) => {
+  socket.onMessage(() => { handled = true; });
+});
+function clientFrame(fin, opcode, text) {
+  const payload = Buffer.from(text, "utf8");
+  const mask = Buffer.from([9, 3, 7, 1]);
+  const frame = Buffer.alloc(6 + payload.length);
+  frame[0] = (fin ? 0x80 : 0) | opcode;
+  frame[1] = 0x80 | payload.length;
+  mask.copy(frame, 2);
+  for (let i = 0; i < payload.length; i++) frame[6 + i] = payload[i] ^ mask[i % 4];
+  return frame;
+}
+app.start(() => {
+  const client = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0);
+  let upgraded = false;
+  client.on("connect", () => {
+    client.write([
+      "GET /echo HTTP/1.1",
+      "Host: 127.0.0.1:" + app.port(),
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Key: " + crypto.randomBytes(16).toString("base64"),
+      "Sec-WebSocket-Version: 13",
+      "",
+      ""
+    ].join("\r\n"));
+  });
+  client.on("data", (chunk) => {
+    data = Buffer.concat([data, chunk]);
+    if (!upgraded) {
+      const end = data.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      if (!data.toString("ascii", 0, end).startsWith("HTTP/1.1 101")) throw new Error("upgrade failed");
+      upgraded = true;
+      data = data.slice(end + 4);
+      client.write(Buffer.concat([
+        clientFrame(false, 0x1, "1234"),
+        clientFrame(true, 0x0, "5678")
+      ]));
+    }
+    if (data.length >= 2 && (data[0] & 0x0f) === 0x8) {
+      console.log(JSON.stringify({ close: true, handled }));
+      client.destroy();
+      app.stop().then(() => process.exit(0));
+    }
+  });
+  setTimeout(() => process.exit(2), 1000);
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"close":true,"handled":false}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn websocket_unmasked_client_frames_are_rejected() {
+    let text = run_runtime(
+        "websocket-unmasked",
+        r#"
+const net = require("node:net");
+const crypto = require("node:crypto");
+const app = runtime.server(0);
+let handled = false;
+app.ws("/echo", (socket) => {
+  socket.onMessage(() => { handled = true; });
+});
+app.start(() => {
+  const client = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0);
+  let upgraded = false;
+  client.on("connect", () => {
+    client.write([
+      "GET /echo HTTP/1.1",
+      "Host: 127.0.0.1:" + app.port(),
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Key: " + crypto.randomBytes(16).toString("base64"),
+      "Sec-WebSocket-Version: 13",
+      "",
+      ""
+    ].join("\r\n"));
+  });
+  client.on("data", (chunk) => {
+    data = Buffer.concat([data, chunk]);
+    if (!upgraded) {
+      const end = data.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      if (!data.toString("ascii", 0, end).startsWith("HTTP/1.1 101")) throw new Error("upgrade failed");
+      upgraded = true;
+      data = data.slice(end + 4);
+      client.write(Buffer.from([0x81, 0x01, 0x78]));
+    }
+    if (data.length >= 2 && (data[0] & 0x0f) === 0x8) {
+      console.log(JSON.stringify({ close: true, handled }));
+      client.destroy();
+      app.stop().then(() => process.exit(0));
+    }
+  });
+  setTimeout(() => process.exit(2), 1000);
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"close":true,"handled":false}"#),
+        "{text}"
+    );
 }
 
 #[test]
@@ -902,4 +1762,204 @@ fn list_of(source: &str, start: &str, end: &str) -> Vec<String> {
     }
     out.sort();
     out
+}
+
+
+#[test]
+fn the_server_has_the_pieces_that_keep_a_browser_from_doing_what_it_should_not() {
+    let text = run_runtime(
+        "security",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use(runtime.security());
+app.get("/", (req) => "hello");
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/", (res) => {
+    console.log(res.headers["x-content-type-options"]);
+    console.log(res.headers["x-frame-options"]);
+    console.log(!!res.headers["content-security-policy"]);
+    app.stop();
+    process.exit(0);
+  });
+});
+"#,
+    );
+    assert!(text.contains("nosniff"), "{text}");
+    assert!(text.contains("SAMEORIGIN"), "{text}");
+    assert!(text.contains("true"), "{text}");
+}
+
+#[test]
+fn the_requests_of_a_visitor_are_limited() {
+    let text = run_runtime(
+        "rate-limit",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.use(runtime.rateLimit({ limit: 2 }));
+app.get("/", (req) => "hello");
+app.start(() => {
+  const ask = () => new Promise((resolve) => {
+    http.get("http://127.0.0.1:" + app.port() + "/", (res) => {
+      res.on("data", () => {});
+      res.on("end", () => resolve(res.statusCode));
+    });
+  });
+  (async () => {
+    console.log(await ask());
+    console.log(await ask());
+    console.log(await ask());
+    app.stop();
+    process.exit(0);
+  })();
+});
+"#,
+    );
+    assert!(text.contains("200"), "{text}");
+    assert!(text.contains("429"), "{text}");
+}
+
+#[test]
+fn forwarded_ip_and_protocol_are_used_only_when_proxy_is_trusted() {
+    let text = run_runtime(
+        "trust-proxy",
+        r#"
+const http = require("node:http");
+function listen(trustProxy) {
+  return new Promise((resolve) => {
+    const app = runtime.server(0, { trustProxy });
+    app.get("/", (req) => ({ ip: req.ip, protocol: req.protocol }));
+    app.start(() => resolve(app));
+  });
+}
+function ask(app) {
+  return new Promise((resolve) => {
+    http.get({
+      host: "127.0.0.1",
+      port: app.port(),
+      path: "/",
+      headers: {
+        "X-Forwarded-For": "203.0.113.42, 10.0.0.1",
+        "X-Forwarded-Proto": "https, http"
+      }
+    }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => resolve(JSON.parse(body)));
+    });
+  });
+}
+(async () => {
+  const untrusted = await listen(false);
+  const untrustedRequest = await ask(untrusted);
+  await untrusted.stop();
+  const trusted = await listen(true);
+  const trustedRequest = await ask(trusted);
+  await trusted.stop();
+  if (untrustedRequest.ip === "203.0.113.42" || untrustedRequest.protocol !== "http") {
+    throw new Error("untrusted forwarded headers were used");
+  }
+  if (trustedRequest.ip !== "203.0.113.42" || trustedRequest.protocol !== "https") {
+    throw new Error("trusted forwarded headers were ignored");
+  }
+  console.log("proxy trust behavior verified");
+  process.exit(0);
+})();
+"#,
+    );
+    assert_eq!(text.lines().last(), Some("proxy trust behavior verified"));
+}
+
+#[test]
+fn a_request_that_takes_too_long_is_refused() {
+    let text = run_runtime(
+        "timeout",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0, { timeout: 50 });
+app.get("/", (req) => new Promise(() => {}));
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/", (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(res.statusCode);
+      app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains("408"), "{text}");
+}
+
+#[test]
+fn the_files_of_a_folder_are_served_before_the_routes() {
+    let text = run_runtime(
+        "static-first",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const folder = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-"));
+nodeFs.writeFileSync(path.join(folder, "a.txt"), "the file");
+const app = runtime.server(0);
+app.get("/a.txt", () => "the route");
+app.static(folder);
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/a.txt", (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(body);
+      app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert!(text.contains("the file"), "{text}");
+}
+
+#[test]
+fn a_part_of_a_file_may_be_asked_for() {
+    let text = run_runtime(
+        "range",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const folder = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-range-"));
+nodeFs.writeFileSync(path.join(folder, "a.txt"), "0123456789");
+const app = runtime.server(0);
+app.static(folder);
+app.start(() => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/a.txt",
+    headers: { Range: "bytes=2-5" }
+  }, (res) => {
+    let body = "";
+    res.on("data", (chunk) => { body += chunk; });
+    res.on("end", () => {
+      console.log(res.statusCode);
+      console.log(body);
+      console.log(res.headers["content-range"]);
+      app.stop();
+      process.exit(0);
+    });
+  });
+  request.end();
+});
+"#,
+    );
+    assert!(text.contains("206"), "{text}");
+    assert!(text.contains("2345"), "{text}");
+    assert!(text.contains("bytes 2-5/10"), "{text}");
 }

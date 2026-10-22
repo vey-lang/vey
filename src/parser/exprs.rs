@@ -256,7 +256,10 @@ impl Parser {
                 );
             } else if self.is_punct("(") {
                 let pos = self.tok.pos;
-                let args = self.parse_args()?;
+                // The path of a route is a pattern, so the braces in it name
+                // a part of the path and are not an interpolation.
+                let path = matches!(&expr, Expr::Ident(name, _) if name == "route" || name == "navigate");
+                let args = self.parse_args_with(path)?;
                 expr = Expr::Call(Box::new(expr), args, false, pos);
             } else if self.is_op("<") && self.type_arguments_ahead() {
                 // The call names its type arguments, as in
@@ -420,6 +423,14 @@ impl Parser {
     }
 
     pub(crate) fn parse_args(&mut self) -> Result<Vec<Expr>, VeyError> {
+        self.parse_args_with(false)
+    }
+
+    /// The arguments of a call.
+    ///
+    /// The path of a route is a pattern: the braces in it name a part of
+    /// the path, and they are not an interpolation.
+    fn parse_args_with(&mut self, path: bool) -> Result<Vec<Expr>, VeyError> {
         self.expect_punct("(")?;
         let mut args = Vec::new();
         // The arguments that are given by name, held in one object.
@@ -438,6 +449,29 @@ impl Parser {
                     self.advance()?;
                     let value = self.parse_expression()?;
                     named.push((name, value));
+                } else if path && args.is_empty() && self.tok.kind == TokKind::Str {
+                    // The path of a route is a pattern: the braces in it
+                    // name a part of the path, and they are not an
+                    // interpolation.
+                    let token = self.advance()?;
+                    let mut text = String::new();
+                    for part in &token.parts {
+                        match &part.expr {
+                            Some((source, _)) => {
+                                text.push('{');
+                                text.push_str(source);
+                                text.push('}');
+                            }
+                            None => text.push_str(&crate::lexer::process_escapes(&part.text)),
+                        }
+                    }
+                    args.push(Expr::String(
+                        vec![StrPart {
+                            text,
+                            expr: None,
+                        }],
+                        token.pos,
+                    ));
                 } else {
                     args.push(self.parse_expression()?);
                 }

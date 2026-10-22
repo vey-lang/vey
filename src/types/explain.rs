@@ -3,13 +3,24 @@
 //! The command `vey explain` asks this question: what is the type of the
 //! expression that is written at that line and column?
 
+use std::collections::HashMap;
+
 use crate::ast::*;
 use crate::lexer::Pos;
-use crate::types::checker::TypeChecker;
+use crate::types::checker::{ModuleTypeEnv, TypeChecker};
 use crate::VeyError;
 
 /// The type of the expression at a place of a program.
-pub fn explain(program: &Program, file: &str, line: usize, col: usize) -> Result<String, VeyError> {
+///
+/// The modules that the file uses are given, so that the types of another
+/// module are known as well.
+pub fn explain(
+    program: &Program,
+    file: &str,
+    line: usize,
+    col: usize,
+    imports: &HashMap<String, ModuleTypeEnv>,
+) -> Result<String, VeyError> {
     let point = Pos::new(line, col);
     let mut walker = Walker {
         point,
@@ -27,7 +38,7 @@ pub fn explain(program: &Program, file: &str, line: usize, col: usize) -> Result
         ));
     };
 
-    let mut checker = TypeChecker::for_explain(program, file)?;
+    let mut checker = TypeChecker::for_explain(program, file, imports)?;
     // A name inside a function is known to that function, so the function
     // that holds it is checked first.
     if let Some((params, body, ret)) = &walker.best_function {

@@ -418,3 +418,46 @@ bind("#app", App())
     // The message of the program is shown on its own, without a stack.
     assert!(!error.contains("at Object.bind"), "{error}");
 }
+
+#[test]
+fn a_name_of_the_top_level_hides_the_helper_of_the_runtime() {
+    // The name of the top level is known before the body is written, so a
+    // function that is written above it still uses the name of the
+    // program and not the helper of the runtime.
+    assert_prints(
+        "shadow-top-level",
+        r#"
+fn f() { return value }
+let value = 42
+print(f())
+"#,
+        "42",
+    );
+}
+
+#[test]
+fn a_helper_of_the_runtime_is_used_when_no_name_hides_it() {
+    assert_prints(
+        "helper-not-shadowed",
+        r#"
+fn f() { return len("abc") }
+print(f())
+"#,
+        "3",
+    );
+}
+
+#[test]
+fn a_name_that_hides_a_helper_may_not_be_called() {
+    // The program calls a number, so it must not silently call the helper
+    // of the runtime instead.
+    let error = run_fails(
+        "shadow-is-not-called",
+        r#"
+fn f() { return len("abc") }
+let len = 5
+print(f())
+"#,
+    );
+    assert!(error.contains("is not a function"), "{error}");
+}

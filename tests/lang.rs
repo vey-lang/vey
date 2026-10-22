@@ -734,9 +734,15 @@ bind("#app", Missing())
     let index = fs::read_to_string(dir.join("site/index.js")).unwrap();
     assert!(index.contains("Home page"), "{}", index);
     assert!(!index.contains("PUBLIC INDEX"), "{}", index);
-    let missing = fs::read_to_string(dir.join("site/404.js")).unwrap();
+    let missing = fs::read_to_string(dir.join("site/404.html")).unwrap();
     assert!(missing.contains("Not found here"), "{}", missing);
     assert!(!missing.contains("PUBLIC 404"), "{}", missing);
+    assert!(missing.contains("<script>"), "404 page has no inline script: {missing}");
+    assert!(
+        !missing.contains("src=\"404.js\""),
+        "404 page must not load its script from a relative URL: {missing}"
+    );
+    assert!(!dir.join("site/404.js").exists());
     assert!(dir.join("site/robots.txt").is_file());
     assert!(dir.join("site/assets/app.svg").is_file());
 }
@@ -755,20 +761,22 @@ fn new_project_builds_and_curate_is_gone() {
 
     for file in [
         "src/main.vey",
+        "src/site.vey",
         "src/styles/site.css",
         "public/robots.txt",
         "public/logo.svg",
         "public/favicon.svg",
+        "tests/site.vey",
         "package.json",
         "README.md",
         ".gitignore",
     ] {
         assert!(project.join(file).is_file(), "missing {}", file);
     }
-    // The page of an unknown address and the tests are built in, so a new
-    // project does not need them.
+    // The page of an unknown address is built in, so a new project does not
+    // need one of its own. The tests are there, so that the `vey test` of the
+    // continuous integration runs something instead of passing quietly.
     assert!(!project.join("src/404.vey").exists());
-    assert!(!project.join("tests").exists());
 
     let build = Command::new(env!("CARGO_BIN_EXE_vey"))
         .arg("build")
@@ -776,6 +784,14 @@ fn new_project_builds_and_curate_is_gone() {
         .output()
         .unwrap();
     assert!(build.status.success(), "{}", stderr(&build));
+
+    // The test of the new project runs, and it passes.
+    let test = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("test")
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(test.status.success(), "{}", stderr(&test));
     assert!(!project.join("main.vey").exists());
     // The content of a page is in the script of the page.
     let index = fs::read_to_string(project.join(".dist/index.js")).unwrap();
@@ -805,7 +821,7 @@ fn new_project_builds_and_curate_is_gone() {
         assert!(!css.contains(pattern), "unexpected {} in style", pattern);
     }
 
-    let landing = fs::read_to_string(project.join("src/main.vey")).unwrap();
+    let landing = fs::read_to_string(project.join("src/site.vey")).unwrap();
     assert!(landing.contains("logo.svg"), "{}", landing);
     assert!(landing.contains("Welcome to Vey"), "{}", landing);
 
@@ -1949,5 +1965,45 @@ fn a_module_may_only_be_used_at_the_top_level() {
         "fn run() {\n  use \"./other.vey\"\n}\n",
         "use-inside",
         "only be used at the top level",
+    );
+}
+
+#[test]
+fn a_form_follows_its_values_and_says_what_is_wrong() {
+    let dir = temp_dir("form");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let f = form({ name: "", age: 0 }, { check: fn(values) {
+  let found = {}
+  if values.name == "" { found.name = "a name is needed" }
+  return found
+} })
+
+fn run() {
+  print(f.valid.value)
+  print(f.errors.value.name)
+  f.set("name", "ada")
+  print(f.valid.value)
+  print(f.dirty.value)
+  print(f.values.value.name)
+  let answer = await f.submit(fn(values) { return "sent " + values.name })
+  print(answer)
+  f.reset()
+  print(f.dirty.value)
+  print(f.values.value.name)
+}
+
+run()
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        "false\na name is needed\ntrue\ntrue\nada\nsent ada\nfalse"
     );
 }

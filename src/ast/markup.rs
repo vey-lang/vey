@@ -19,6 +19,8 @@ pub struct Element {
     pub classes: Vec<String>,
     pub id: Option<String>,
     pub attrs: Vec<(String, Expr)>,
+    /// The props that are spread into the element, e.g. `Card ...props`.
+    pub spreads: Vec<Expr>,
     /// Positional arguments of a component call, e.g. `Card("title")`.
     pub args: Vec<Expr>,
     /// The name of the slot the element goes in, when it is not the default

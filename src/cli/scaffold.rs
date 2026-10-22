@@ -102,7 +102,12 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     println!("next:");
     println!("  cd {}", name);
     match template {
-        Template::Page | Template::Server => println!("  vey dev"),
+        Template::Page => println!("  vey dev"),
+        // A server is a program of Node, so it is built and then run.
+        Template::Server => {
+            println!("  vey build --node -o server.cjs");
+            println!("  node server.cjs");
+        }
         // A library has no page, so the file of it is named.
         Template::Lib => println!("  vey check src/lib.vey"),
     }
@@ -135,18 +140,21 @@ fn template_from(name: Option<&str>) -> Result<Template, String> {
 fn page_files(project: &str) -> Vec<(&'static str, String)> {
     vec![
         ("src/main.vey", PROJECT_MAIN.to_string()),
+        ("src/site.vey", PROJECT_SITE.to_string()),
         ("src/styles/site.css", PROJECT_STYLE.to_string()),
         ("public/logo.svg", PROJECT_LOGO.to_string()),
         ("public/favicon.svg", PROJECT_FAVICON.to_string()),
         ("public/robots.txt", ROBOTS.to_string()),
+        ("tests/site.vey", PROJECT_TEST.to_string()),
         (
             "package.json",
             PROJECT_PACKAGE.replace("{name}", &package_name(project)),
         ),
         ("README.md", PROJECT_README.replace("{name}", project)),
+        ("vey.toml", CONFIG.replace("{name}", project).to_string()),
         (".gitignore", GITIGNORE.to_string()),
-        ("Dockerfile", DOCKERFILE.to_string()),
-        (".github/workflows/ci.yml", CI_WORKFLOW.to_string()),
+        ("Dockerfile", PAGE_DOCKERFILE.to_string()),
+        (".github/workflows/ci.yml", ci_workflow("vey check")),
     ]
 }
 
@@ -154,28 +162,36 @@ fn page_files(project: &str) -> Vec<(&'static str, String)> {
 fn server_files(project: &str) -> Vec<(&'static str, String)> {
     let mut files = page_files(project);
     for file in files.iter_mut() {
-        if file.0 == "src/main.vey" {
-            file.1 = SERVER_MAIN.to_string();
-        }
-        if file.0 == "README.md" {
-            file.1 = SERVER_README.replace("{name}", project);
+        match file.0 {
+            "src/main.vey" => file.1 = SERVER_MAIN.to_string(),
+            "src/site.vey" => file.1 = SERVER_SITE.to_string(),
+            "tests/site.vey" => file.1 = SERVER_TEST.to_string(),
+            "package.json" => {
+                file.1 = SERVER_PACKAGE.replace("{name}", &package_name(project))
+            }
+            "README.md" => file.1 = SERVER_README.replace("{name}", project),
+            "Dockerfile" => file.1 = SERVER_DOCKERFILE.to_string(),
+            _ => {}
         }
     }
     files
 }
 
 /// The files of a project that is a library.
+///
+/// A library has no page to show and no server to run, so it has no
+/// container either: the image of it would have nothing to do.
 fn lib_files(project: &str) -> Vec<(&'static str, String)> {
     vec![
         ("src/lib.vey", LIB_MAIN.to_string()),
+        ("tests/lib.vey", LIB_TEST.to_string()),
         (
             "package.json",
             LIB_PACKAGE.replace("{name}", &package_name(project)),
         ),
         ("README.md", LIB_README.replace("{name}", project)),
         (".gitignore", GITIGNORE.to_string()),
-        ("Dockerfile", DOCKERFILE.to_string()),
-        (".github/workflows/ci.yml", CI_WORKFLOW.to_string()),
+        (".github/workflows/ci.yml", ci_workflow("vey check src/lib.vey")),
     ]
 }
 
@@ -202,7 +218,40 @@ fn package_name(project: &str) -> String {
     }
 }
 
-pub(crate) const PROJECT_MAIN: &str = r##"use "./styles/site.css"
+/// The settings of a new project.
+const CONFIG: &str = r#"# The settings of the project.
+#
+# The options of the command line are stronger than these.
+
+# The port that the server listens on.
+port = 4000
+
+# The host that the server listens on.
+host = "127.0.0.1"
+
+# The title of the site.
+title = "{name}"
+
+# The folder the site is written to.
+out = ".dist"
+
+[lint]
+# The length of a line that is still easy to read.
+maxLine = 100
+"#;
+
+const PROJECT_MAIN: &str = r##"// The entry of the site: the page is put on the screen.
+//
+// The parts of the page live in `src/site.vey`, so that a test may use them
+// without putting anything on a screen.
+
+use "./site.vey" as site
+
+bind("#app", site.App())
+"##;
+
+/// The page itself: the styles it uses and the component it shows.
+const PROJECT_SITE: &str = r##"use "./styles/site.css"
 
 style {
   .start {
@@ -225,14 +274,21 @@ style {
   }
 }
 
-component App() {
+export component App() {
   main.start {
     img.mark src="/logo.svg" alt="" width="52" height="52"
     h1 { "Welcome to Vey" }
   }
 }
+"##;
 
-bind("#app", App())
+/// The first test of a new site: the page that the site shows.
+const PROJECT_TEST: &str = r##"use "../src/site.vey" as site
+
+test("the welcome page greets the visitor", fn() {
+  let page = html(site.App())
+  assert(includes(page, "Welcome to Vey"), "the heading should be in the page")
+})
 "##;
 
 pub(crate) const PROJECT_STYLE: &str = r##"/* The styles of the site.
@@ -315,10 +371,30 @@ const ROBOTS: &str = "User-agent: *\nAllow: /\n";
 /// A project with a server.
 const SERVER_MAIN: &str = r##"// A server that answers with a page.
 //
-// The server is started with `vey dev` or `vey run`, and the page is at
-// http://localhost:4000.
+// The server is built into one program of Node with `npm start` (or
+// `vey build --node -o server.cjs` and `node server.cjs`), and the page is
+// at http://localhost:4000.
 
-use "./styles/site.css"
+use "./site.vey" as site
+
+let app = server(4000)
+
+app.get("/", fn(req) {
+  print(req.path)
+  return response(html(site.App("world")), 200, { "Content-Type": "text/html; charset=utf-8" })
+})
+
+// The files of `public/` are served as they are, so the page may ask for
+// `/logo.svg` and `/favicon.svg`.
+app.static("public")
+
+app.start()
+"##;
+
+/// The page that the server answers with.
+///
+/// Nothing here starts anything, so a test may use the component as well.
+const SERVER_SITE: &str = r##"use "./styles/site.css"
 
 style {
   body {
@@ -328,47 +404,75 @@ style {
   }
 }
 
-component App(name: string) {
+export component App(name: string) {
   main {
     h1 { "Hello, " + name }
   }
 }
+"##;
 
-server(4000)
-  .get("/", fn(req) {
-    print(req.path)
-    return response(html(App("world")), 200, { "Content-Type": "text/html; charset=utf-8" })
-  })
+/// The first test of a new server: the page that it answers with.
+const SERVER_TEST: &str = r##"use "../src/site.vey" as site
+
+test("the server greets the one that opens the page", fn() {
+  let page = html(site.App("world"))
+  assert(includes(page, "Hello, world"), "the greeting should be in the page")
+})
 "##;
 
 const SERVER_README: &str = r##"# {name}
 
 A server written with [Vey](https://vey-lang.dev).
 
-## Development
+## Run
 
 ```sh
-npm run dev     # or: vey dev
+npm start
 ```
 
-The server watches the files of the project, rebuilds when one of them
-changes and reloads the page in the browser.
+The server is built into one program of Node (`server.cjs`) and started, and
+the page is at http://localhost:4000. `npm run build` only builds it, and
+`npm run dev` does what `npm start` does.
 
-## Build
+The same work by hand:
 
 ```sh
-npm run build   # or: vey build
+vey build --node -o server.cjs
+node --enable-source-maps server.cjs
 ```
 
-The site is written to `.dist/`.
+## Check and test
+
+```sh
+npm run check   # or: vey check
+npm test        # or: vey test
+```
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `src/main.vey` | the server and the page |
-| `src/styles/site.css` | the styles of the site |
-| `public/` | the files that are copied as they are |
+| `src/main.vey` | the server: the routes and the start |
+| `src/site.vey` | the page that the server answers with |
+| `src/styles/site.css` | the styles of the page |
+| `public/` | the files that are served as they are |
+| `tests/site.vey` | the tests of the page |
+"##;
+
+/// The scripts of the package of a server.
+const SERVER_PACKAGE: &str = r##"{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A server written with Vey.",
+  "scripts": {
+    "dev": "npm start",
+    "start": "vey build --node -o server.cjs && node --enable-source-maps server.cjs",
+    "build": "vey build --node -o server.cjs",
+    "test": "vey test",
+    "check": "vey check"
+  }
+}
 "##;
 
 /// A library.
@@ -394,20 +498,33 @@ const LIB_PACKAGE: &str = r##"{
   "private": true,
   "description": "A library written with Vey.",
   "scripts": {
-    "check": "vey check",
+    "check": "vey check src/lib.vey",
     "test": "vey test"
   }
 }
+"##;
+
+/// The first test of a new library.
+const LIB_TEST: &str = r##"use "../src/lib.vey" as lib
+
+test("the greeting names the one it greets", fn() {
+  assert(lib.greet("world") == "Hello, world", "greet should say hello")
+})
+
+test("the letters of a text are counted", fn() {
+  assert(lib.countLetters("vey") == 3, "vey has three letters")
+})
 "##;
 
 const LIB_README: &str = r##"# {name}
 
 A library written with [Vey](https://vey-lang.dev).
 
-## Check
+## Check and test
 
 ```sh
-npm run check   # or: vey check
+npm run check   # or: vey check src/lib.vey
+npm test        # or: vey test
 ```
 
 ## Layout
@@ -415,10 +532,34 @@ npm run check   # or: vey check
 | Path | What it is |
 | --- | --- |
 | `src/lib.vey` | the library |
+| `tests/lib.vey` | the tests of the library |
 "##;
 
-/// The recipe of a container that runs the project.
-const DOCKERFILE: &str = r##"FROM node:22-alpine
+/// The recipe of a container that serves the site of the project.
+///
+/// The site is built when the container is made, so a page that cannot be
+/// built stops the image from being made. It is served by Vey itself, the
+/// way a host serves it; the address is every one of the machine, because
+/// the container is reached from outside of it.
+const PAGE_DOCKERFILE: &str = r##"FROM node:22-alpine
+
+WORKDIR /app
+
+# The compiler that builds and serves the project.
+RUN npm install -g vey
+
+COPY . .
+
+RUN vey build
+
+EXPOSE 4000
+CMD ["vey", "run", "--host", "0.0.0.0", "--port", "4000"]
+"##;
+
+/// The recipe of a container that runs the server of the project.
+///
+/// The server is one program of Node, which is what the container runs.
+const SERVER_DOCKERFILE: &str = r##"FROM node:22-alpine
 
 WORKDIR /app
 
@@ -427,15 +568,21 @@ RUN npm install -g vey
 
 COPY . .
 
-# The site is built when the container is made, and served by the runtime
-# of Node.
-RUN vey build
+# The server is built into one file, so that the container only runs it.
+RUN vey build --node -o server.cjs
 
 EXPOSE 4000
-CMD ["node", ".dist/server.cjs"]
+CMD ["node", "--enable-source-maps", "server.cjs"]
 "##;
 
 /// The recipe of the continuous integration.
+///
+/// The command that checks the project is different for every shape of a
+/// project, so it is put in the place of `{check}`.
+fn ci_workflow(check: &str) -> String {
+    CI_WORKFLOW.replace("{check}", check)
+}
+
 const CI_WORKFLOW: &str = r##"name: ci
 
 on:
@@ -452,7 +599,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g vey
-      - run: vey check
+      - run: {check}
       - run: vey test
 "##;
 
@@ -505,9 +652,11 @@ npm start       # or: vey run
 
 | Path | What it is |
 | --- | --- |
-| `src/main.vey` | the page |
+| `src/main.vey` | the entry: the page is put on the screen |
+| `src/site.vey` | the component of the page and its styles |
 | `src/styles/site.css` | the styles of the site |
 | `public/` | the files that are copied as they are |
+| `tests/site.vey` | the tests of the page |
 
 ## Styles
 
@@ -537,4 +686,14 @@ only be used in a program and not in a page of the site.
 
 `src/404.vey` is the page of an unknown address. Without it, Vey writes a
 plain page of its own.
+
+## Tests
+
+```sh
+npm test       # or: vey test
+```
+
+`tests/site.vey` tests the page of the site: it renders the component and
+looks at what it says. The page is imported from `src/site.vey`, so the test
+uses the same file the site uses, and nothing is put on a screen.
 "##;

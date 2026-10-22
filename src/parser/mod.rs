@@ -363,6 +363,28 @@ impl Parser {
         self.parse_expr_or_assign()
     }
 
+    /// Whether the code that is here is a call of its own.
+    ///
+    /// A component may have work of its own before its markup, such as
+    /// `provide("theme", theme)`. A name with a big letter is a component
+    /// of the markup, so it is not a call of its own.
+    fn call_statement_ahead(&mut self) -> Result<bool, VeyError> {
+        if self.tok.kind != TokKind::Ident {
+            return Ok(false);
+        }
+        if self
+            .tok
+            .value
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_uppercase())
+        {
+            return Ok(false);
+        }
+        let next = self.peek()?;
+        Ok(next.kind == TokKind::Punct && next.value == "(")
+    }
+
     fn parse_declaration(&mut self) -> Result<Stmt, VeyError> {
         if self.is_kw("let") || self.is_kw("const") {
             return self.parse_var(false);
@@ -479,11 +501,18 @@ impl Parser {
             return Err(self.error_at(self.tok.pos, "a component has no return type"));
         }
         self.expect_punct("{")?;
+        // A component may have values of its own, which are kept when the
+        // page is written again.
+        let mut body = Vec::new();
+        while self.is_kw("let") || self.is_kw("const") || self.call_statement_ahead()? {
+            body.push(self.parse_statement()?);
+        }
         let children = self.parse_markup_nodes()?;
         self.expect_punct("}")?;
         Ok(Stmt::Component(ComponentDecl {
             name,
             params,
+            body,
             children,
             exported,
             pos: start.pos,

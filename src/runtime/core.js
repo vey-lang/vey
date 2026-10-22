@@ -180,6 +180,19 @@ function veyCore(ctx) {
 
   var pendingTests = 0;
 
+  // The number of the tests that passed and of the ones that failed.
+  var passedTests = 0;
+  var failedTests = 0;
+  var summaryPrinted = false;
+
+  // The number of the tests is said when the program is done, so that
+  // the one that runs them may tell it.
+  function printSummary() {
+    if (summaryPrinted) return;
+    summaryPrinted = true;
+    log.log("VEY_TESTS: " + passedTests + " passed, " + failedTests + " failed");
+  }
+
   var testKeepAlive = null;
 
   function startTestKeepAlive() {
@@ -189,9 +202,12 @@ function veyCore(ctx) {
 
   function finishTest() {
     pendingTests -= 1;
-    if (pendingTests <= 0 && testKeepAlive) {
-      clearInterval(testKeepAlive);
-      testKeepAlive = null;
+    if (pendingTests <= 0) {
+      if (testKeepAlive) {
+        clearInterval(testKeepAlive);
+        testKeepAlive = null;
+      }
+      printSummary();
     }
   }
 
@@ -207,6 +223,15 @@ function veyCore(ctx) {
     if (filter && String(name).indexOf(filter) === -1) {
       return;
     }
+    // The number of the tests is said when the program is done.
+    if (isNode && !summaryPrinted) {
+      try {
+        nodeModule("node:process").on("exit", printSummary);
+      } catch (err) {
+        // The host has no way of saying it, so the number is said at the
+        // end of the last test.
+      }
+    }
     try {
       var result = fn();
       if (result && typeof result.then === "function") {
@@ -215,6 +240,7 @@ function veyCore(ctx) {
         return result.then(
           function () {
             try {
+              passedTests += 1;
               log.log("ok " + name);
             } finally {
               finishTest();
@@ -229,6 +255,7 @@ function veyCore(ctx) {
           }
         );
       }
+      passedTests += 1;
       log.log("ok " + name);
     } catch (err) {
       failTest(name, err);
@@ -236,6 +263,7 @@ function veyCore(ctx) {
   }
 
   function failTest(name, err) {
+    failedTests += 1;
     log.error("fail " + name);
     log.error(testFailure(err));
     if (isNode) nodeModule("node:process").exitCode = 1;
@@ -260,6 +288,24 @@ function veyCore(ctx) {
     return Promise.race(list || []);
   }
 
+  // A number that is random, in a way that may be used for a secret.
+  //
+  // The bytes of the host are used when it has them, so that a name, a
+  // token or a password is not guessable from the shape of the number.
+  function secureRandom() {
+    var host = scope.crypto;
+    if (host && host.getRandomValues) {
+      try {
+        var bytes = new Uint32Array(1);
+        host.getRandomValues(bytes);
+        return bytes[0] / 4294967296;
+      } catch (err) {
+        // The host does not give bytes, so the ordinary number is used.
+      }
+    }
+    return Math.random();
+  }
+
   function uuid() {
     if (isNode) {
       var cryptoModule = nodeModule("node:crypto");
@@ -267,16 +313,16 @@ function veyCore(ctx) {
     }
     if (scope.crypto && scope.crypto.randomUUID) return scope.crypto.randomUUID();
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (ch) {
-      var value = Math.random() * 16 | 0;
+      var value = secureRandom() * 16 | 0;
       var nibble = ch === "x" ? value : (value & 0x3 | 0x8);
       return nibble.toString(16);
     });
   }
 
   function random(min, max) {
-    if (min === undefined && max === undefined) return Math.random();
+    if (min === undefined && max === undefined) return secureRandom();
     if (max === undefined) { max = min; min = 0; }
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(secureRandom() * (max - min + 1)) + min;
   }
 
   function clamp(value, min, max) {
@@ -336,11 +382,18 @@ function veyCore(ctx) {
 
   // The kind of a value, which is what a check of a type looks at.
   function is(value, kind) {
+    // A value of an unknown type may be of any kind, and one of no type is
+    // of none of them.
+    if (kind === "any" || kind === "unknown") return true;
+    if (kind === "never") return false;
     if (kind === "number") return typeof value === "number";
     if (kind === "string") return typeof value === "string";
     if (kind === "boolean") return typeof value === "boolean";
+    if (kind === "symbol") return typeof value === "symbol";
+    if (kind === "bigint") return typeof value === "bigint";
     if (kind === "null") return value === null;
-    if (kind === "undefined") return value === undefined;
+    // The value of a function that gives nothing back is not there.
+    if (kind === "undefined" || kind === "void") return value === undefined;
     if (kind === "list") return Array.isArray(value);
     if (kind === "function") return typeof value === "function";
     if (kind === "object") {

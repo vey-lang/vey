@@ -8,6 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use vey::compiler::compile_project;
 
 use crate::cli::args::parse_args;
+use crate::cli::config::Config;
 use crate::cli::dev::{serve, DEFAULT_PORT};
 use crate::cli::entry::{collect_tool_files, collect_vey_files, default_title, entry_from, project_root};
 use crate::cli::output::{node_script, print_command_help, report, report_warnings, temp_file};
@@ -34,14 +35,19 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
         }
     };
 
+    // The settings of the project may say where the server listens and
+    // what the title of the site is.
+    let config = Config::find(&project_root(&entry));
     let host = parsed
         .host
         .clone()
+        .or_else(|| config.host.clone())
         .unwrap_or_else(|| "127.0.0.1".to_string());
-    let port = parsed.port.unwrap_or(DEFAULT_PORT);
+    let port = parsed.port.or(config.port).unwrap_or(DEFAULT_PORT);
     let title = parsed
         .title
         .clone()
+        .or_else(|| config.title.clone())
         .unwrap_or_else(|| default_title(&entry));
 
     // The site is served the way a host would serve it: without the watcher
@@ -100,8 +106,8 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
     if parsed.watch {
         // The tests are run again and again, as long as the files change.
         loop {
-            let failed = run_tests(&files, &parsed);
-            if !wait_for_change(&files) {
+            let (failed, watched_files) = run_tests(&files, &parsed);
+            if !wait_for_change(&watched_files) {
                 break;
             }
             if failed > 0 {
@@ -111,7 +117,7 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
         return 0;
     }
 
-    let failed = run_tests(&files, &parsed);
+    let (failed, _) = run_tests(&files, &parsed);
     if failed == 0 {
         println!("{} file(s) passed", files.len());
         0
@@ -122,18 +128,28 @@ pub(crate) fn cmd_test(args: &[String]) -> i32 {
 }
 
 /// Run the tests of the files, and say how many of them failed.
-fn run_tests(files: &[PathBuf], parsed: &crate::cli::args::ParsedArgs) -> usize {
+fn run_tests(
+    files: &[PathBuf],
+    parsed: &crate::cli::args::ParsedArgs,
+) -> (usize, Vec<PathBuf>) {
     let mut failed = 0;
+    // The number of the tests that passed and of the ones that failed.
+    let mut passed = 0usize;
+    let mut broken = 0usize;
+    let mut watched_files = files.to_vec();
     for file in files {
         println!("test {}", file.display());
         let bundle = match compile_project(file) {
             Ok(bundle) => bundle,
             Err(err) => {
+                watched_files.push(PathBuf::from(&err.file));
                 report(&err);
                 failed += 1;
                 continue;
             }
         };
+        watched_files.extend(bundle.modules.iter().map(|module| module.path.clone()));
+        watched_files.extend(bundle.styles.iter().map(|style| style.path.clone()));
 
         let temp = temp_file("vey-test", "cjs");
         if let Err(err) = fs::write(&temp, node_script(&bundle)) {
@@ -143,26 +159,64 @@ fn run_tests(files: &[PathBuf], parsed: &crate::cli::args::ParsedArgs) -> usize 
         }
         report_warnings(&bundle.warnings);
 
-        let status = Command::new("node")
+        // The test may take a while, but not for ever.
+        let output = Command::new("node")
             .arg("--enable-source-maps")
             .arg(&temp)
             .env("VEY_TEST", "1")
             .envs(node_path(file))
             .envs(test_filter(parsed))
-            .status();
+            .output();
         let _ = fs::remove_file(&temp);
 
-        match status {
-            Ok(status) if status.success() => {}
-            Ok(_) => failed += 1,
+        let output = match output {
+            Ok(output) => output,
             Err(err) => {
                 eprintln!("cannot start node: {}", err);
                 eprintln!("node is required to run Vey tests");
                 failed += 1;
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&output.stdout).to_string();
+        print!("{}", text);
+        let errors = String::from_utf8_lossy(&output.stderr).to_string();
+        if !errors.is_empty() {
+            eprint!("{}", errors);
+        }
+        // The number of the tests is said by the program, so that the one
+        // that runs them may tell it.
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("VEY_TESTS: ") {
+                let mut parts = rest.split(", ");
+                if let Some(good) = parts.next() {
+                    passed += good
+                        .split_whitespace()
+                        .next()
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(0);
+                }
+                if let Some(bad) = parts.next() {
+                    broken += bad
+                        .split_whitespace()
+                        .next()
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(0);
+                }
             }
         }
+
+        if output.status.success() {
+            continue;
+        }
+        failed += 1;
     }
-    failed
+    if passed + broken > 0 {
+        println!("{} test(s) passed, {} failed", passed, broken);
+    }
+    watched_files.sort();
+    watched_files.dedup();
+    (failed, watched_files)
 }
 
 /// Wait until one of the files changes.

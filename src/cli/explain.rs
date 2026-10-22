@@ -5,9 +5,9 @@
 //! program.
 
 use std::fs;
+use std::path::Path;
 
-use vey::parser::Parser;
-use vey::types;
+use vey::compiler;
 
 use crate::cli::args::parse_args;
 use crate::cli::output::print_command_help;
@@ -46,23 +46,13 @@ pub(crate) fn cmd_explain(args: &[String]) -> i32 {
             return 1;
         }
     };
+    // The file is read, so that a file that is not there is said before
+    // anything else is tried.
+    let _ = source;
 
-    let mut parser = match Parser::new(&source, &file) {
-        Ok(parser) => parser,
-        Err(err) => {
-            eprintln!("{}", err);
-            return 1;
-        }
-    };
-    let program = match parser.parse_program() {
-        Ok(program) => program,
-        Err(err) => {
-            eprintln!("{}", err);
-            return 1;
-        }
-    };
-
-    match types::explain(&program, &file, line, col) {
+    // The modules that the file uses are checked as well, so that the type
+    // of a value of another module is the real one.
+    match compiler::explain_file(Path::new(&file), line, col) {
         Ok(ty) => {
             println!("{}:{}:{}: {}", file, line, col, ty);
             0

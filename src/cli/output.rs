@@ -213,6 +213,8 @@ build options:
   -o, --out <dir>                 output directory (default: .dist)
   --title <text>                  page title
   --node                          emit a node script instead of a site
+  --force                         empty the folder of the build even when
+                                  it holds files that the build did not write
 
 server options:
   --port <n>                      port to listen on (default: 4000)
@@ -269,6 +271,8 @@ Build the site into .dist/, or a single file into a node script.
   -o, --out <dir>   the folder the site is written to (default: .dist)
   --title <text>    the title of the page
   --node            emit a node script instead of a site
+  --force           empty the folder of the build, even when it holds
+                    files that the build did not write
   -h, --help        this message
 "#,
         "test" => r#"usage: vey test [file|dir] [--filter <text>] [--watch]

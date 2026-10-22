@@ -40,7 +40,12 @@ pub(crate) fn cmd_deploy(args: &[String]) -> i32 {
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join(OUTPUT_FOLDER));
 
-    let build = crate::cli::build::build_site(&entry, &output, parsed.title.as_deref());
+    let build = crate::cli::build::build_site(
+        &entry,
+        &output,
+        parsed.title.as_deref(),
+        parsed.force,
+    );
     if build != 0 {
         return build;
     }

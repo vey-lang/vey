@@ -537,6 +537,10 @@ impl Checker<'_> {
                 self.declare(name, BindingKind::Param, param.pos)?;
             }
         }
+        // The values of the component are known by its markup.
+        for stmt in &decl.body {
+            self.check_stmt(stmt)?;
+        }
         self.check_markup_nodes(&decl.children)?;
         self.pop_scope();
         Ok(())
@@ -546,8 +550,17 @@ impl Checker<'_> {
         for node in nodes {
             match node {
                 MarkupNode::Element(element) => {
+                    // A component that is held in a name is read by the
+                    // markup, so its name is used even when it is not
+                    // called as a function.
+                    if element.component {
+                        self.read(&element.tag);
+                    }
                     for (_, value) in &element.attrs {
                         self.check_expr(value)?;
+                    }
+                    for spread in &element.spreads {
+                        self.check_expr(spread)?;
                     }
                     self.check_markup_nodes(&element.children)?;
                 }

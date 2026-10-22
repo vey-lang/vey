@@ -73,6 +73,9 @@ pub(crate) fn cmd_fmt(args: &[String]) -> i32 {
     if !parsed.write && changed > 0 {
         eprintln!("{} file(s) are not in the usual shape.", changed);
         eprintln!("pass --write to write them.");
+        // The command fails when a file is not in the usual shape, so that
+        // a pipeline that runs it notices the file that has not.
+        return 1;
     }
     0
 }
@@ -114,6 +117,7 @@ pub(crate) fn format_source(source: &str) -> String {
     // A text that spans lines keeps its spaces, so the lines of it are
     // written as they are.
     let mut in_text = false;
+    let mut in_block_comment = false;
 
     while let Some(line) = lines.next() {
         if in_text {
@@ -151,7 +155,7 @@ pub(crate) fn format_source(source: &str) -> String {
             continue;
         }
 
-        let (opens, closes, text_open) = braces(line);
+        let (opens, closes, text_open) = braces(line, &mut in_block_comment);
         // A line that closes a block is put back where the block began.
         let mut here = level as isize;
         if closes > 0 && trimmed.starts_with('}') {
@@ -186,12 +190,19 @@ pub(crate) fn format_source(source: &str) -> String {
 ///
 /// The marks that are in a text or in a comment do not count. The last
 /// value says whether the line ends inside a text, which may span lines.
-fn braces(line: &str) -> (usize, usize, bool) {
+fn braces(line: &str, in_block_comment: &mut bool) -> (usize, usize, bool) {
     let mut opens = 0usize;
     let mut closes = 0usize;
     let mut in_text = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
+        if *in_block_comment {
+            if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                *in_block_comment = false;
+            }
+            continue;
+        }
         if in_text {
             if c == '`' {
                 in_text = false;
@@ -214,6 +225,10 @@ fn braces(line: &str) -> (usize, usize, bool) {
             }
             // A text may hold any mark, and it may span lines.
             '`' => in_text = true,
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                *in_block_comment = true;
+            }
             '/' if chars.peek() == Some(&'/') => break,
             '{' => opens += 1,
             '}' => closes += 1,

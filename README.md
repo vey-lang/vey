@@ -107,13 +107,16 @@ The project that is written is small on purpose:
 ```
 myapp/
   src/
-    main.vey         the page
+    main.vey         the entry: the page is put on the screen
+    site.vey         the component of the page and its styles
     styles/
       site.css       the styles of the site
   public/
     logo.svg         the mark of the site
     favicon.svg      the mark as a favicon
     robots.txt
+  tests/
+    site.vey         the tests of the page
   package.json       the scripts of npm
   README.md
   .gitignore
@@ -210,6 +213,9 @@ There are matchers for the things a test says most of the time:
 `assertNotContains`, `assertThrows` and `assertMatch`. Each of them takes
 the values and a message that says what the test was about.
 
+The number of the tests that passed and of the ones that failed is told when
+the tests are done.
+
 ## Checks
 
 `vey check` rejects duplicate declarations, reassignment of constants and imports, `break` or `continue` outside a loop, `return` outside a function, assignment to an unknown variable, the use of an unknown variable, the use of a value before it is declared and type mismatches in annotated code. The same checks run before every build.
@@ -228,6 +234,31 @@ main.vey:2:7: unknown variable 'nam'
 The compiler also gives warnings, which do not stop a build: a name that is
 written and never read, a name that hides another one, and a name that is
 close to another one.
+
+## Settings
+
+The settings of a project are written in `vey.toml` in the folder of the
+project. The options of the command line are stronger than the file, so that
+a program may be run in another way for a moment.
+
+```toml
+# The port that the server listens on.
+port = 4000
+# The host that the server listens on.
+host = "127.0.0.1"
+# The title of the site.
+title = "My site"
+# The folder the site is written to.
+out = ".dist"
+
+[lint]
+# The length of a line that is still easy to read.
+maxLine = 100
+
+[build]
+# Whether the site is made smaller.
+minify = false
+```
 
 ## The tools
 
@@ -251,6 +282,11 @@ vey build --help
 
 The build is cached in `.vey/`, so a project that did not change is built
 again in no time. The modules of a project are written in parallel.
+
+The language server (`vey lsp`) tells the editor what is wrong with a file,
+the type of the expression under the cursor, the names that are declared in
+a file, where a name is declared, where it is used, and how it may be
+changed.
 
 ## Language
 
@@ -518,6 +554,7 @@ Type forms:
 - `T?` optional value
 - `(number, string) -> bool` function
 - `(...number) -> number` rest parameters
+- `Signal<T>` / `Store<T>` the state of a page (see [A page that lives](#a-page-that-lives))
 
 The fields of an object may be written one under the other, with or without a
 comma. The same goes for the fields of an object value.
@@ -919,8 +956,87 @@ Rules:
 - A component of another module is written `module.Card`.
 - `children` is passed automatically when a component has child nodes.
 - `style`, `script`, `head`, `title`, `meta` and `link` are regular HTML tags inside markup.
+- The tags of SVG are tags as well, so a drawing may be written: `svg`, `path`, `circle`, `g`, `defs`, `linearGradient` and the rest.
+- The name of an attribute may have parts: `data-value`, `xml:lang`, `xlink:href`.
+- The props of a component may be spread into it: `Card ...props`.
+- A component may have values of its own, which are kept when the page is written again:
 
-Event attributes map to DOM handlers: `click`, `dblclick`, `change`, `input`, `submit`, `load`, `focus`, `blur`, `keydown`, `keyup`, `mouseover`, `mouseout`.
+```vey
+component Counter(label) {
+  // The value belongs to this component, so every counter of a page has
+  // its own.
+  let count = signal(0)
+  button click=fn() {
+    count.set(count.value + 1)
+  } { "{label}: {count.value}" }
+}
+```
+
+- `Boundary` catches the mistakes of the components under it, so that one broken component does not take the whole page away:
+
+```vey
+component Fallback() {
+  div { "Something went wrong." }
+}
+
+component App() {
+  Boundary fallback=Fallback {
+    Risky()
+  }
+}
+```
+
+- A component may give a value to the ones under it, so that it does not have to be given to each of them:
+
+```vey
+component Leaf() {
+  let theme = inject("theme")
+  div { "the theme is {theme}" }
+}
+
+component App() {
+  let theme = signal("dark")
+  provide("theme", theme)
+  Leaf()
+}
+```
+
+- A part of the page may be written in another place of it, so that a dialogue or a menu is not cut by the box it belongs to:
+
+```vey
+component Dialogue(text) {
+  div.card { text }
+}
+
+component App() {
+  div.page {
+    "the page"
+    // The dialogue is written in the element `#side`, and it follows the
+    // state of the page the way the rest of it does.
+    portal(Dialogue("Are you sure?"), "#side", "dialogue")
+  }
+}
+```
+
+- A component may have slots, so that the caller may put its content in the place it wants:
+
+```vey
+component Card(title, body) {
+  div.card {
+    h2 { title }
+    // The content of the slot is there when the caller gives nothing.
+    slot name="body" { p { "There is nothing here yet." } }
+  }
+}
+
+component App() {
+  Card("Hello") {
+    p slot="body" { "The content of the caller." }
+  }
+}
+```
+
+Event attributes map to DOM handlers: `click`, `dblclick`, `change`, `input`, `submit`, `load`, `focus`, `blur`, `keydown`, `keyup`, `keypress`, `mouseover`, `mouseout`, `wheel`, `context-menu`, `pointer-down`, `pointer-up`, `pointer-move`, `pointer-enter`, `pointer-leave`, `touch-start`, `touch-end`, `touch-move`, `drag-start`, `drag-end`, `drag-over`, `drop`.
 
 ### Passing arguments to a component
 
@@ -990,6 +1106,39 @@ effect(fn() {
 count.set(1)
 ```
 
+A signal or a store that is not written again is a `const`, so that the type
+of its value is kept and a change of another type is said:
+
+```vey
+const count = signal(0)
+
+let shown: number = count.value
+count.set(1)
+```
+<!-- check -->
+
+`count.set("text")` is a mistake then: the checker says *argument 1 expects
+number, found string*. A value that is a `let` stays dynamic, the way every
+`let` does.
+
+The type may also be written by hand, which is how a signal and a store are
+named when they are passed around:
+
+```vey
+let count: Signal<number> = signal(0)
+let shared: Store<{ a: number }> = store({ a: 1 })
+```
+<!-- check -->
+
+Two values of a signal are compared the way its options say, and not always
+with `===`:
+
+```vey
+const same = signal(0, { equals: fn(a, b) { return a == b } })
+const deep = signal({ a: 1 }, { equals: "deep" })
+```
+<!-- check -->
+
 A value that follows other values is a `computed`. It is called again when
 one of the values it read has changed.
 
@@ -1047,8 +1196,12 @@ shown with `navigate`. The parameters of the route that is shown now are in
 `routeParams()`.
 
 ```vey
-route("/users/{id}", fn(params) {
+component UserPage(params) {
   h1 { "User {params.id}" }
+}
+
+route("/users/{id}", fn(params) {
+  UserPage(params)
 })
 
 navigate("/users/7")
@@ -1082,6 +1235,48 @@ component App() {
         "Goodbye"
       }
     }
+  }
+}
+```
+
+`transition` writes that work for a fade, so the same node may come in and go
+out without the work of both parts being written by hand. The `enter` and
+`leave` of the value are given to the node, and either of them may be given
+on its own.
+
+```vey
+let fade = transition(200)
+
+component App() {
+  div {
+    if visible() {
+      section.card enter=fade.enter leave=fade.leave { "Hello" }
+    }
+  }
+}
+```
+
+A form holds the values of its fields together with what is wrong with them.
+`check` is given the values and gives back the fields that are wrong, so
+`valid` follows the fields and `submit` calls its function only when the form
+may be sent.
+
+```vey
+let signup = form({ name: "", mail: "" }, { check: fn(values) {
+  let found = {}
+  if values.name == "" { found.name = "a name is needed" }
+  if !includes(values.mail, "@") { found.mail = "the mail is not right" }
+  return found
+} })
+
+component App() {
+  form {
+    input value=signup.values.value.name placeholder="your name" { }
+    input value=signup.values.value.mail placeholder="your mail" { }
+    button click=fn() {
+      signup.submit(fn(values) { print("sent to {values.mail}") })
+    } { "Send" }
+    p { signup.errors.value.name }
   }
 }
 ```
@@ -1203,11 +1398,57 @@ app.use("/admin", fn(req, res, next) {
 ```
 
 The pieces that are ready are `logger()`, `cors()`, `compress()`,
-`errorHandler(fn)` and `bodyLimit(bytes)`. A route may have a piece of its
-own, which is written after the handler of the route.
+`errorHandler(fn)` and `bodyLimit(bytes)`. The pieces `security()`,
+`rateLimit(options)` and `csrf(options)` keep a browser from doing things it
+should not, say how many requests a visitor may make, and check that a
+request that changes something comes from the page. A route may have a piece
+of its own, which is written after the handler of the route.
 
 The answer of the server may set a cookie with `res.cookie(name, value)`, and
 the sessions live from one request to the next.
+
+The server takes some options:
+
+```vey
+let app = server(3000, {
+  // The biggest body that is read. A body that is bigger is refused
+  // before it is read.
+  bodyLimit: 1024 * 1024,
+  // Whether a proxy is in front of the server. The heads that a proxy
+  // writes are only read when this is true, because a visitor may write
+  // them as well.
+  trustProxy: false,
+  // Whether the reason of a mistake is told to the visitor. It may tell
+  // something about the machine of the server, so it is not told unless
+  // this is true.
+  exposeErrors: false,
+  // The time that a request may take, before it is refused.
+  timeout: 30000,
+  // The time that the requests that are running may take when the
+  // server stops.
+  shutdownTimeout: 10000
+})
+```
+
+The files of a folder are served before the routes, so that a program may
+put a file of its own in front of them. A part of a file may be asked for,
+so that a big file may be played without being read whole:
+
+```vey
+app.static("public", { index: "index.html", maxAge: 3600 })
+```
+
+A mistake of the server itself is given to the program with
+`app.onError(fn)`, and `app.lastError()` says whether there was one.
+
+The work that is done when the program is told to stop is given with
+`onShutdown(fn)`, so that the server may take the requests that are running
+before it goes:
+
+```vey
+let app = server(3000)
+onShutdown(fn() { app.stop() })
+```
 
 ```vey
 app.get("/login", fn(req, res) {
@@ -1333,6 +1574,9 @@ has a limit, and `stop()` waits for the requests that are running.
 | `compress` | a middle piece that makes the answers smaller |
 | `errorHandler` | a middle piece that catches the mistakes |
 | `bodyLimit` | a middle piece that says how big a request may be |
+| `security` | a middle piece that writes the marks that keep a browser from doing things it should not |
+| `rateLimit` | a middle piece that says how many requests a visitor may make |
+| `csrf` | a middle piece that checks that a request that changes something comes from the page |
 | `session` | the sessions of the server |
 | `Map` | a map whose keys are not texts |
 | `Set` | a set of the values it has seen once |
@@ -1365,15 +1609,24 @@ has a limit, and `stop()` waits for the requests that are running.
 | `bytes.from(text, encoding?)` / `bytes.toBase64(bytes)` / `bytes.fromBase64(text)` / `bytes.concat(list)` / `bytes.length(bytes)` / `bytes.hex(bytes)` | the bytes of a text, as a list of numbers |
 | `text.encode(value)` / `text.decode(bytes)` | the bytes of a text |
 | `deepCopy(value)` | a copy of a value that holds nothing of the value it came from |
-| `signal(value)` / `store(name, initial)` / `effect(fn)` | the state of a page, and the work that follows it |
+| `signal(value, options?)` / `store(name, initial, options?)` / `effect(fn)` / `computed(fn)` | the state of a page, and the work that follows it |
+| `Signal<T>` / `Store<T>` | the type of a signal and of a store, which hold the type of their value |
+| `form(initial, options?)` | the values of a form with `values`, `errors`, `valid`, `dirty`, `set`, `replace`, `reset`, `check` and `submit` |
+| `signal.peek()` / `signal.subscribe(fn)` / `signal.set(v)` / `signal.update(fn)` | reading and writing a value without listening to it, and listening to it |
+| `store.set(key, value)` / `store.replace(state)` / `store.update(fn)` | changing one field of a state, the whole of it, or both |
+| `deepEquals(a, b)` | whether two values have the same content |
 | `mount(target, node)` | write a page in the browser and change it in place |
 | `route(path, view)` / `navigate(url)` / `currentRoute()` / `routeParams()` | the routes of the browser |
 | `on(target, event, fn)` / `delegate(target, event, selector, fn)` | the events of one's own |
 | `onMount(fn)` / `onDestroy(fn)` / `ref()` | the life of a node, and a way to hold it |
+| `transition(duration, options?)` | the `enter` and `leave` work of a node that comes in and goes out little by little |
+| `Boundary` | the component that catches the mistakes of the ones under it |
+| `provide(name, value)` / `inject(name)` | a value that the components under the one that gives it may read |
+| `portal(content, target, key?)` | a part of the page that is written in another element, such as a dialogue or a menu |
 | `setTimeout(fn, ms)` / `clearTimeout(id)` / `setInterval(fn, ms)` / `clearInterval(id)` | the timers of the browser |
 | `requestAnimationFrame(fn)` / `cancelAnimationFrame(id)` | the frames of the browser |
 | `http.fetch(url, options?)` / `http.Request` / `http.Response` / `http.Headers` / `http.AbortController` | a request of the browser, with a time and a retry |
-| `storage.get(key)` / `storage.set(key, value)` / `storage.remove(key)` / `storage.clear()` | the notes that stay after the browser is closed |
+| `storage.get(key)` / `storage.set(key, value)` / `storage.remove(key)` / `storage.clear()` / `storage.keys()` | the notes that stay after the browser is closed |
 | `sessionStorage.get(key)` / `sessionStorage.set(key, value)` | the notes that stay until the tab is closed |
 | `history.push(state, title, url)` / `history.replace(state, title, url)` / `history.back()` / `history.forward()` / `history.go(n)` / `history.state()` | the address of the page |
 | `Blob(parts)` / `File(parts, name)` / `FileReader()` / `FormData()` | the files of a visitor |
@@ -1387,7 +1640,9 @@ has a limit, and `stop()` waits for the requests that are running.
 | `zlib.gzip(value)` / `zlib.gunzip(bytes)` / `zlib.deflate(value)` / `zlib.inflate(bytes)` | the files that are smaller, Node only |
 | `app.use(fn)` / `app.use(path, fn)` | the middle pieces of the server |
 | `logger()` / `cors()` / `compress()` / `errorHandler(fn)` / `bodyLimit(bytes)` | the middle pieces that are ready |
-| `session.start()` / `session.get(key)` / `session.set(key, value)` / `session.end()` | the sessions of the server |
+| `security(options?)` / `rateLimit(options?)` / `csrf(options?)` | the marks that keep a browser from doing things it should not, the limit of the requests of a visitor and the check that a request comes from the page |
+| `session.start()` / `session.regenerate()` / `session.get(key)` / `session.set(key, value)` / `session.end()` / `session.id()` | the sessions of the server |
+| `onShutdown(fn)` | the work that is done when the program is told to stop |
 
 A few details worth knowing:
 
@@ -1486,6 +1741,7 @@ src/cli/             the commands
   json.rs            the reading and the writing of JSON
   add.rs             adding a package of npm to a project
   args.rs            command line parsing
+  config.rs          the settings of a project
   run.rs             run, test and check
   build.rs           the build of the site
   site.rs            static sites

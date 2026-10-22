@@ -20,7 +20,20 @@ function createVeyRuntime(scope, req) {
     req: req,
     isNode: typeof req === "function",
     doc: scope.document || null,
-    log: scope.console || console
+    log: scope.console || console,
+    // The component that is written now, so that the work of its life is
+    // known by the nodes it gives.
+    currentComponent: null,
+    // The place of the component that is written now, so that its values
+    // are the same when the page is written again.
+    currentPath: "",
+    // The number of the components of the one that is written now.
+    childIndex: 0,
+    // The values of the components, by their place in the page.
+    states: new Map(),
+    // The values that the components share, by the component that has
+    // them.
+    contexts: []
   };
 
   // The helpers that every part may use.
@@ -40,6 +53,7 @@ function createVeyRuntime(scope, req) {
   V = Object.assign(V, veyIntl(ctx));
   V = Object.assign(V, veyBytes(ctx));
   V = Object.assign(V, veyState(ctx));
+  V = Object.assign(V, veyForm(ctx));
   V = Object.assign(V, veyDom(ctx));
   V = Object.assign(V, veyMount(ctx));
   V = Object.assign(V, veyEvents(ctx));

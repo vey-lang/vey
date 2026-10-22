@@ -77,6 +77,7 @@ const HTML_TAGS: &[&str] = &[
     "script",
     "section",
     "select",
+    "slot",
     "small",
     "span",
     "strong",
@@ -103,4 +104,79 @@ const HTML_TAGS: &[&str] = &[
 
 pub(crate) fn is_html_tag(name: &str) -> bool {
     HTML_TAGS.contains(&name)
+}
+
+/// The tags of SVG.
+///
+/// A drawing is written with them, so they are tags of the markup as well.
+const SVG_TAGS: &[&str] = &[
+    "animate",
+    "animateMotion",
+    "animateTransform",
+    "circle",
+    "clipPath",
+    "defs",
+    "desc",
+    "ellipse",
+    "feBlend",
+    "feColorMatrix",
+    "feComponentTransfer",
+    "feComposite",
+    "feConvolveMatrix",
+    "feDiffuseLighting",
+    "feDisplacementMap",
+    "feDistantLight",
+    "feDropShadow",
+    "feFlood",
+    "feFuncA",
+    "feFuncB",
+    "feFuncG",
+    "feFuncR",
+    "feGaussianBlur",
+    "feImage",
+    "feMerge",
+    "feMergeNode",
+    "feMorphology",
+    "feOffset",
+    "fePointLight",
+    "feSpecularLighting",
+    "feSpotLight",
+    "feTile",
+    "feTurbulence",
+    "filter",
+    "foreignObject",
+    "g",
+    "image",
+    "line",
+    "linearGradient",
+    "marker",
+    "mask",
+    "metadata",
+    "mpath",
+    "path",
+    "pattern",
+    "polygon",
+    "polyline",
+    "radialGradient",
+    "rect",
+    "set",
+    "stop",
+    "svg",
+    "switch",
+    "symbol",
+    "text",
+    "textPath",
+    "tspan",
+    "use",
+    "view",
+];
+
+/// Whether the tag is a tag of SVG.
+pub(crate) fn is_svg_tag(name: &str) -> bool {
+    SVG_TAGS.contains(&name)
+}
+
+/// Whether the tag is a tag that the markup knows.
+pub(crate) fn is_known_tag(name: &str) -> bool {
+    is_html_tag(name) || is_svg_tag(name)
 }
