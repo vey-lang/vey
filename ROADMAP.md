@@ -34,9 +34,9 @@ for each phase, and the gaps that are left are in part 14.
 | --- | --- | --- |
 | Lexer | 40 lines of operators, decimal numbers, `//` comments | the marks of the bitwise family, the numbers of four bases, the `_` between the digits, the escapes `\u` and `\x`, the block comments, the doc comments, the templates |
 | Parser | expressions, statements, markup, types | the end of a statement, the tuples, the dictionaries, the interfaces, the `throw`, the `?`, the `defer`, the `yield`, the labelled loops, the patterns that take a value apart, the casts |
-| Types | 15 type kinds, structural objects, generics on `fn` | `Promise`, `Result`, `Option`, `unknown`, the tuples, the dictionaries, the interfaces, the narrowing, the types that are guessed |
+| Types | 15 type kinds, structural objects, generics on `fn` | `Promise`, `Result`, `Option`, `unknown`, the tuples, the dictionaries, the interfaces, the narrowing of a name and of a member, the types that are guessed |
 | Checker | names, scopes, a few ordering rules | the unused names, the shadowing, the unreachable code, the order of every name |
-| Codegen | plain JavaScript, one bundle, one inline source map | the columns of the source map, the script of every page in a file of its own |
+| Codegen | plain JavaScript, one bundle, one inline source map | the columns of the source map, the script of every page in a file of its own, the shaking of the exports that nothing reads |
 | Runtime (browser) | `h`, `html`, `raw`, `bind`, `cls`, `clipboard`, `title` | the state, the difference between two trees, the routes, the events, the timers, the fetch, the storage, the history, the observers |
 | Runtime (server) | routes, a body, cookies, a static folder | the middle pieces, the sessions, the cookies of the answer, the cache of the files, the sockets, the limit of the body |
 | Standard library | text, lists, dates, JSON, the server | the maps, the sets, the regex, the numbers of the world, the bytes, the deep copy |
