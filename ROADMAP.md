@@ -550,7 +550,7 @@ of a web framework is missing.
 - [x] **The tests may be watched,** and `dev` watches by asking the
       files every 300 ms (`src/cli/dev.rs:143-159`, `:518-585`) instead of
       waiting for the system to say that something changed.
-- [ ] **The reload of the page is a script that is put in every page**
+- [x] **The reload of the page is a script that is put in every page**
       (`src/cli/dev.rs:404-413`); there is no socket, and the CSS is not
       reloaded on its own.
 - [x] **The tests cannot be chosen** (`src/cli/run.rs:46-132`): no filter,
@@ -713,7 +713,7 @@ compiler and the runtime stop saying things that are not so.
 - [x] `vey fmt` and `vey lint`.
 - [x] `vey repl` and `vey explain`.
 - [x] The cache of the build and the modules in parallel.
-- [ ] The watch of the files by the system, not by a question every 300 ms.
+- [x] The watch of the files by the system, not by a question every 300 ms.
 - [x] The filter of the tests, the matchers and the measure of the cover.
 - [x] The language server.
 - [x] `vey docs`, `vey deploy` and `vey migrate`.

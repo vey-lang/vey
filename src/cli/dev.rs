@@ -241,6 +241,34 @@ pub(crate) fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<DevState
     let path = target.split('?').next().unwrap_or("/");
     let head = method.eq_ignore_ascii_case("HEAD");
 
+    // The page listens for the changes, so that it reloads itself without
+    // asking every moment.
+    if path == "/__vey/events" {
+        let _ = stream.set_read_timeout(None);
+        let headers = "HTTP/1.1 200 OK\r\n\
+                       Content-Type: text/event-stream\r\n\
+                       Cache-Control: no-store\r\n\
+                       Connection: keep-alive\r\n\r\n";
+        if stream.write_all(headers.as_bytes()).is_err() {
+            return;
+        }
+        let mut last = u64::MAX;
+        loop {
+            let version = lock(&state).version;
+            if version != last {
+                last = version;
+                if stream
+                    .write_all(format!("data: {}\n\n", version).as_bytes())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        return;
+    }
+
     let (status, content_type, body) = {
         let mut guard = lock(&state);
         respond(&mut guard, path)
@@ -406,8 +434,11 @@ pub(crate) fn accepts_html(path: &str) -> bool {
 }
 
 pub(crate) fn inject_reload(html: &str, version: u64) -> String {
+    // The page listens to the server, and reloads itself when the number
+    // changes. The stylesheets are changed in place, so that the state of
+    // the page is kept.
     let snippet = format!(
-        "<script>(function(){{var v={};setInterval(function(){{fetch('/__vey/version',{{cache:'no-store'}}).then(function(r){{return r.text()}}).then(function(t){{if(t!==String(v)){{v=t;location.reload()}}}}).catch(function(){{}})}},600)}})();</script>",
+        "<script>(function(){{var v={};var source=new EventSource('/__vey/events');source.onmessage=function(event){{if(event.data===String(v))return;v=event.data;var links=document.querySelectorAll('link[rel=\"stylesheet\"]');if(!links.length){{location.reload();return;}}var left=links.length;for(var i=0;i<links.length;i++){{(function(link){{var fresh=link.cloneNode();fresh.href=link.href.split('?')[0]+'?v='+v;fresh.onload=function(){{if(--left===0)location.reload();}};link.parentNode.replaceChild(fresh,link);}})(links[i]);}}}});}})();</script>",
         version
     );
     match html.rfind("</body>") {
