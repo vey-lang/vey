@@ -379,7 +379,15 @@ impl Codegen {
                         Pattern::Binding { name, .. } if !bound.contains(name) => {
                             bound.push(name.clone());
                         }
-                        _ => {}
+                        // The names of a list or an object pattern are
+                        // names of their own.
+                        _ => {
+                            for (name, _) in pattern.bindings() {
+                                if !bound.contains(&name) {
+                                    bound.push(name);
+                                }
+                            }
+                        }
                     }
                 }
 

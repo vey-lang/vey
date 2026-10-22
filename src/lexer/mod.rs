@@ -135,6 +135,14 @@ pub fn is_keyword(word: &str) -> bool {
     )
 }
 
+/// The words of the language.
+///
+/// The word `type` is a word of the language, even though a name may still
+/// be `type`, so that the two highlighters colour it the same way.
+pub fn is_word(word: &str) -> bool {
+    is_keyword(word) || word == "type"
+}
+
 impl Lexer {
     pub fn new(src: &str, file: &str) -> Self {
         Self::with_pos(src, file, 1, 1)

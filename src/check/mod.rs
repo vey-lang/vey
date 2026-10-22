@@ -777,10 +777,12 @@ impl Checker<'_> {
                     }
                 }
             }
-            Pattern::Binding { name, pos } => {
-                self.declare(name, BindingKind::Let, *pos)?;
+            // A name of a list or an object pattern is a name of its own.
+            _ => {
+                for (name, pos) in pattern.bindings() {
+                    self.declare(&name, BindingKind::Let, pos)?;
+                }
             }
-            _ => {}
         }
         Ok(())
     }

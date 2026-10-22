@@ -7,7 +7,7 @@ function veyHighlight(ctx) {
     "let", "const", "fn", "return", "if", "else", "while", "for", "in", "repeat",
     "break", "continue", "try", "catch", "finally", "use", "as", "export",
     "component", "await", "async", "true", "false", "null", "and", "or", "not",
-    "match", "enum", "type"
+    "match", "enum", "type", "pub", "priv", "throw", "yield", "defer", "is"
   ];
 
   // The names of the types of the language.
@@ -26,7 +26,7 @@ function veyHighlight(ctx) {
     "link main mark menu meta meter nav noscript ol optgroup option output p " +
     "picture pre progress q s samp script section select small span strong " +
     "style sub summary sup table tbody td textarea tfoot th thead time tr u " +
-    "ul var video wbr"
+    "ul var video wbr title"
   ).split(" ");
 
   // The marks of the language that are not names.

@@ -826,3 +826,80 @@ const path = require("node:path");
     assert!(text.contains("the file of the stream"), "{text}");
 }
 
+
+#[test]
+fn the_lists_of_the_runtime_are_the_lists_of_the_compiler() {
+    // The highlighter of the runtime has its own list of the words and of
+    // the tags of the language. They are copies, so a test keeps them in
+    // step with the compiler.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let lexer = fs::read_to_string(root.join("src/lexer/mod.rs")).unwrap();
+    // The words of the language are the ones of `is_keyword`.
+    let body = lexer
+        .split("pub fn is_keyword")
+        .nth(1)
+        .and_then(|rest| rest.split_once('{'))
+        .map(|(_, body)| body)
+        .unwrap_or("");
+    let body = body.split('}').next().unwrap_or("");
+    let mut words: Vec<String> = Vec::new();
+    for word in body.split('"').skip(1).step_by(2) {
+        if !word.is_empty() && !words.contains(&word.to_string()) {
+            words.push(word.to_string());
+        }
+    }
+    words.push("type".to_string());
+    words.sort();
+
+    let html = fs::read_to_string(root.join("src/parser/html.rs")).unwrap();
+    let mut tags: Vec<String> = Vec::new();
+    for line in html.lines() {
+        let line = line.trim().trim_end_matches(',');
+        if !line.starts_with('"') || !line.ends_with('"') {
+            continue;
+        }
+        let tag = line.trim_matches('"');
+        if !tag.is_empty() && !tags.contains(&tag.to_string()) {
+            tags.push(tag.to_string());
+        }
+    }
+    tags.sort();
+
+    let runtime = fs::read_to_string(root.join("src/runtime/highlight.js")).unwrap();
+    let runtime_words = list_of(&runtime, "var keywords = [", "]");
+    let runtime_tags = list_of(&runtime, "var htmlTags = (", ")");
+
+    assert_eq!(
+        runtime_words, words,
+        "the list of the words of the runtime has drifted"
+    );
+    assert_eq!(
+        runtime_tags, tags,
+        "the list of the tags of the runtime has drifted"
+    );
+}
+
+/// The words of a list of the runtime, read from its source.
+fn list_of(source: &str, start: &str, end: &str) -> Vec<String> {
+    let Some(index) = source.find(start) else {
+        panic!("the list '{}' is not there", start);
+    };
+    let rest = &source[index + start.len()..];
+    let body = &rest[..rest.find(end).unwrap_or(0)];
+    let mut out: Vec<String> = Vec::new();
+    for piece in body.split('"').skip(1).step_by(2) {
+        // A list of the runtime may be written in parts.
+        for word in piece.split(|c: char| c == ',' || c.is_whitespace()) {
+            let word = word.trim();
+            if word.is_empty() {
+                continue;
+            }
+            if !out.contains(&word.to_string()) {
+                out.push(word.to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}

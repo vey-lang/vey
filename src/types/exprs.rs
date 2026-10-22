@@ -449,7 +449,15 @@ impl TypeChecker<'_> {
                     _ => Type::Any,
                 })
             }
-            Expr::Try(inner, _) => {
+            Expr::Try(inner, pos) => {
+                // The failure is handed on to the function that is around,
+                // so a `?` outside a function has nowhere to go.
+                if self.expected_returns.is_empty() && self.try_depth == 0 {
+                    return Err(self.error(
+                        *pos,
+                        "the ? is only allowed inside a function",
+                    ));
+                }
                 // The type of a value that hands its failure on is the type
                 // of the value inside it.
                 let ty = self.infer_expr(inner)?;
@@ -996,7 +1004,25 @@ impl TypeChecker<'_> {
                 let ty = match env.values.get(name) {
                     Some(ty) => ty.clone(),
                     None => match env.types.get(name) {
-                        Some(ty) => qualified_type(alias, ty.clone()),
+                        Some(ty) => {
+                            // The type may have functions of its own.
+                            let ty = qualified_type(alias, ty.clone());
+                            match &ty {
+                                Type::Named(type_name, _) | Type::Interface(type_name, _) => {
+                                    if let Some(methods) = env.impls.get(type_name) {
+                                        if let Some(method) = methods.get(name) {
+                                            return Ok(if optional {
+                                                union(vec![method.clone(), Type::Null])
+                                            } else {
+                                                method.clone()
+                                            });
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            ty
+                        }
                         None => {
                             if env.components.contains_key(name) {
                                 Type::Any
@@ -1238,12 +1264,16 @@ impl TypeChecker<'_> {
                     })
                     .unwrap_or(Ok(Type::Any))
             }
-            Type::Object(fields) | Type::Named(_, fields) => {
+            Type::Object(fields) | Type::Named(_, fields) | Type::Interface(_, fields) => {
                 if let Some(field) = fields.iter().find(|field| field.name == name) {
                     return Ok(field.ty.clone());
                 }
                 // The type may have functions of its own.
-                if let Type::Named(type_name, _) = ty {
+                let type_name = match ty {
+                    Type::Named(type_name, _) | Type::Interface(type_name, _) => Some(type_name),
+                    _ => None,
+                };
+                if let Some(type_name) = type_name {
                     if let Some(info) = self.impls.get(type_name) {
                         if let Some(method) = info.methods.iter().find(|m| m.name == name) {
                             return self.method_type(method);

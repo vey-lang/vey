@@ -299,7 +299,11 @@ function veyCore(ctx) {
     }
     if (value && value.__veyResult === true) {
       if (!value.ok) {
-        var failed = new Error("the call failed");
+        // The reason of the failure is the message of the error, so that a
+        // `try` of the program may show it.
+        var failed = new Error(
+          value.error === undefined ? "the call failed" : String(value.error)
+        );
         failed.__veyFailure = value.error;
         throw failed;
       }

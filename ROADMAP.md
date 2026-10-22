@@ -769,13 +769,13 @@ gap that is closed.
       `src/types/checker.rs`)
 - [ ] **A `let ... else` throws the destructuring away.** Every name of the
       pattern is bound to the whole value. (`src/codegen/mod.rs`)
-- [ ] **The names of a list or an object pattern of an `if let` or a
+- [x] **The names of a list or an object pattern of an `if let` or a
       `while let` are never declared,** so the program is refused with
       "unknown variable". (`src/check/mod.rs`, `src/types/stmts.rs`)
-- [ ] **The names of a list or an object pattern of a `match` are never
+- [x] **The names of a list or an object pattern of a `match` are never
       declared,** so they are of the type `any`.
       (`src/types/exprs.rs`, `src/types/stmts.rs`)
-- [ ] **The names of a list or an object pattern of a `match` are not in the
+- [x] **The names of a list or an object pattern of a `match` are not in the
       scope of the code generator,** so a name that hides a helper of the
       runtime is not the one that is bound. (`src/codegen/exprs.rs`)
 - [ ] **The arguments that are given by name are not handled in the path of
@@ -813,9 +813,9 @@ gap that is closed.
       (`src/check/mod.rs`)
 - [ ] **The branch that reads `() => ...` can never be reached.**
       (`src/parser/exprs.rs`)
-- [ ] **A `?` at the top level of a module ends the program without a
+- [x] **A `?` at the top level of a module ends the program without a
       word.** (`src/codegen/mod.rs`)
-- [ ] **A `try` of the program catches the failure of `?` as a wrapper
+- [x] **A `try` of the program catches the failure of `?` as a wrapper
       error,** so the reason of the failure is lost and the failure is not
       handed on. (`src/codegen/mod.rs`, `src/runtime/core.js`)
 - [ ] **The line count of a wrapped module is computed and thrown away.**
@@ -836,7 +836,7 @@ gap that is closed.
 - [x] **The enum of another module was looked for in an order that
       changed from one run to the next,** so the same program could be
       checked two ways. (`src/types/exprs.rs`)
-- [ ] **Every member of an interface was `any`:** an interface was not
+- [x] **Every member of an interface was `any`:** an interface was not
       checked at all. (`src/types/exprs.rs`)
 - [ ] **The tuple type could not be used:** a list of values is never a
       tuple, and a tuple does not fit a list. (`src/types/rules.rs`,
@@ -877,7 +877,7 @@ gap that is closed.
 - [ ] **The type parameters of an interface are parsed and then thrown
       away,** so an interface with a type parameter does not work.
       (`src/types/checker.rs`, `src/types/resolve.rs`)
-- [ ] **The methods of an `impl` block are not known to the other
+- [x] **The methods of an `impl` block are not known to the other
       modules.** (`src/types/checker.rs`, `src/types/exprs.rs`)
 - [ ] **The types that are guessed for a parameter are put together
       instead of being held to,** so a parameter that is used in two ways
@@ -967,10 +967,10 @@ gap that is closed.
       the frame of the code is missing. (`src/cli/output.rs`)
 - [ ] **The general help does not name `--target` and `--write`.**
       (`src/cli/output.rs`)
-- [ ] **The list of the tags of HTML is copied into the runtime and has
+- [x] **The list of the tags of HTML is copied into the runtime and has
       drifted:** `title` is missing. (`src/runtime/highlight.js`,
       `src/parser/html.rs`)
-- [ ] **The list of the words of the language is copied into the runtime
+- [x] **The list of the words of the language is copied into the runtime
       and has drifted:** `pub`, `priv`, `throw`, `yield`, `defer` and `is`
       are missing, and `type` is there. (`src/runtime/highlight.js`,
       `src/lexer/mod.rs`)

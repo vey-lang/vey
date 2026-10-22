@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::lexer::Pos;
-use crate::types::core::{element_type, rest_element_type, union, FunctionType, Type};
+use crate::types::core::{
+    element_type, project_field, rest_element_type, union, FunctionType, Type,
+};
 use crate::types::rules::{assignable, has_type_var, substitute_bound, unify_types};
 use crate::suggest::did_you_mean;
 use crate::VeyError;
@@ -396,7 +398,11 @@ impl TypeChecker<'_> {
             }
             Stmt::Break(_, _) | Stmt::Continue(_, _) => Ok(()),
             Stmt::Try(decl) => {
-                self.check_block(&decl.body)?;
+                // A `?` inside the block is caught by the catch.
+                self.try_depth += 1;
+                let result = self.check_block(&decl.body);
+                self.try_depth -= 1;
+                result?;
                 if let Some(catch) = &decl.catch {
                     self.push_scope();
                     if let Some(name) = &decl.name {
@@ -527,6 +533,10 @@ impl TypeChecker<'_> {
     }
 
     /// The names that a pattern takes apart, with the type of the value.
+    /// The names that a pattern of a `match` takes apart.
+    ///
+    /// A list or an object pattern takes the values of its parts, so that a
+    /// name is given the type of the part it stands for.
     pub(crate) fn declare_pattern_names(&mut self, pattern: &Pattern, ty: &Type) {
         match pattern {
             Pattern::Binding { name, .. } => {
@@ -537,7 +547,22 @@ impl TypeChecker<'_> {
                     self.declare(&binding.name, ty.clone());
                 }
             }
-            _ => {}
+            Pattern::List(items, _) => {
+                let element = element_type(ty);
+                for item in items {
+                    self.declare_pattern_names(item, &element);
+                }
+            }
+            Pattern::Object(fields, _) => {
+                for (key, pattern) in fields {
+                    let field_ty = project_field(ty, key);
+                    self.declare_pattern_names(pattern, &field_ty);
+                }
+            }
+            Pattern::Literal(_)
+            | Pattern::Range(_, _)
+            | Pattern::Wildcard
+            | Pattern::Prefix(_, _) => {}
         }
     }
 

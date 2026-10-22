@@ -39,6 +39,9 @@ pub struct ModuleTypeEnv {
     pub enums: HashMap<String, EnumInfo>,
     /// The interfaces of the module.
     pub interfaces: HashSet<String>,
+    /// The functions that the types of the module have of their own, by the
+    /// name of the type and the name of the function.
+    pub impls: HashMap<String, HashMap<String, Type>>,
     /// The names the module keeps to itself.
     pub private: HashSet<String>,
     /// Whether the module is one that the compiler cannot read.
@@ -75,6 +78,7 @@ pub fn check(
         components: HashMap::new(),
         param_scopes: Vec::new(),
         resolved: HashMap::new(),
+        try_depth: 0,
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
     };
@@ -149,6 +153,15 @@ pub fn check(
                 }
             }
             Stmt::Impl(decl) => {
+                // The functions of the type are known to the modules that
+                // use it.
+                let mut methods = HashMap::new();
+                for method in &decl.methods {
+                    if let Ok(ty) = checker.method_type(method) {
+                        methods.insert(method.name.clone(), ty);
+                    }
+                }
+                env.impls.insert(decl.type_name.clone(), methods);
                 // The constructor of a type is public when the type is, so
                 // that the users of the module may make a value of it.
                 if !env.types.contains_key(&decl.type_name) {
@@ -432,6 +445,8 @@ pub(crate) struct TypeChecker<'a> {
     /// The calls whose arguments are given by name, and the order of the
     /// arguments.
     pub(crate) resolved: ResolvedCalls,
+    /// How many `try` blocks are around, so that a `?` may be caught.
+    pub(crate) try_depth: usize,
     pub(crate) expected_returns: Vec<Option<Type>>,
     pub(crate) collected_returns: Vec<Vec<Type>>,
 }
@@ -464,6 +479,7 @@ impl TypeChecker<'_> {
             components: HashMap::new(),
             param_scopes: Vec::new(),
             resolved: HashMap::new(),
+            try_depth: 0,
             expected_returns: Vec::new(),
             collected_returns: Vec::new(),
         };
