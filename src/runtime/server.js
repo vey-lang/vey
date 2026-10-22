@@ -840,6 +840,40 @@ function veyServer(ctx) {
       var res = makeResponse(response);
       var method = request.method;
 
+      // File helpers read asynchronously so serving a file does not block the
+      // event loop. They use the same response object, preserving status and
+      // headers set by middleware before the callback completes.
+      res.sendFile = function (file, options) {
+        var settings = options || {};
+        fs.readFile(String(file), function (err, data) {
+          if (err) {
+            if (!res.isFinished()) {
+              res.status(err.code === "ENOENT" ? 404 : 500);
+              res.send(err.code === "ENOENT" ? "Not found" : "Cannot read file");
+            }
+            return;
+          }
+          if (settings.headers) {
+            for (var key in settings.headers) {
+              if (Object.prototype.hasOwnProperty.call(settings.headers, key)) {
+                res.set(key, settings.headers[key]);
+              }
+            }
+          }
+          if (settings.type) res.contentType(settings.type);
+          res.send(data);
+        });
+        return res;
+      };
+      res.download = function (file, name, options) {
+        var settings = options || {};
+        var filename = name === undefined ? pathModule.basename(String(file)) : String(name);
+        var safeName = filename.replace(/[\r\n"\\]/g, "_");
+        settings = Object.assign({}, settings, { headers: Object.assign({}, settings.headers || {}) });
+        settings.headers["Content-Disposition"] = "attachment; filename=\"" + safeName + "\"";
+        return res.sendFile(file, settings);
+      };
+
       // A HEAD is the same as a GET, without the body of the answer.
       // The events of the server are asked for with a GET as well.
       var methods = [method];
@@ -930,7 +964,10 @@ function veyServer(ctx) {
               return;
             }
             Promise.resolve(found.route.handler(info, res)).then(function (result) {
-              if (res.isFinished()) return;
+              // Response helpers return `res` for chaining. Returning that
+              // object from a handler must not serialize its internal state as
+              // the response body, especially for asynchronous file helpers.
+              if (res.isFinished() || result === res) return;
               res.send(result);
             }).catch(function (err) {
               fail(info, res, err);

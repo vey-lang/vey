@@ -373,6 +373,10 @@ function veyShared(ctx) {
         state.headers["Content-Type"] = String(kind);
         return res;
       },
+      contentType: function (kind) {
+        state.headers["Content-Type"] = String(kind);
+        return res;
+      },
       // The answer depends on the head of the request.
       vary: function (name) {
         var key = headerKey(state.headers, "vary");

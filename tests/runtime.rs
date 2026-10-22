@@ -663,6 +663,42 @@ app.start(() => {
 }
 
 #[test]
+fn response_can_send_files_and_downloads_asynchronously() {
+    let text = run_runtime(
+        "response-files",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-response-file-" + process.pid);
+nodeFs.writeFileSync(file, "file body");
+const app = runtime.server(0);
+app.get("/file", (req, res) => res.sendFile(file));
+app.get("/download", (req, res) => res.download(file, "report.txt"));
+app.get("/missing", (req, res) => res.sendFile(file + ".missing"));
+app.start(() => {
+  const get = path => new Promise(resolve => {
+    http.get("http://127.0.0.1:" + app.port() + path, res => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => resolve({ status: res.statusCode, body, disposition: res.headers["content-disposition"] || null }));
+    });
+  });
+  Promise.all([get("/file"), get("/download"), get("/missing")]).then(async answers => {
+    console.log(JSON.stringify(answers));
+    nodeFs.unlinkSync(file);
+    await app.stop();
+    process.exit(0);
+  });
+});
+"#,
+    );
+    assert!(text.contains(r#"{"status":200,"body":"file body","disposition":null}"#), "{text}");
+    assert!(text.contains(r#"{"status":200,"body":"file body","disposition":"attachment; filename=\"report.txt\""}"#), "{text}");
+    assert!(text.contains(r#"{"status":404,"body":"Not found","disposition":null}"#), "{text}");
+}
+
+#[test]
 fn cors_answers_preflight_with_the_configured_headers() {
     let text = run_runtime(
         "cors-preflight",
