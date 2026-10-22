@@ -42,6 +42,21 @@ function veyDom(ctx) {
     return { __vey: true, tag: tag, props: attrs, children: kids };
   }
 
+  // The classes of a node, as they are written in the attribute.
+  //
+  // A list of classes is joined with a space, as the class of an element
+  // is a list of names.
+  function classText(value) {
+    if (!Array.isArray(value)) return value;
+    var out = [];
+    for (var i = 0; i < value.length; i++) {
+      var item = value[i];
+      if (item === null || item === undefined || item === false || item === "") continue;
+      out.push(String(item));
+    }
+    return out.join(" ");
+  }
+
   function applyProps(el, attrs) {
     var props = ownProps(attrs);
     for (var key in props) {
@@ -79,7 +94,7 @@ function veyDom(ctx) {
         continue;
       }
       if (key === "class") {
-        el.setAttribute("class", value);
+        el.setAttribute("class", classText(value));
         continue;
       }
       if (key === "style" && typeof value === "object") {
@@ -93,6 +108,13 @@ function veyDom(ctx) {
       }
       if (key === "value" || key === "checked") {
         el[key] = value;
+        continue;
+      }
+      // The work that is done when a node comes and when it goes.
+      if (key === "enter" || key === "leave") {
+        if (typeof value === "function") {
+          Object.defineProperty(el, "__vey" + key, { value: value, writable: true, enumerable: false, configurable: true });
+        }
         continue;
       }
       el.setAttribute(key, value === true ? "" : String(value));
@@ -149,6 +171,10 @@ function veyDom(ctx) {
       // The key of an item and the reference to a node are of the program,
       // not of the page.
       if (key === "key" || key === "ref") continue;
+      if (key === "class") {
+        attrs += " class=\"" + escapeHtml(classText(value)) + "\"";
+        continue;
+      }
       if (key === "style" && typeof value === "object") {
         var styles = ownProps(value);
         var css = "";

@@ -999,6 +999,32 @@ let page = mount("#app", App())
 page.update(App())
 ```
 
+When the page is given as a function, the page follows the state it reads:
+the values that the markup reads are remembered, and the page is written
+again when one of them changes.
+
+```vey
+let count = signal(0)
+
+component App() {
+  main.page {
+    h1 { "Clicked {count.value} times" }
+    button click=fn() { count.set(count.value + 1) } { "click" }
+  }
+}
+
+mount("#app", App)
+```
+
+The view of a route may also be a function, and the page of the route
+follows the state it reads as well.
+
+```vey
+route("/users/{id}", fn(params) {
+  h1 { "User {params.id}" }
+})
+```
+
 When the server has already written the page, the browser takes it over
 instead of putting it out again, so that the visitor does not see the page
 twice.

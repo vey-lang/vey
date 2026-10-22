@@ -67,3 +67,57 @@ bind("#app", App())
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("DOM_TEST_OK"));
 }
+
+#[test]
+fn the_page_follows_the_state_it_reads() {
+    let dir = temp_dir();
+    let app = dir.join("app.vey");
+    fs::write(
+        &app,
+        r##"
+let count = signal(0)
+
+component App() {
+  main.page {
+    h1 { "Clicked {count.value} times" }
+  }
+}
+
+mount("#app", App)
+
+setTimeout(fn() {
+  count.set(1)
+}, 10)
+"##,
+    )
+    .unwrap();
+
+    let bundle = dir.join("app.cjs");
+    let build = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("build")
+        .arg(&app)
+        .arg("-o")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let harness = dir.join("dom-signal-test.cjs");
+    fs::write(&harness, include_str!("fixtures/dom-signal-test.cjs")).unwrap();
+
+    let output = Command::new("node")
+        .arg(&harness)
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("DOM_SIGNAL_TEST_OK"));
+}

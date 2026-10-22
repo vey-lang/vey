@@ -1195,6 +1195,142 @@ gap that is closed.
 
 ---
 
+## 15. The frontend that is still missing
+
+The language has the pieces of a page: the markup, the components, the
+state, the routes, the events. What it does not have is the part that
+makes a page feel alive: the state does not follow the page, a node that
+leaves cannot say goodbye, a form is not tied to the state, and a component
+has only one hole for its content.
+
+The items below were found by reading the runtime of the browser and the
+code that writes a page, and by writing pages that wanted more.
+
+### 15.1 The state and the page
+
+- [x] **The markup does not follow the state.** A signal that is read in
+      the markup does not change the page: the page has to be written again
+      by hand with `page.update(App())`. A page that reads a signal should
+      change itself when the signal changes. The page is now given as a
+      function (`mount("#app", App)`), and the values it reads are
+      remembered. The view of a route may be a function as well.
+      (`src/runtime/mount.js`, `src/runtime/router.js`)
+- [ ] **There is no value that follows another.** A value that is computed
+      from a signal has to be written again by hand.
+      (`src/runtime/state.js`)
+- [ ] **The changes are not gathered.** Ten writes of ten signals write the
+      page ten times, and the page may be written in the middle of a change.
+      (`src/runtime/state.js`)
+- [ ] **A signal has no equality of its own.** A new object with the same
+      content is a change, so the page is written again for nothing.
+      (`src/runtime/state.js`)
+
+### 15.2 The transitions and the animations
+
+- [ ] **Nothing knows that a node is going to leave.** A node that is taken
+      away has no chance to say goodbye, so a transition on the way out
+      cannot be written. (`src/runtime/mount.js`)
+- [ ] **Nothing knows that a node has come.** A node that is put in the page
+      has no chance to say hello either.
+      (`src/runtime/mount.js`)
+- [ ] **There is no helper for a transition.** The page has to write the
+      class of the node and the time of the transition by hand.
+      (`src/runtime/`)
+
+### 15.3 The forms
+
+- [ ] **The value of a field is not tied to the state.** The runtime copies
+      the value of the field into the page, but the state does not follow
+      what the visitor writes. (`src/runtime/mount.js`, `src/runtime/state.js`)
+- [ ] **There are no helpers for a form.** The values of the form, its
+      validity and its sending are written by hand.
+      (`src/runtime/`)
+
+### 15.4 The components
+
+- [ ] **A component has only one hole for its content.** A component that
+      wants a title and a body cannot ask for them by name, and it cannot
+      say what is put in the hole when the caller gives nothing.
+      (`src/codegen/markup.rs`, `src/runtime/dom.js`)
+- [ ] **There is no context.** A value that is shared by a part of the page
+      has to be passed through every component in between.
+      (`src/runtime/state.js`)
+- [ ] **There is no wall for the mistakes.** An error in a component stops
+      the whole page; there is no way to catch it near the component that
+      made it. (`src/runtime/mount.js`)
+- [ ] **There is no component that waits.** A component that asks for
+      something cannot show that it is waiting.
+      (`src/codegen/mod.rs`)
+- [ ] **There is no memo.** A component is written again every time the
+      page is, even when nothing it uses has changed.
+      (`src/runtime/mount.js`)
+- [ ] **A component cannot hold a value of its own.** A `let` cannot be
+      written inside a markup, so a value of a component has to live
+      outside of it. (`src/parser/markup.rs`)
+- [ ] **A component never receives a prop whose name is the name of an
+      event.** The name `click` becomes `onclick` for every node, so a
+      component that takes a `click` reads nothing. (`src/codegen/markup.rs`)
+- [ ] **A component whose markup waits gives a promise to the page,** so
+      the page writes `[object Promise]`. (`src/codegen/mod.rs`,
+      `src/runtime/dom.js`)
+- [ ] **Children that are given to a component that takes none are
+      dropped without a word.** (`src/types/stmts.rs`)
+- [ ] **The type of the children of a component is never checked,** and
+      there is no type in the language for a node, so the children of a
+      component can only be `any`. (`src/types/stmts.rs`)
+- [ ] **A positional argument is thrown away when the parameter of the
+      component is a pattern.** (`src/codegen/mod.rs`)
+- [ ] **A slot whose name the component does not declare is dropped, and
+      a slot whose name it does declare is asked for as an argument.**
+      There is no way to say what is put in a slot when the caller gives
+      nothing. (`src/parser/markup.rs`, `src/codegen/markup.rs`,
+      `src/types/stmts.rs`)
+- [ ] **Two children with the same slot name: the first one is lost.**
+      (`src/codegen/markup.rs`)
+- [ ] **The props of a component cannot be spread,** so a component that
+      wraps another one cannot pass a bag of props on.
+      (`src/parser/markup.rs`)
+- [ ] **The name of an attribute cannot hold a colon,** so `xlink:href`
+      and `xml:lang` cannot be written. (`src/parser/markup.rs`)
+- [ ] **A tag that is not a tag of HTML is accepted when it has
+      attributes,** although the README says that it is reported.
+      (`src/parser/markup.rs`)
+- [ ] **A tag of SVG is not a tag of HTML,** so there is no way to write
+      a drawing. (`src/parser/html.rs`)
+- [ ] **A void tag cannot be written on its own,** so `br` has to be
+      written `br { }`. (`src/parser/markup.rs`)
+- [ ] **A component cannot be given its props from an expression,** so
+      `Card({ title: "B" })` puts the whole object in the first place.
+      (`src/runtime/dom.js`)
+
+### 15.5 The page of the browser
+
+- [ ] **The classes of a list are joined with a comma,** so the style of the
+      page does not find them. (`src/runtime/dom.js`)
+- [ ] **The focus is lost when a node is replaced,** so a visitor who is
+      writing in a field loses their place when the page changes.
+      (`src/runtime/mount.js`)
+- [ ] **The work of a node that is taken away is never done.** The work that
+      waits for the page to be taken away only runs when the whole page is
+      taken away. (`src/runtime/mount.js`, `src/runtime/events.js`)
+- [ ] **The place of the scroll is not kept.** A visitor who scrolls down
+      and comes back is at the top of the page. (`src/runtime/mount.js`)
+- [ ] **There is no way to put a node outside of the page.** A menu that
+      opens above the page cannot be written.
+      (`src/runtime/dom.js`)
+- [ ] **The children of a component are moved when they are written a
+      second time,** so the browser and the server do not agree on the
+      page. (`src/runtime/dom.js`)
+- [ ] **The `slot` attribute is taken from every node,** so it never
+      reaches the page, although it is an attribute of HTML.
+      (`src/parser/markup.rs`)
+- [ ] **The work of a node that is mounted runs again at every writing of
+      the page, and the work of a node that is taken away is never done**
+      when the page is written again. (`src/runtime/mount.js`,
+      `src/runtime/events.js`)
+
+---
+
 ## The promises of the README that the code does not keep
 
 Every promise of the README is kept now. The gaps that are left are in

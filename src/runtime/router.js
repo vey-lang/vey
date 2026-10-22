@@ -11,6 +11,9 @@ function veyRouter(ctx) {
   var routes = [];
   var listening = false;
   var current = { path: "/", params: {}, query: {}, view: null };
+  // The work that listens to the values of the view of the route, so that
+  // the page is written again when one of them changes.
+  var stopView = null;
 
   // The address of the page, as it is written.
   function base() {
@@ -55,9 +58,23 @@ function veyRouter(ctx) {
     };
     if (!found) return null;
     var view = found.route.view;
-    var tree = typeof view === "function" ? view(found.params, query) : view;
-    renderMounted(tree);
-    return tree;
+    // The view of the route that is shown now does not listen any more.
+    if (stopView) {
+      stopView();
+      stopView = null;
+    }
+    if (typeof view === "function") {
+      // The view is a function, so the values it reads are remembered, and
+      // the page is written again when one of them changes.
+      var tree = null;
+      stopView = ctx.effect(function () {
+        tree = view(found.params, query);
+        renderMounted(tree);
+      });
+      return tree;
+    }
+    renderMounted(view);
+    return view;
   }
 
   // The address of the browser is watched, so that the way back shows the

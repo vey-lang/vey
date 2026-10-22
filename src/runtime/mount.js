@@ -123,7 +123,24 @@ function veyMount(ctx) {
     }
     // The node is of another kind, so it is left out for the new one.
     var parent = old.parentNode;
-    if (parent) parent.replaceChild(neu, old);
+    if (parent) {
+      // The visitor who is writing in the node keeps his place, so the
+      // focus follows the new node.
+      var hadFocus = doc && doc.activeElement === old;
+      var start = old.selectionStart;
+      var end = old.selectionEnd;
+      parent.replaceChild(neu, old);
+      if (hadFocus && neu && typeof neu.focus === "function") {
+        neu.focus();
+        if (typeof start === "number" && typeof neu.setSelectionRange === "function") {
+          try {
+            neu.setSelectionRange(start, end);
+          } catch (err) {
+            // A node that has no place to write in does not take one.
+          }
+        }
+      }
+    }
     return neu;
   }
 
@@ -162,9 +179,33 @@ function veyMount(ctx) {
       }
     }
 
-    // The children that are not wanted any more are taken away.
+    // The children that are not wanted any more are taken away. A node
+    // that says goodbye is taken away when it is done, so that a transition
+    // may be seen.
     for (var k = 0; k < old.length; k++) {
-      if (!used[k] && old[k].parentNode === parent) parent.removeChild(old[k]);
+      if (used[k] || old[k].parentNode !== parent) continue;
+      var leaving = old[k];
+      var goodbye = leaving.__veyLeave;
+      if (typeof goodbye === "function") {
+        var waiting = null;
+        try {
+          waiting = goodbye(leaving);
+        } catch (err) {
+          log.error(err);
+        }
+        if (waiting && typeof waiting.then === "function") {
+          waiting.then(
+            function () {
+              if (leaving.parentNode === parent) parent.removeChild(leaving);
+            },
+            function () {
+              if (leaving.parentNode === parent) parent.removeChild(leaving);
+            }
+          );
+          continue;
+        }
+      }
+      parent.removeChild(leaving);
     }
 
     // The children are put in the order of the new ones.
@@ -174,6 +215,14 @@ function veyMount(ctx) {
       if (target === null) {
         target = pairs[m].neu;
         parent.insertBefore(target, cursor);
+        // A node that says hello is called after it is in the page.
+        if (target && typeof target.__veyEnter === "function") {
+          try {
+            target.__veyEnter(target);
+          } catch (err) {
+            log.error(err);
+          }
+        }
       } else {
         target = patchNode(target, pairs[m].neu);
         if (target !== cursor && target.parentNode === parent) {
@@ -247,6 +296,10 @@ function veyMount(ctx) {
   //
   // The page that is already there is changed instead of being put out, so
   // that a list may change and be put in another order.
+  //
+  // The page may be given as a function. Then the values that the page
+  // reads are remembered, and the page is written again when one of them
+  // changes.
   function mount(target, node) {
     if (!doc) {
       throw veyError(
@@ -256,16 +309,57 @@ function veyMount(ctx) {
     }
     var el = typeof target === "string" ? doc.querySelector(target) : target;
     if (!el) throw new Error("element not found: " + target);
-    render(el, flatten([node]).map(toDom));
+    // The page is a function, so it is written again when a value it reads
+    // changes.
+    var isFunction = typeof node === "function";
+    var drawing = false;
+    var again = false;
+
+    function draw() {
+      // A value that is changed while the page is written does not write it
+      // again at once, but after the page is done.
+      if (drawing) {
+        again = true;
+        return;
+      }
+      drawing = true;
+      try {
+        var tree = isFunction ? node() : node;
+        render(el, flatten([tree]).map(toDom));
+      } finally {
+        drawing = false;
+      }
+      if (again) {
+        again = false;
+        draw();
+      }
+    }
+
+    var stop = null;
+    if (isFunction) {
+      // The effect listens to the values the page reads.
+      stop = ctx.effect(function () {
+        draw();
+      });
+    } else {
+      draw();
+    }
+
     return {
       element: el,
       // The page is written again, with a new tree.
       update: function (next) {
-        render(el, flatten([next]).map(toDom));
+        node = next;
+        isFunction = typeof next === "function";
+        draw();
         return this;
       },
       // The page is taken away, and the work that waits for it is done.
       destroy: function () {
+        if (stop) {
+          stop();
+          stop = null;
+        }
         while (el.firstChild) el.removeChild(el.firstChild);
         el.__veyMount = null;
         if (mounted && mounted.element === el) mounted = null;
