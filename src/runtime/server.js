@@ -410,7 +410,7 @@ function veyServer(ctx) {
           res.end();
           return true;
         }
-        res.send(fs.readFileSync(file));
+        res.sendFile(file);
         return true;
       } catch (err) {
         return false;

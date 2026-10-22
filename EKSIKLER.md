@@ -1056,15 +1056,15 @@ function fitsPath(pattern, pathname) {
 
 Hata middleware'leri artık `(error, req, res, next)` imzasıyla `next()`/`next(err)` kullanarak sıradaki hata middleware'ine geçebiliyor. Test: `tests/runtime.rs::error_handlers_can_pass_errors_to_the_next_handler`.
 
-### D8 · Statik dosya servisi bir **middleware** değil, yalnızca 404 fallback'i
+### D8 · Statik dosya servisi 🟡 **temel middleware davranışı mevcut**
 `src/runtime/server.js:371-373` + `611-613`
 
 ```js
 if (!found) { notFound(request, info, res); return; }   // sadece route eşleşmezse
 ```
-Bir route eşleşirse `public/` dosyaları **asla** servis edilmiyor. Ayrıca:
-- **Range request / 206 yok** → video/ses ve büyük dosya indirme çalışmıyor.
-- `fs.readFileSync` → event loop bloklanıyor (`server.js:271`).
+Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a düşüyor; route eşleşti diye statik dosya engellenmiyor. Ayrıca:
+- ~~**Range request / 206 yok**~~ ✅ mevcut.
+- ~~`fs.readFileSync`~~ ✅ normal dosya yanıtı artık `sendFile`/`createReadStream` üzerinden akıyor.
 - `fs.statSync` **iki kez** çağrılıyor (`server.js:242,245`).
 - `Cache-Control` isim hash'ine bağlı değil → aynı isimli dosya 1 yıl bayat kalıyor (`server.js:39-45`).
 - `maxAge`/`index`/`immutable`/`fallthrough` ayarları yok (`static(dir)` tek argüman).
