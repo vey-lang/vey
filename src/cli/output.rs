@@ -168,6 +168,7 @@ usage:
   vey docs [file|dir] [-o out]     write the documentation of the program
   vey migrate [file|dir]           bring the program to this version
   vey deploy [entry|dir]           build the site and say where it is
+  vey lsp                         the language server
   vey version                     print version
   vey help                        show this message
 

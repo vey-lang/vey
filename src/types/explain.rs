@@ -129,8 +129,10 @@ impl Walker {
         if pos.line <= self.point.line
             && (pos.line < self.point.line || pos.col <= self.point.col)
         {
+            // The expression that comes last before the place is the one
+            // that is asked about.
             let closer = match &self.best {
-                Some(best) => best.pos().after(&pos),
+                Some(best) => pos.after(&best.pos()),
                 None => true,
             };
             if closer {

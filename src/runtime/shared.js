@@ -273,7 +273,20 @@ function veyShared(ctx) {
       },
       set: function (name, value) {
         var key = headerKey(state.headers, name);
-        if (key !== null && key !== String(name)) delete state.headers[key];
+        if (key !== null) {
+          var current = state.headers[key];
+          // A mark that may be written more than once, such as the cookie
+          // of the answer, keeps the ones that are already there.
+          if (Array.isArray(current)) {
+            current.push(value);
+            return res;
+          }
+          if (key !== String(name)) {
+            delete state.headers[key];
+            state.headers[String(name)] = value;
+            return res;
+          }
+        }
         state.headers[String(name)] = value;
         return res;
       },

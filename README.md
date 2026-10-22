@@ -1010,6 +1010,10 @@ has a limit, and `stop()` waits for the requests that are running.
 | `assertNotContains(text, part, message)` | throw when the text holds the part |
 | `assertThrows(fn, message)` | throw when the code does not throw |
 | `assertMatch(text, pattern, message)` | throw when the text does not match the pattern |
+| `ok(value)` | the answer of a function that worked |
+| `err(error)` | the answer of a function that failed |
+| `todo(message)` | throw, because the work is not finished |
+| `unimplemented(message)` | throw, because the work is not written |
 | `test(name, fn)` | run a test block |
 | `error(message)` | throw an error |
 | `all(list)` / `race(list)` | promise combinators |
@@ -1147,6 +1151,7 @@ src/sourcemap/       the source map
   mod.rs             the map
   vlq.rs             the encoding of the map
 src/cli/             the commands
+  json.rs            the reading and the writing of JSON
   args.rs            command line parsing
   run.rs             run, test and check
   build.rs           the build of the site
@@ -1164,6 +1169,7 @@ src/cli/             the commands
   docs.rs            the documentation of a program
   migrate.rs         bringing a program to this version
   deploy.rs          building the site for a host
+  lsp.rs             the language server
 src/builtins.rs      the names the runtime provides
 src/suggest.rs       suggestions for names that are close to a known one
 src/warn.rs          the warnings of the compiler

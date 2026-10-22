@@ -1,0 +1,727 @@
+# Roadmap
+
+What the language is missing, and the order in which the gaps are closed.
+
+This file is written from the source in `src/`. Every item names the files
+that hold the gap, so that the work can start at the place where the change
+belongs. The items are grouped in the order of the phases at the end of the
+file: the things that lie come first, then the type system, then the parts
+of the language that are not there yet, then the surface, then the library,
+then the two runtimes, then the tools.
+
+A short note on the shape of the language today: the compiler is a single
+binary, the runtime is small and readable, the types are optional and erased
+at the end, and the markup has no closing tags. What is missing is mostly
+what a language needs to *grow up* with: a type system that keeps its
+promises, the parts of a language that a program reaches for every day, a
+browser runtime that can hold state, a server with the middle pieces of a
+web framework, and the tools that a team needs around a compiler.
+
+---
+
+## 0. The state of the language
+
+| Part | Today | The gap in one line |
+| --- | --- | --- |
+| Lexer | 40 lines of operators, decimal numbers, `//` comments | no `;`, no hex, no block comments, no escapes beyond four |
+| Parser | expressions, statements, markup, types | no ASI, no tuples, no interfaces, no `throw` |
+| Types | 15 type kinds, structural objects, generics on `fn` | `await` and every unannotated call fall back to `any` |
+| Checker | names, scopes, a few ordering rules | no unused names, no shadowing, no unreachable code |
+| Codegen | plain JavaScript, one bundle, one inline source map | the source map loses every closure, the columns are lost |
+| Runtime (browser) | `h`, `html`, `raw`, `bind`, `cls`, `clipboard`, `title` | it renders once; there is no state and no update |
+| Runtime (server) | routes, a body, cookies, a static folder | no middleware, no sessions, no caching, no sockets |
+| Standard library | text, lists, dates, JSON, the server | no `Map`, no `Set`, no regex, no timers, no `fetch` |
+| CLI | `run`, `dev`, `test`, `build`, `new`, `check` | no `fmt`, no `lint`, no `repl`, no language server |
+
+---
+
+## 1. Truth first: the places where the code lies
+
+These are not missing features. They are places where the compiler, the
+checker or the runtime says something that is not true, and they cost more
+than a missing feature because the reader trusts them.
+
+- [ ] **The `ctx` helpers are assigned in the wrong place.** In four parts of
+      the runtime the `ctx.*` lines ended up inside a function body instead
+      of at the end of the part: `src/runtime/data.js:39-43` (inside
+      `url.parse`), `src/runtime/http.js:17-25` (inside the `then` of the
+      request), `src/runtime/server.js:159-161` (inside `makeRequest`) and
+      `src/runtime/dom.js:42-51` (inside the branch of `h` without a
+      document). Nothing reads them, so the effect is dead code with a
+      misleading indentation. *Done when:* every `ctx.*` sits at the end of
+      its part, and the indentation of the four files is straight.
+
+- [ ] **`vey build` returns 0 when a page fails.** The failures are printed
+      to stderr but the exit code is still 0 (`src/cli/build.rs:47-67`), so a
+      pipeline that builds a site never notices a broken page. *Done when:*
+      the command returns 1 when a page could not be built.
+
+- [ ] **A `match` with a guard is called exhaustive when it is not.**
+      The checker inserts the variant of an arm into the covered set even
+      when the arm has a guard (`src/types/exprs.rs:296`), while the
+      wildcard is only noticed when there is no guard
+      (`src/types/exprs.rs:299-308`). A match whose only `Size.Large` arm is
+      guarded passes the check and then falls through to `undefined` at
+      runtime (`src/codegen/exprs.rs:391-393`). *Done when:* an arm with a
+      guard does not cover its variant, and the checker says so.
+
+- [ ] **The source map loses every closure.** `capture()` throws the line
+      table of the body away (`src/codegen/mod.rs:153-167`), so the code
+      inside an arrow, a `fn` expression or a `match` body is not in the map.
+      A runtime error there points at the wrong line, which breaks the
+      promise of the README (line 170). *Done when:* the lines of a closure
+      are in the map.
+
+- [ ] **The source map has no columns.** The generated column and the
+      source column are always 0 (`src/sourcemap/mod.rs:35-38`), so a
+      debugger can only point at a line. *Done when:* the caret of the error
+      page lands on the word that is wrong.
+
+- [ ] **The pages of a `tests/` folder are built as pages of the site.**
+      `is_ignored_dir` knows `tests` and `examples`
+      (`src/cli/entry.rs:97-110`), but `collect_vey_files` does not
+      (`src/cli/entry.rs:177-200`), so a project with its entry at the root
+      tries to build `tests/*.vey` as a page. *Done when:* both walk the
+      same list of folders.
+
+- [ ] **The `;` is a token that the parser never wants.** The lexer reads it
+      (`src/lexer/mod.rs:241`) and the parser reports "unexpected token ';'"
+      (`let x = 1;` fails). Either the semicolon is a separator or it is not
+      a token. *Done when:* the two agree.
+
+- [ ] **The rules for the bitwise operators are dead.** The type checker
+      knows `& | ^ << >>` (`src/types/exprs.rs:644-651`) but the lexer has
+      no such marks (`src/lexer/mod.rs:75-78`), so `1 & 2` is a syntax
+      error and the rules can never run. *Done when:* the marks exist or the
+      rules are gone.
+
+- [ ] **`input()` writes to the ambient `process`.** The runtime is careful
+      not to trust the ambient `process` (`src/runtime/index.js:14-17`) and
+      asks for the module of Node instead, but `input` uses the global
+      (`src/runtime/core.js:18`). *Done when:* it asks for the module.
+
+- [ ] **A generic call is parsed by copying the parser.**
+      `src/parser/exprs.rs:200-215` clones the whole parser to try the
+      generic form and restores it when it fails, so `a < b > (c)` may be
+      read as a generic call. *Done when:* the parser looks ahead instead of
+      copying itself.
+
+- [ ] **`src/cli/highlight.rs:36` keeps a flag that is thrown away**
+      (`let _ = done;`). *Done when:* the flag says something or is gone.
+
+- [ ] **The enum of a module is described twice.** The checker keeps the
+      variants of an enum (`src/types/checker.rs:125-189`) and the code
+      generator rebuilds them (`src/codegen/js.rs:104-121`). *Done when:*
+      there is one description.
+
+---
+
+## 2. The type system that keeps its promises
+
+The types are optional and erased, which is the right shape for a small
+language. The problem is not that they are optional, it is that a program
+*with* types is not checked in many places, and the checker stays quiet
+where it should speak.
+
+### 2.1 The places where everything becomes `any`
+
+- [ ] **`await` has no type.** There is no `Promise` in the language
+      (`src/types/builtins.rs:58`); the type of an `await` is `any`
+      (`src/types/exprs.rs:371-374`). *Done when:* `await` has the type of
+      what it waits for, and `Promise<T>` is a type of the language.
+
+- [ ] **A call to a function without types is not checked.** The arity and
+      the arguments are only checked when the function has a type on a
+      parameter or on the return (`src/types/exprs.rs:429-431` and
+      `src/types/checker.rs:404`). The same happens to every call with a
+      spread (`src/types/exprs.rs:429`). *Done when:* the arguments of
+      every call are checked, and the types of a function are inferred when
+      they are not written.
+
+- [ ] **A call on a union is not checked** (`src/types/exprs.rs:567`) and
+      the optional call `?.()` is not checked at all
+      (`src/types/exprs.rs:139-143`).
+
+- [ ] **A name that is not known is `any`, without an error**
+      (`src/types/exprs.rs:32-35`), and the member of a module that is not
+      known is `any`, without an error (`src/types/exprs.rs:666-679`). A
+      typo in `ui.Card` or `math.PIe` is silent.
+
+- [ ] **A `let` without a type is `any`** (`src/types/stmts.rs:113`) and the
+      type of a `const` is only guessed for the simple shapes
+      (`src/types/helpers.rs:186-197`).
+
+- [ ] **`and`, `or`, `+` and the bitwise marks do not check their
+      operands** (`src/types/exprs.rs:117-127`, `:583-593`, `:644-651`).
+
+- [ ] **A spread of something that is not a list, or an object with a
+      spread, throws the whole type away** (`src/types/exprs.rs:40-45`,
+      `:72-87`).
+
+- [ ] **`any` fits everywhere**, in both directions
+      (`src/types/rules.rs:61-65`), so one `any` in a program turns the
+      checking off for everything it touches.
+
+### 2.2 The types that do not exist yet
+
+- [ ] **No interface, trait or protocol.** The only shapes are the object
+      type and the alias (`src/ast/types.rs:5-15`).
+- [ ] **No tuple and no dictionary type.** `{[string]: number}` cannot be
+      written (`src/parser/types.rs:40-127`).
+- [ ] **No `unknown`, no `object`, no `symbol`, no `bigint`.**
+- [ ] **No cast (`as`), no `is`, no `satisfies`, no `typeof`, `keyof` or
+      `infer` in a type.**
+- [ ] **No generic function expression.** The generics are on the `fn` of a
+      declaration (`src/ast/decl.rs:63-79`), not on an arrow
+      (`src/ast/expr.rs:88-89`).
+- [ ] **The constraint of a type alias is parsed and never checked**
+      (`src/parser/mod.rs:411-445` against `src/types/resolve.rs:140-171`).
+      The constraint of a function is checked
+      (`src/types/exprs.rs:546-562`).
+
+### 2.3 The checks that are too soft
+
+- [ ] **A condition is barely checked.** Only a number and a text are
+      refused (`src/types/stmts.rs:326-334`); a list, an object or a
+      function pass as a condition. *Done when:* a condition must be a
+      boolean.
+
+- [ ] **`repeat n { }` does not check that `n` is a number**
+      (`src/types/stmts.rs:254-257`).
+
+- [ ] **An object with a field too much is accepted**
+      (`src/types/rules.rs:101-120` only walks the fields of the target).
+
+- [ ] **The narrowing knows two shapes only:** `x == null` and
+      `type(x) == "kind"` (`src/types/patterns.rs:13-82`). The truth of a
+      value (`if user { }`), `!= undefined` and `instanceof` do not narrow.
+      The kind `undefined` cannot be narrowed at all
+      (`src/types/core.rs:253-285`).
+
+- [ ] **The exhaustiveness of a `match` is only checked for the enums of
+      the program.** A `match` on `number | string` is not checked
+      (`src/types/exprs.rs:327-364`).
+
+- [ ] **The enums of another module are not checked at all.** The
+      environment of a module keeps no enum
+      (`src/types/checker.rs:26-35`), so `t.Status.Nope` is not reported
+      and a `match` on a foreign enum is not checked for exhaustiveness.
+      The README (line 414) says the fields are checked.
+
+- [ ] **The arguments of a component are checked only when the component has
+      no `children` and no rest parameter** (`src/types/stmts.rs:517-532`),
+      and the arguments in excess are ignored
+      (`src/types/stmts.rs:506-509`).
+
+- [ ] **A type that is recursive is loose in both directions**
+      (`src/types/rules.rs:61-63`), so the open end of
+      `type Node = { value: number, next: Node | null }` takes anything.
+
+- [ ] **A type variable that cannot be bound becomes `any` without a word**
+      (`src/types/rules.rs:192-233`).
+
+---
+
+## 3. The checker of the names
+
+- [ ] **No unused names.** Nothing in the program reports a name that is
+      written and never read: no unused variable, no unused import, no
+      unused parameter, no unused `catch` binding.
+- [ ] **No shadowing.** A name may hide another name in the same block
+      without a word (`src/check/scopes.rs:81-86`).
+- [ ] **No unreachable code.** The code after a `return`, a `break` or a
+      `continue` is not reported.
+- [ ] **The order of the names is only checked for `let` and `const` at the
+      top level** (`src/check/mod.rs:101-106`, `:354-364`); a function or a
+      component may be used before it is written.
+- [ ] **The names of a module are not checked.** `ui.Card` and `math.PIe`
+      are only checked as an object and an index
+      (`src/check/mod.rs:415-420`).
+- [ ] **A `break` outside a loop is not found in every case.** The counter
+      is reset for every function (`src/check/mod.rs:243-247`), so a
+      `break` inside a `match` inside a loop passes and becomes a mistake
+      in the emitted JavaScript.
+- [ ] **The types and the enums are not names for the checker**
+      (`src/check/mod.rs:222-223`), so two types with the same name are
+      only caught by the type checker.
+
+---
+
+## 4. The parts of the language that are not there yet
+
+These are not mistakes; they are the parts of a language that a program
+reaches for every day and that Vey does not have. Each of them is small on
+its own and large in the life of a program.
+
+### 4.1 The shapes of a program
+
+- [ ] **There is no `Map` and no `Set`.** The only shapes are the list and
+      the object (`src/ast/expr.rs`), so the keys of a map are always
+      texts and a set is an object with `true` in it. *Done when:* the
+      runtime has `Map` and `Set` with the same shape as the language.
+
+- [ ] **There is no `Result` and no `Option`.** A failure is only an
+      exception (`src/runtime/core.js:82-87`), so a function that may fail
+      cannot say so in its type, and every caller has to know the shape of
+      the answer. *Done when:* `Result<T, E>` and `Option<T>` are types of
+      the language, with `?` to hand the failure on.
+
+- [ ] **There is no `yield`, so there are no iterators.** A function that
+      hands back values one by one has to build a list first
+      (`src/ast/expr.rs`), so a file of a million lines is read into the
+      memory before the first line is used. *Done when:* `yield` writes a
+      generator and `for x in generator` reads it.
+
+- [ ] **There is no `defer`.** A program that opens a file, a lock or a
+      connection has no way to close it when the block is left
+      (`src/ast/stmt.rs`), so the cleanup is written by hand at every exit.
+
+- [ ] **There is no `pub` and no `priv`.** Everything a module exports is
+      for everyone (`src/ast/decl.rs`), and `export` is all or nothing: a
+      library cannot keep a helper of its own to itself.
+
+- [ ] **There are no methods.** A type has no fields and no functions of its
+      own; the helpers are free functions in a namespace
+      (`src/runtime/collections.rs`). A program of many types has a file of
+      free functions.
+
+- [ ] **There is no `if let` and no `while let`.** The `match` does the
+      work, but the two forms that read well when there is one case are not
+      there.
+
+- [ ] **There is no `let else`.** A value that must be there is written as
+      a `match` with an arm that fails.
+
+- [ ] **The `for` has no step and does not walk the keys of an object**
+      (`src/parser/mod.rs`). There is no `for i in 0..10 by 2`.
+
+- [ ] **There are no labelled loops**, so a `break` in a loop inside a loop
+      breaks the inner one only, and there is no way to say otherwise.
+
+### 4.2 The words of a program
+
+- [ ] **There are no doc comments.** `///` is not a comment
+      (`src/lexer/mod.rs:167-174` reads only `//`), so the docs of a
+      library live somewhere else than the code.
+
+- [ ] **There is no version of the language in a file.** A file that is
+      written for one compiler may be read by another without a word; there
+      is no `// vey: 0.7` that says what it was written for.
+
+- [ ] **There are no warnings.** The compiler speaks only when something is
+      wrong. A name that is never used, a branch that is never taken, a
+      value that is always the same and a `catch` that is empty are all
+      silent.
+
+- [ ] **There is no `todo` and no `unimplemented` in the language.** A
+      piece of work that is not finished is a comment today.
+
+---
+
+## 5. The surface of the language
+
+### 5.1 The lexer
+
+- [ ] **The numbers are decimal only** (`src/lexer/mod.rs:257-312`): no
+      `0x`, `0b`, `0o`, no `_` between the digits, no `n` at the end, no
+      `.5` at the start.
+- [ ] **The escapes are four:** `\n`, `\t`, `\r`, `\0`
+      (`src/lexer/strings.rs:36-43`). `\uXXXX`, `\xNN`, `\'` and `\"` are
+      not read; `\u` becomes a `u`.
+- [ ] **There are no block comments** outside a `style { }` block
+      (`src/lexer/strings.rs:117-125`).
+- [ ] **There is no `!`, no `&`, no `^`, no `<<`, no `>>`** in the marks
+      (`src/lexer/mod.rs:75-78`). `not` is there, the bitwise family is not.
+- [ ] **There is no regex and no template string.**
+
+### 5.2 The parser
+
+- [ ] **There is no end of a statement.** The newlines are plain spaces
+      (`src/lexer/mod.rs:159-178`), so `let a = 1` under a line that begins
+      with `-2` is `1 - 2`, and `f(x)` under `(y)` is `f(x)(y)`. *Done
+      when:* the end of a line ends a statement, or the semicolon is
+      wanted.
+
+- [ ] **The assignment marks are few:** `= += -= *= /= %=`
+      (`src/parser/mod.rs:17`). There is no `**=`, `&&=`, `||=`, `??=`.
+
+- [ ] **There is no `throw`** (only the `error()` helper), no `switch`, no
+      labelled `break`/`continue`, no `do while`, no class, no struct, no
+      `impl`, no decorator, no macro.
+
+- [ ] **The patterns of a `match` are few** (`src/ast/expr.rs:21-37`,
+      `src/parser/patterns.rs:9-124`): a value, a range, a name, a variant.
+      There is no list, no object, no prefix of a text, no `as`.
+
+- [ ] **The markup knows four things:** an element, an expression, an `if`
+      and a `for` (`src/ast/markup.rs:6-12`). There is no `match` in the
+      markup, no `key`, no slot, no spread of the children, no index in a
+      `for`, and a `<` in the text is a mistake. One `id` per element.
+
+- [ ] **The type of an arrow function cannot be written**
+      (`src/parser/exprs.rs:355-415` reads only the types of the
+      parameters).
+
+- [ ] **The named arguments live only in the markup**; `f(a=1)` is a
+      mistake anywhere else (`src/parser/exprs.rs:262-268`).
+
+- [ ] **The `async` keyword is refused** (`src/parser/mod.rs:140-150`),
+      which is right, but nothing says so in the language itself.
+
+### 5.3 The shape of the types
+
+- [ ] **No tuple, no dictionary, no interface** (see 2.2).
+
+---
+
+## 6. The compiler and the code generator
+
+- [ ] **The lines of the closures are lost** (see 1).
+- [ ] **The `await` is found by looking at the text.** A default value with
+      an `await` in it (`src/codegen/mod.rs:191-194`,
+      `src/codegen/awaits.rs:5-41`), a `match` with an `await` in the guard
+      or in the subject (`src/codegen/exprs.rs:399-403`) and the defaults of
+      the parameters of an arrow (`src/codegen/exprs.rs:166-169`) are not
+      seen, so the emitted function is not `async` and the JavaScript is a
+      mistake.
+
+- [ ] **The events are twelve** (`src/codegen/js.rs:44-57`): there is no
+      `keypress`, `wheel`, `pointer*`, `touch*`, `drag*`, `contextmenu`,
+      no events of one's own and no delegation.
+
+- [ ] **The attributes are thin.** The `class` and the `id` are put
+      together by hand (`src/codegen/markup.rs:59-87`); there is no list of
+      the marks that are true when they are there, no care for `data-*` and
+      `aria-*`, and no difference between a `style` that is a text and a
+      `style` that is an object.
+
+- [ ] **The lists of the markup have no key.** A `for` becomes a
+      `V.flatMap` (`src/codegen/markup.rs:32-39`), so the items of a list
+      have no name of their own.
+
+- [ ] **The `use` of a module is lifted above everything**
+      (`src/codegen/mod.rs:129-139`), even when the parser allows a `use`
+      inside a block.
+
+- [ ] **A `match` that is not exhaustive gives `undefined`**
+      (`src/codegen/exprs.rs:391-393`).
+
+- [ ] **A name of the program is only made safe with a `_`**; a variable
+      called `json` hides the runtime for the whole scope.
+
+- [ ] **There is no cache of the build.** Every build reads every module and
+      compiles it again (`src/compiler/mod.rs:48-120`), and the modules are
+      compiled one after the other. *Done when:* the modules that did not
+      change are taken from `.vey/cache`, and the modules are compiled in
+      parallel.
+
+---
+
+## 7. The library that a program needs
+
+The runtime is small on purpose. What is missing here is not a lot of
+helpers, it is the handful of helpers that every program reaches for in its
+first week.
+
+### 7.1 The common part
+
+- [ ] **No `Map` and no `Set`** in the runtime either
+      (`src/runtime/collections.js`).
+- [ ] **No regex.** A text is searched with `includes` and cut with
+      `split` (`src/runtime/text.js`); there is no `match`, no `replaceAll`,
+      no `at`, no `trimStart`/`trimEnd`.
+- [ ] **No `Intl`.** A number and a date are written the way JavaScript
+      writes them (`src/runtime/date.js:40-57` knows six marks of a date);
+      there is no language, no zone, no name of a day.
+- [ ] **No binary.** There is no `Buffer` and no `Uint8Array` helper; the
+      base64 of the runtime (`src/runtime/data.js`) is all there is.
+- [ ] **No `TextEncoder` and no `TextDecoder`** for the bytes of a text.
+- [ ] **No `structuredClone` and no deep copy**, so a copy of an object
+      shares what is inside it.
+
+### 7.2 The browser
+
+- [ ] **No `fetch` with a `Request`, a `Response` and `Headers`.** There
+      are `http.get` and `http.post` (`src/runtime/http.js:30-44`), so the
+      body, the marks and the time of a request are all out of reach.
+- [ ] **No way to end a request** (`AbortController`), no time, no retry.
+- [ ] **No `URL` object**, only `url.parse` with a plain object
+      (`src/runtime/data.js`).
+- [ ] **No `Blob`, no `File`, no `FileReader`, no `FormData`**, so a file
+      that a visitor chooses never reaches the server.
+- [ ] **No `WebSocket` and no `EventSource`** on the client.
+- [ ] **No `localStorage` and no `sessionStorage`.**
+- [ ] **No `history`**, so a page of a single-page program cannot change
+      the address of the browser.
+- [ ] **No timers.** There is `sleep(ms)` (`src/runtime/core.js:35-37`),
+      which waits; there is no `setTimeout`, no `setInterval` and no
+      `requestAnimationFrame`, so a page cannot draw, poll or wait for
+      anything.
+- [ ] **No `matchMedia`, no `IntersectionObserver`, no `ResizeObserver`,**
+      so a page cannot react to the size of the screen.
+
+### 7.3 The server
+
+- [ ] **No `child_process`.** A program cannot run another program
+      (`src/runtime/node.js`), so a build script, a watcher of a process and
+      a call to `git` are all outside the language.
+- [ ] **No streams.** A file is read whole into the memory
+      (`src/runtime/node.js:68-70`).
+- [ ] **No `crypto`.** There is `hash` and `uuid`
+      (`src/runtime/node.js:41-51`), but no random bytes, no signature, no
+      key.
+- [ ] **No `zlib`**, so a file that is served is not compressed.
+
+---
+
+## 8. The runtime of the browser
+
+The runtime of the browser is seven helpers: `h`, `html`, `raw`, `bind`,
+`cls`, `clipboard.write` and `title`. A page is written once and never
+changes. These are the pieces that a page needs to live.
+
+- [ ] **There is no state.** `bind()` writes the children of its target
+      once (`src/runtime/dom.js:156-168`); there is no signal, no store, no
+      effect, no way to say that a value has changed and to have the page
+      follow.
+- [ ] **There is no difference.** `h()` builds the real nodes at once
+      (`src/runtime/dom.js:35-40`) and `html()` builds a text. Nothing
+      compares two trees, so there is no update of a list, no order that
+      changes, no `key`.
+- [ ] **There is no route in the browser.** The only matcher is on the
+      server (`src/runtime/server.js:10-38`). There is no history, no
+      parameters of a route in the page, no layouts that hold each other.
+- [ ] **There is no water.** The page of the server is not taken over by
+      the page of the browser; `bind()` would replace all of it.
+- [ ] **There are no forms.** The server reads a form that is
+      `application/x-www-form-urlencoded` or JSON
+      (`src/runtime/server.js:84-102`); `multipart/form-data` is not read
+      at all. There is no state of a form, no check, no file.
+- [ ] **There is no event system** beyond the twelve marks of the markup:
+      no delegation, no events of one's own, no `onMount`, no `onDestroy`,
+      no reference to a node.
+
+---
+
+## 9. The runtime of the server
+
+The server has nine methods (`src/runtime/server.js:237-268`). The middle
+of a web framework is missing.
+
+- [ ] **There is no middle piece.** No `app.use(...)`, no middle piece that
+      catches the mistakes, no log of the requests, no CORS, no
+      compression, no limit of the requests.
+- [ ] **There are no sessions and no way to set a cookie.** The `cookie`
+      helper reads and writes a text (`src/runtime/web.js:42-69`), but the
+      answer of the server has no `Set-Cookie`.
+- [ ] **The files that are served have no cache.** `serveStatic` sets the
+      kind of the file and nothing else (`src/runtime/server.js:133-154`):
+      no `ETag`, no `Last-Modified`, no `Cache-Control`.
+- [ ] **There are no sockets and no events from the server** (no
+      WebSocket, no SSE), no HTTPS, no `HEAD`, no `OPTIONS`.
+- [ ] **The body of a request has no limit**; it is all read into the
+      memory (`src/runtime/server.js:84-102`).
+- [ ] **The request is thin** (`src/runtime/server.js:163-172`): no
+      `req.get(header)`, no `req.ip`, no `req.host`, no `req.protocol`.
+- [ ] **The routes are simple** (`src/runtime/server.js:10-38`): a segment
+      that is the same or a `{param}`, and a `*` at the end. No optional
+      parameter, no constraint, no middle piece of its own, no order.
+- [ ] **The server does not stop well.** There is a `stop()`
+      (`src/runtime/server.js:255-267`), but a request that is running is
+      not waited for.
+
+---
+
+## 10. The tools
+
+- [ ] **There is no `vey fmt` and no `vey lint`.**
+- [ ] **There is no `vey repl`.** A language that is learned in a minute
+      should be tried in a minute; today a program is written in a file,
+      built and run.
+- [ ] **There is no `vey explain`.** There is no way to ask the compiler
+      what the type of an expression is.
+- [ ] **There is no watch outside `dev`,** and `dev` watches by asking the
+      files every 300 ms (`src/cli/dev.rs:143-159`, `:518-585`) instead of
+      waiting for the system to say that something changed.
+- [ ] **The reload of the page is a script that is put in every page**
+      (`src/cli/dev.rs:404-413`); there is no socket, and the CSS is not
+      reloaded on its own.
+- [ ] **The tests cannot be chosen** (`src/cli/run.rs:46-132`): no filter,
+      no name, no watch, no measure of the cover. There is `assert` and
+      nothing else: no matchers, no mocks, no files of fixtures, no
+      pictures of a result.
+- [ ] **There is no `vey docs`, no `vey deploy`, no language server, no
+      `vey add` for a package.**
+- [ ] **There is no `--help` for a command.** `vey build --help` says
+      "unknown option" (`src/cli/args.rs:54-56`).
+- [ ] **`--force` is read by every command and used by one**
+      (`src/cli/args.rs:40`, `src/cli/scaffold.rs:36`).
+- [ ] **The help does not name `--force`, the `--host` of `dev`, or the
+      entry of `run` and `dev`** (`src/cli/output.rs:142-175`).
+- [ ] **The bundle is one file with everything.** There is no shaking of the
+      trees, no minifier and no split of the code that is only used on one
+      page (`src/compiler/mod.rs:120-172`).
+- [ ] **There is no migration of the old programs.** When the language
+      changes, there is no `vey migrate` that takes a program of the older
+      version to the newer one.
+- [ ] **The scaffold has one shape only** (`src/cli/scaffold.rs`); there is
+      no template for a program with a server, for a library or for a
+      single page.
+- [ ] **There is no bench and no recipe for the continuous integration**;
+      a new project has no Dockerfile and no workflow.
+
+---
+
+## 11. The words of the mistakes
+
+- [ ] **The suggestion is too near** for a short name: the limit is
+      `max(len / 3, 2)` (`src/suggest.rs:30`), so for a name of two or three
+      letters almost everything is close enough.
+- [ ] **Only the distance of Levenshtein is used** (`src/suggest.rs:4-50`):
+      the two letters that are swapped are not seen, and the case is not
+      ignored.
+- [ ] **Only an unknown name and an unknown type get a suggestion**
+      (`src/check/mod.rs:349`, `src/types/resolve.rs:97`); a member, a
+      component or a variant that is not known get nothing.
+
+---
+
+## 12. A program of Vey cannot do these things today
+
+The short list that the rest of this file is made of.
+
+```vey
+// A map of many entries, with keys that are not texts.
+let seen = Map()
+seen.set(user.id, user)
+
+// A function that may fail, said so in its type.
+fn readConfig(path: string) -> Result<Config, Error>
+
+// A file that is read line by line, not all at once.
+fn lines(path: string) -> Iterator<string>
+
+// A file that is closed when the block is over.
+let file = open("data.txt")
+defer file.close()
+
+// A type with its own functions.
+impl Config {
+  fn port(): number { return 8080 }
+}
+
+// A helper of a library that the outside world cannot see.
+fn parseHeader(text: string): Header
+
+// A warning that a name is never read.
+let unused = 1
+```
+
+---
+
+## 13. The road
+
+The phases are in the order in which they should be done. Each phase ends
+with something that a reader of the language can use.
+
+### Phase 0 — Say what is true  *(the small fixes, one afternoon)*
+
+The items of the first part. Nothing here is a feature; after it, the
+compiler and the runtime stop saying things that are not so.
+
+- [ ] The `ctx` helpers of the four parts of the runtime.
+- [ ] The exit code of `vey build`.
+- [ ] The exhaustiveness of a `match` with a guard.
+- [ ] The lines of the closures in the source map.
+- [ ] The `tests/` folder in the pages of a site.
+- [ ] The `;` and the dead rules of the bitwise marks.
+
+### Phase 1 — A type system that speaks  *(the heart of the language)*
+
+- [ ] `Promise<T>` and the type of an `await`.
+- [ ] The check of the calls, also for the functions without types.
+- [ ] The names of the modules, the members of a module, the variants of a
+      foreign enum.
+- [ ] The narrowing: the truth of a value, `undefined`, `instanceof`.
+- [ ] The arguments of a component, in every case.
+- [ ] The condition must be a boolean.
+- [ ] The unused names and the shadowing.
+- [ ] The tuples, the dictionaries and the interfaces.
+
+### Phase 2 — The parts of the language  *(what a program reaches for)*
+
+- [ ] `Map` and `Set`.
+- [ ] `Result` and `Option`, with `?`.
+- [ ] `yield` and the iterators.
+- [ ] `defer`.
+- [ ] `pub` and `priv`.
+- [ ] The methods of a type (`impl`).
+- [ ] `if let`, `while let` and `let else`.
+- [ ] The doc comments and the version of the language in a file.
+- [ ] The warnings.
+
+### Phase 3 — The surface of the language  *(what is written every day)*
+
+- [ ] The end of a statement (the semicolon or the end of the line).
+- [ ] The numbers of the other bases, the `_` between the digits.
+- [ ] The escapes `\u` and `\x`, the block comments.
+- [ ] The missing marks: `!`, `&`, `|`, `^`, `<<`, `>>`, `**=`, `??=`.
+- [ ] The patterns of a `match`: the lists, the objects, the prefixes.
+- [ ] The markup: `key`, the slots, the `match`, the `<` in the text.
+- [ ] The `throw`, the labelled `break`.
+
+### Phase 4 — A library that a program can lean on  *(the runtime)*
+
+- [ ] The timers of the browser: `setTimeout`, `setInterval`,
+      `requestAnimationFrame`.
+- [ ] The `fetch` of the browser with `Request`, `Response` and `Headers`,
+      and a way to end it.
+- [ ] `localStorage`, the `history` of the browser.
+- [ ] The `Blob`, the `File` and the `FormData` of the browser, and the
+      `multipart` of the server.
+- [ ] `child_process` and the streams of Node, `crypto`, `zlib`.
+- [ ] The regex and the `Intl` of the common part.
+- [ ] The deep copy and the `TextEncoder`.
+
+### Phase 5 — A page that lives  *(the runtime of the browser)*
+
+- [ ] The state: a signal, a store, and the page that follows.
+- [ ] The difference between two trees, so that a list may change.
+- [ ] The routes in the browser.
+- [ ] The events of one's own, the delegation, the life of a node.
+- [ ] The water between the page of the server and the page of the browser.
+
+### Phase 6 — A server with the middle pieces  *(the runtime of the server)*
+
+- [ ] The middle pieces, the log of the requests, the CORS.
+- [ ] The sessions and the cookies of the answer.
+- [ ] The cache of the files that are served.
+- [ ] The sockets and the events from the server.
+- [ ] The limit of the body of a request.
+- [ ] The routes with their own middle piece and their own order.
+
+### Phase 7 — The tools around the compiler  *(the work of a team)*
+
+- [ ] `vey fmt` and `vey lint`.
+- [ ] `vey repl` and `vey explain`.
+- [ ] The cache of the build and the modules in parallel.
+- [ ] The watch of the files by the system, not by a question every 300 ms.
+- [ ] The filter of the tests, the matchers and the measure of the cover.
+- [ ] The language server.
+- [ ] `vey docs`, `vey deploy` and `vey migrate`.
+- [ ] The templates of the new projects, the bench and the recipe of the
+      continuous integration.
+
+---
+
+## The promises of the README that the code does not keep
+
+| The README says | The code does |
+| --- | --- |
+| line 414: the enums of another module have their fields checked | the enums of a module are not checked at all (2.3) |
+| line 361: the checker narrows the unions in the simple conditions | only two shapes narrow (2.3) |
+| line 391: a `match` on an enum is checked for exhaustiveness | not with a guard, and not for a foreign enum (1, 2.3) |
+| line 361: the checker checks the calls | not for a function without types (2.1) |
+| line 170: the source map points at the file and the line | not inside a closure, and never at a column (1) |
+| line 197: `vey check` refuses a value that is used before it is written | only for `let` and `const` at the top level (3) |
+| line 951: the list of the parts of the runtime | `src/runtime/highlight.js` is missing from the list |
