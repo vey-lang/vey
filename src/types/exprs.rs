@@ -210,9 +210,25 @@ impl TypeChecker<'_> {
                 // are not, so that a closure fits the type it is given.
                 self.function_type_from_parts(params, ret, ret_ann.is_some(), &[], &param_types)
             }
-            Expr::Arrow(params, body, ret_ann, pos) => {
-                let (ret, param_types) = self.check_arrow(params, body, ret_ann.as_ref(), *pos)?;
-                self.function_type_from_parts(params, ret, ret_ann.is_some(), &[], &param_types)
+            Expr::Arrow(type_params, params, body, ret_ann, pos) => {
+                // The type parameters of the arrow are in scope while its
+                // body is checked.
+                self.push_type_params(type_params)?;
+                let result = self
+                    .check_arrow(params, body, ret_ann.as_ref(), *pos)
+                    .and_then(|(ret, param_types)| {
+                        // The type of the arrow is made while its type
+                        // parameters are still in scope.
+                        self.function_type_from_parts(
+                            params,
+                            ret,
+                            ret_ann.is_some(),
+                            type_params,
+                            &param_types,
+                        )
+                    });
+                self.pop_type_params();
+                result
             }
             Expr::Range(start, end, pos) => {
                 let start_ty = self.infer_expr(start)?;

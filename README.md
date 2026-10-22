@@ -309,6 +309,13 @@ let double = (n: number): number => n * 2
 ```
 <!-- check -->
 
+An arrow may name its type parameters, the way a function does:
+
+```vey
+let identity = <T>(value: T) => value
+```
+<!-- check -->
+
 The arguments of a call may be given by name, and the ones that are given
 in order fill the parameters that are left:
 

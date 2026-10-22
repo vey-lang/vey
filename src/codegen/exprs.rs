@@ -130,7 +130,7 @@ impl Codegen {
                 }
             }
             Expr::Fn(params, body, _, _) => self.gen_fn_expr(params, body),
-            Expr::Arrow(params, body, _, _) => self.gen_arrow(params, body),
+            Expr::Arrow(_, params, body, _, _) => self.gen_arrow(params, body),
             Expr::Range(start, end, _) => Ok(format!(
                 "V.range({}, {})",
                 self.gen_expr(start)?,

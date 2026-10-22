@@ -151,7 +151,7 @@ pub(crate) fn markup_assigns_name(nodes: &[MarkupNode], name: &str) -> bool {
 pub(crate) fn expr_assigns_name(expr: &Expr, name: &str) -> bool {
     match expr {
         Expr::Fn(_, body, _, _) => block_assigns_name(body, name),
-        Expr::Arrow(_, body, _, _) => match body {
+        Expr::Arrow(_, _, body, _, _) => match body {
             ArrowBody::Block(block) => block_assigns_name(block, name),
             ArrowBody::Expr(expr) => expr_assigns_name(expr, name),
         },

@@ -657,7 +657,7 @@ impl Checker<'_> {
                 }
             }
             Expr::Fn(params, body, _, _) => self.check_function(params, body)?,
-            Expr::Arrow(params, body, _, _) => self.check_arrow(params, body)?,
+            Expr::Arrow(_, params, body, _, _) => self.check_arrow(params, body)?,
             Expr::Match(subject, arms, _) => {
                 self.check_expr(subject)?;
                 for arm in arms {

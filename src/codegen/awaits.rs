@@ -247,7 +247,7 @@ fn walk(expr: &Expr, test: &dyn Fn(&Expr) -> bool) -> bool {
         return true;
     }
     match expr {
-        Expr::Fn(..) | Expr::Arrow(_, _, _, _) => false,
+        Expr::Fn(..) | Expr::Arrow(_, _, _, _, _) => false,
         Expr::Number(_, _) | Expr::Bool(_, _) | Expr::Null(_) | Expr::Ident(_, _) => false,
         Expr::String(parts, _) => parts
             .iter()

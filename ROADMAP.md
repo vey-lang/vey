@@ -178,7 +178,7 @@ where it should speak.
 - [x] **A cast (`as`) and a check of a type (`is`) are there.** There is no
       `satisfies`, no `typeof`, no `keyof` or
       `infer` in a type.**
-- [ ] **No generic function expression.** The generics are on the `fn` of a
+- [x] **No generic function expression.** The generics are on the `fn` of a
       declaration (`src/ast/decl.rs:63-79`), not on an arrow
       (`src/ast/expr.rs:88-89`).
 - [x] **The constraint of a type alias is parsed and never checked**

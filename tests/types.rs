@@ -572,3 +572,11 @@ fn a_match_of_a_union_needs_a_name_or_a_wildcard() {
     );
     assert!(error.contains("not exhaustive"), "{error}");
 }
+
+#[test]
+fn an_arrow_may_name_its_type_parameters() {
+    check_ok(
+        "generic-arrow",
+        "let identity = <T>(value: T) => value\nlet n: number = identity(42)\nlet s: string = identity(\"text\")\n",
+    );
+}

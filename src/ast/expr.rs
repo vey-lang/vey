@@ -1,6 +1,6 @@
 //! The expressions of a program.
 
-use crate::ast::decl::{Block, EnumBinding, Param};
+use crate::ast::decl::{Block, EnumBinding, Param, TypeParam};
 use crate::ast::types::TypeExpr;
 use crate::lexer::Pos;
 
@@ -124,7 +124,7 @@ pub enum Expr {
     CallGeneric(Box<Expr>, Vec<TypeExpr>, Vec<Expr>, bool, Pos),
     Member(Box<Expr>, MemberProp, bool, Pos),
     Fn(Vec<Param>, Block, Option<TypeExpr>, Pos),
-    Arrow(Vec<Param>, ArrowBody, Option<TypeExpr>, Pos),
+    Arrow(Vec<TypeParam>, Vec<Param>, ArrowBody, Option<TypeExpr>, Pos),
     Range(Box<Expr>, Box<Expr>, Pos),
     Match(Box<Expr>, Vec<MatchArm>, Pos),
     Await(Box<Expr>, Pos),
@@ -158,7 +158,7 @@ impl Expr {
             | Expr::CallGeneric(_, _, _, _, p)
             | Expr::Member(_, _, _, p)
             | Expr::Fn(_, _, _, p)
-            | Expr::Arrow(_, _, _, p)
+            | Expr::Arrow(_, _, _, _, p)
             | Expr::Range(_, _, p)
             | Expr::Match(_, _, p)
             | Expr::Await(_, p)

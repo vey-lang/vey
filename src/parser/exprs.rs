@@ -461,6 +461,13 @@ impl Parser {
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, VeyError> {
         let token = self.tok.clone();
 
+        // An arrow may name its type parameters, as in `<T>(x: T) => x`.
+        if self.is_op("<") {
+            if let Some(expr) = self.try_parse_generic_arrow()? {
+                return Ok(expr);
+            }
+        }
+
         match token.kind {
             TokKind::Number => {
                 self.advance()?;
@@ -477,6 +484,7 @@ impl Parser {
                     self.advance()?;
                     let body = self.parse_arrow_body()?;
                     return Ok(Expr::Arrow(
+                        Vec::new(),
                         vec![Param {
                             pattern: BindingPattern::Name {
                                 name: token.value,
@@ -533,6 +541,45 @@ impl Parser {
         }
 
         Err(self.error(format!("unexpected token '{}'", token.value)))
+    }
+
+    /// An arrow that names its type parameters, as in `<T>(x: T) => x`.
+    fn try_parse_generic_arrow(&mut self) -> Result<Option<Expr>, VeyError> {
+        let pos = self.tok.pos;
+        let saved = self.clone();
+        let result = (|| -> Result<Option<Expr>, VeyError> {
+            let type_params = self.parse_type_params()?;
+            if type_params.is_empty() {
+                return Ok(None);
+            }
+            if !self.is_punct("(") {
+                return Ok(None);
+            }
+            let params = self.parse_params()?;
+            let ret = if self.is_punct(":") {
+                self.advance()?;
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            if !self.is_op("=>") {
+                return Ok(None);
+            }
+            self.advance()?;
+            let body = self.parse_arrow_body()?;
+            Ok(Some(Expr::Arrow(type_params, params, body, ret, pos)))
+        })();
+        match result {
+            Ok(Some(expr)) => Ok(Some(expr)),
+            Ok(None) => {
+                *self = saved;
+                Ok(None)
+            }
+            Err(err) => {
+                *self = saved;
+                Err(err)
+            }
+        }
     }
 
     pub(crate) fn try_parse_typed_arrow(&mut self) -> Result<Option<Expr>, VeyError> {
@@ -592,7 +639,7 @@ impl Parser {
             self.advance()?;
             committed = true;
             let body = self.parse_arrow_body()?;
-            Ok(Some(Expr::Arrow(params, body, ret, pos)))
+            Ok(Some(Expr::Arrow(Vec::new(), params, body, ret, pos)))
         })();
 
         match result {
@@ -615,7 +662,7 @@ impl Parser {
             self.advance()?;
             self.expect_op("=>")?;
             let body = self.parse_arrow_body()?;
-            return Ok(Expr::Arrow(Vec::new(), body, None, pos));
+            return Ok(Expr::Arrow(Vec::new(), Vec::new(), body, None, pos));
         }
 
         let mut exprs = vec![self.parse_expression()?];
@@ -642,7 +689,7 @@ impl Parser {
                 });
             }
             let body = self.parse_arrow_body()?;
-            return Ok(Expr::Arrow(params, body, None, pos));
+            return Ok(Expr::Arrow(Vec::new(), params, body, None, pos));
         }
 
         if exprs.len() > 1 {
