@@ -91,6 +91,7 @@ pub const BUILTINS: &[&str] = &[
     "signal",
     "store",
     "effect",
+    "computed",
     "mount",
     "route",
     "navigate",

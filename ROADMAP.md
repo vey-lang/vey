@@ -1215,8 +1215,9 @@ code that writes a page, and by writing pages that wanted more.
       function (`mount("#app", App)`), and the values it reads are
       remembered. The view of a route may be a function as well.
       (`src/runtime/mount.js`, `src/runtime/router.js`)
-- [ ] **There is no value that follows another.** A value that is computed
-      from a signal has to be written again by hand.
+- [x] **There is no value that follows another.** A value that is computed
+      from a signal has to be written again by hand. A `computed` is called
+      again when one of the values it read has changed now.
       (`src/runtime/state.js`)
 - [ ] **The changes are not gathered.** Ten writes of ten signals write the
       page ten times, and the page may be written in the middle of a change.

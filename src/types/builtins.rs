@@ -347,6 +347,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "signal" => Some(builtin_optional(vec![any()], 0, any())),
         "store" => Some(builtin_optional(vec![any(), any()], 0, any())),
         "effect" => Some(builtin_function(vec![any()], any())),
+        "computed" => Some(builtin_function(vec![any()], any())),
         "mount" => Some(builtin_function(vec![any(), any()], any())),
         "route" => Some(builtin_function(vec![string(), any()], any())),
         "navigate" => Some(builtin_function(vec![string()], any())),

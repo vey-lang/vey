@@ -107,6 +107,26 @@ function veyState(ctx) {
     return store;
   }
 
+  // A value that follows other values.
+  //
+  // The function is called again when one of the values it read has
+  // changed. The value is a signal of its own, so it may be read and
+  // written like one.
+  function computed(fn) {
+    var sig = makeSignal(undefined);
+    var stop = effect(function () {
+      sig.set(fn());
+    });
+    // The work is let go when the value is not wanted any more.
+    sig.dispose = function () {
+      if (stop) {
+        stop();
+        stop = null;
+      }
+    };
+    return sig;
+  }
+
   // A state that is shared.
   //
   // A store with a name is the same store everywhere it is asked for, so
@@ -189,10 +209,12 @@ function veyState(ctx) {
   ctx.signal = signal;
   ctx.store = store;
   ctx.effect = effect;
+  ctx.computed = computed;
 
   return {
     signal: signal,
     store: store,
     effect: effect,
+    computed: computed,
   };
 }
