@@ -559,7 +559,7 @@ impl TypeChecker<'_> {
             impls,
             imports: HashMap::new(),
             scopes: vec![HashMap::new()],
-        member_narrowings: vec![HashMap::new()],
+            member_narrowings: vec![HashMap::new()],
             type_param_scopes: Vec::new(),
             type_param_bindings: Vec::new(),
             type_param_constraints: Vec::new(),
