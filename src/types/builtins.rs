@@ -60,6 +60,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
 
     match name {
         "print" => Some(builtin_rest(any(), Type::Void)),
+        "undefined" => Some(Type::Undefined),
         "bind" => Some(builtin_function(vec![any(), any()], any())),
         "input" => Some(builtin_optional(vec![string()], 0, string())),
         "sleep" => Some(builtin_function(vec![number()], promise())),

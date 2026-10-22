@@ -362,6 +362,30 @@ fn collect_interfaces(
     Ok(interfaces)
 }
 
+/// Whether the body of an alias is a type of another module.
+///
+/// A local alias that is written over a type of another module names that
+/// type, and the values of it are made in the module that owns it.
+fn is_foreign_type(aliases: &HashMap<String, Alias>, body: &TypeExpr, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    match body {
+        TypeExpr::Qualified(..) => true,
+        TypeExpr::Name(name, _) => match aliases.get(name) {
+            Some(alias) => is_foreign_type(aliases, &alias.body, depth + 1),
+            None => false,
+        },
+        TypeExpr::Union(items, _) => {
+            !items.is_empty()
+                && items
+                    .iter()
+                    .all(|item| is_foreign_type(aliases, item, depth + 1))
+        }
+        _ => false,
+    }
+}
+
 /// The functions of the types of a program.
 fn collect_impls(
     program: &Program,
@@ -373,9 +397,23 @@ fn collect_impls(
         if let Stmt::Impl(decl) = stmt {
             // The type has to be one of the program, or one of the modules
             // it uses.
-            if !aliases.contains_key(&decl.type_name) {
+            let Some(alias) = aliases.get(&decl.type_name) else {
                 return Err(VeyError::new(
                     format!("unknown type '{}'", decl.type_name),
+                    file,
+                    decl.pos.line,
+                    decl.pos.col,
+                ));
+            };
+            // The methods of a type are written where the type is made. A
+            // type of another module is made there, so a method that is
+            // written here would never reach a value of it.
+            if is_foreign_type(aliases, &alias.body, 0) {
+                return Err(VeyError::new(
+                    format!(
+                        "cannot add methods to '{}', because the type belongs to another module",
+                        decl.type_name
+                    ),
                     file,
                     decl.pos.line,
                     decl.pos.col,

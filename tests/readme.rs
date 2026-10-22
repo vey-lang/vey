@@ -62,7 +62,52 @@ fn the_examples_of_the_readme_are_valid() {
 fn every_helper_of_the_runtime_is_in_the_readme() {
     let readme = fs::read_to_string("README.md").expect("the readme is missing");
     let builtins = fs::read_to_string("src/builtins.rs").expect("the list of helpers is missing");
+    let names = helper_names(&builtins);
+    assert!(!names.is_empty(), "no helpers were found");
 
+    for name in names {
+        assert!(
+            readme.contains(&format!("`{}(", name))
+                || readme.contains(&format!("`{}`", name))
+                || readme.contains(&format!("`{}.", name)),
+            "the readme does not mention '{}'",
+            name
+        );
+    }
+}
+
+#[test]
+fn every_helper_of_the_runtime_has_a_type() {
+    // The names of the helpers and their types are two lists that have
+    // drifted before, so a test keeps them together.
+    let builtins = fs::read_to_string("src/builtins.rs").expect("the list of helpers is missing");
+    let types = fs::read_to_string("src/types/builtins.rs").expect("the types are missing");
+    let names = helper_names(&builtins);
+
+    // Only the arms of `builtin_type` are read, because the names of the
+    // methods of a value are in the same file.
+    let body = types
+        .split("fn builtin_type")
+        .nth(1)
+        .unwrap_or_default()
+        .split("\n}\n")
+        .next()
+        .unwrap_or_default();
+    let mut typed = std::collections::HashSet::new();
+    for name in body.split('"').skip(1).step_by(2) {
+        typed.insert(name.to_string());
+    }
+
+    let missing: Vec<&String> = names.iter().filter(|name| !typed.contains(*name)).collect();
+    assert!(
+        missing.is_empty(),
+        "these helpers have no type: {:?}",
+        missing
+    );
+}
+
+/// The names of the helpers of the language.
+fn helper_names(builtins: &str) -> Vec<String> {
     let mut names = Vec::new();
     for line in builtins.lines() {
         let line = line.trim();
@@ -78,17 +123,7 @@ fn every_helper_of_the_runtime_is_in_the_readme() {
             names.push(name.to_string());
         }
     }
-    assert!(!names.is_empty(), "no helpers were found");
-
-    for name in names {
-        assert!(
-            readme.contains(&format!("`{}(", name))
-                || readme.contains(&format!("`{}`", name))
-                || readme.contains(&format!("`{}.", name)),
-            "the readme does not mention '{}'",
-            name
-        );
-    }
+    names
 }
 
 #[test]

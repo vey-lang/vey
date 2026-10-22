@@ -17,6 +17,8 @@ function veyHttp(ctx) {
     return headers;
   }
 
+  // A request whose answer is the same `Response` that `fetch` gives, with
+  // the body already read: a JSON answer is a value, anything else is text.
   function request(url, options) {
     var fetchFn = scope.fetch || (typeof fetch !== "undefined" ? fetch : null);
     if (!fetchFn) return Promise.reject(veyError("fetch is not available"));
@@ -29,15 +31,13 @@ function veyHttp(ctx) {
         if (contentType.indexOf("json") !== -1) {
           try { body = JSON.parse(text); } catch (err) { body = text; }
         }
-        var headers = {};
-        response.headers.forEach(function (value, key) { headers[key] = value; });
-        return {
+        return Response(body, {
           status: response.status,
-          ok: response.ok,
-          body: body,
-          text: text,
-          headers: headers
-        };
+          statusText: response.statusText,
+          headers: response.headers,
+          url: response.url || url,
+          text: text
+        });
       });
     });
   }
@@ -142,8 +142,14 @@ function veyHttp(ctx) {
     var status = opts.status === undefined ? 200 : Number(opts.status);
     var headers = opts.headers;
     if (!headers || typeof headers.get !== "function") headers = Headers(headers);
-    var text = "";
-    if (body !== undefined && body !== null) {
+    // A response may be given its body as a value and the text it was read
+    // from, so that `body` is a value and `text()` is the text itself.
+    var text;
+    if (opts.text !== undefined) {
+      text = String(opts.text);
+    } else if (body === undefined || body === null) {
+      text = "";
+    } else {
       text = typeof body === "string" ? body : String(body);
     }
     var answer = {

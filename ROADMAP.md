@@ -806,7 +806,7 @@ gap that is closed.
 - [x] **The helper that looks for a `defer` inside an expression always
       says no,** so the next person who writes one gets nothing.
       (`src/codegen/awaits.rs`)
-- [ ] **The checker says a type of another module may be implemented, but
+- [x] **The checker says a type of another module may be implemented, but
       only the types of the program itself are known.** (`src/types/checker.rs`)
 - [x] **The comment about the order of the names is old:** the names of the
       functions are now checked like the names of the values.
@@ -982,11 +982,11 @@ gap that is closed.
 - [x] **There are two readers of cookies,** and they give different
       answers for the same head. (`src/runtime/server.js`,
       `src/runtime/web.js`)
-- [ ] **`http.get` and `fetch` give two shapes for the same thing,** and
+- [x] **`http.get` and `fetch` give two shapes for the same thing,** and
       both are typed `any`, so nothing notices. (`src/runtime/http.js`)
 - [x] **The list of the parts of the runtime in the README is missing
       `map.js`.** (`README.md`)
-- [ ] **The list of the helpers of the runtime lives in four places**
+- [x] **The list of the helpers of the runtime lives in four places**
       that have to be written together, and it has already drifted.
       (`src/builtins.rs`, `src/types/builtins.rs`, `README.md`,
       `src/cli/lsp.rs`)

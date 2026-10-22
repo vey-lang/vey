@@ -1196,7 +1196,7 @@ has a limit, and `stop()` waits for the requests that are running.
 | `json.parse`, `json.stringify` | JSON |
 | `math.round`, `math.floor`, `math.random`, `math.pi` | math |
 | `time.now()`, `time.iso()` | time |
-| `http.get(url)`, `http.post(url, body)` | HTTP client |
+| `http.get(url)`, `http.post(url, body)` | HTTP client, with the answer of `http.fetch` and the body already read |
 | `sleep(ms)` | promise based delay |
 | `html(node)` | render a component tree to HTML |
 | `raw(html)` | mark trusted HTML so `html()` does not escape it |
