@@ -473,8 +473,25 @@ function veyNode(ctx) {
       needNode("path.resolve()");
       var parts = Array.prototype.slice.call(arguments);
       return nodeModule("node:path").resolve.apply(null, parts);
+    },
+    relative: function (from, to) {
+      needNode("path.relative()");
+      return nodeModule("node:path").relative(from, to);
+    },
+    normalize: function (value) {
+      needNode("path.normalize()");
+      return nodeModule("node:path").normalize(value);
+    },
+    isAbsolute: function (value) {
+      needNode("path.isAbsolute()");
+      return nodeModule("node:path").isAbsolute(value);
+    },
+    parse: function (value) {
+      needNode("path.parse()");
+      return nodeModule("node:path").parse(value);
     }
   };
+  path.sep = isNode ? nodeModule("node:path").sep : "/";
 
   ctx.fs = fs;
   ctx.path = path;

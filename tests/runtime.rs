@@ -1177,6 +1177,24 @@ const second = path.join(root, "second.txt");
 }
 
 #[test]
+fn path_helpers_cover_normalization_and_parsing() {
+    let text = run_runtime(
+        "path-helpers",
+        r#"
+console.log(
+  runtime.path.relative("/tmp/project/src", "/tmp/project/lib/index.js"),
+  runtime.path.normalize("/tmp/project/../project/file.txt"),
+  runtime.path.isAbsolute("/tmp/file"),
+  runtime.path.parse("/tmp/file.txt").name,
+  runtime.path.parse("/tmp/file.txt").ext,
+  runtime.path.sep
+);
+"#,
+    );
+    assert!(text.contains("../lib/index.js /tmp/project/file.txt true file .txt /"), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",
