@@ -187,11 +187,9 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
         // Arrays and tuples are both mutable at runtime. An array's length
         // is not known, so it cannot promise the positions of a tuple.
         (Type::Array(_), Type::Tuple(_)) => false,
-        (Type::Tuple(source), Type::Array(target)) => {
-            source
-                .iter()
-                .all(|item| invariantly_assignable_in(item, target, opening))
-        }
+        (Type::Tuple(source), Type::Array(target)) => source
+            .iter()
+            .all(|item| invariantly_assignable_in(item, target, opening)),
         (Type::Dict(source_key, source_value), Type::Dict(target_key, target_value)) => {
             invariantly_assignable_in(source_key, target_key, opening)
                 && invariantly_assignable_in(source_value, target_value, opening)
