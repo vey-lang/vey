@@ -1019,7 +1019,7 @@ fn serde_escape(source: &str) -> String {
 
 #[test]
 fn the_language_server_says_the_mistakes_of_a_used_module() {
-    let dir = temp_dir("lsp-module");
+    let dir = temp_dir("lsp-module").join("café");
     let helper = dir.join("helper.vey");
     write(
         &helper,
@@ -1029,7 +1029,7 @@ fn the_language_server_says_the_mistakes_of_a_used_module() {
     let source = "use \"./helper.vey\" as h\n\nfn main() {\n  print(h.bad())\n}\n";
     write(&file, source);
 
-    let uri = format!("file://{}", file.display());
+    let uri = format!("file://{}", file.display()).replace('é', "%C3%A9");
     let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
         .arg("lsp")
         .stdin(std::process::Stdio::piped())
@@ -1070,6 +1070,11 @@ fn the_language_server_says_the_mistakes_of_a_used_module() {
         .find(|message| message.contains("helper.vey"))
         .unwrap_or_else(|| panic!("the module is not named:\n{text}"));
     assert!(reported.contains("expected number, found string"), "{text}");
+    let helper_uri = format!("file://{}", helper.display()).replace('é', "%C3%A9");
+    assert!(
+        reported.contains(&format!("\"uri\":\"{helper_uri}\"")),
+        "{text}"
+    );
     assert_eq!(text.matches("\"newText\":\"helper\"").count(), 2, "{text}");
     assert!(
         text.contains("\"line\":0,\"character\":22},\"end\":{\"line\":0,\"character\":23"),

@@ -208,7 +208,7 @@ impl Server {
         let mut groups: Vec<(String, Vec<Value>)> = vec![(uri.to_string(), Vec::new())];
         for (file, problem) in problems {
             let target = match file {
-                Some(file) if !file.is_empty() => format!("file://{}", file),
+                Some(file) if !file.is_empty() => file_uri(&file),
                 _ => uri.to_string(),
             };
             match groups.iter_mut().find(|(group, _)| *group == target) {
@@ -247,7 +247,9 @@ impl Server {
         let Some(text) = self.files.get(uri) else {
             return Vec::new();
         };
-        let path = path_of(uri);
+        let Some(path) = path_of(uri) else {
+            return Vec::new();
+        };
         let label = path.to_string_lossy().to_string();
         // A problem of the file that is opened belongs to the buffer of the
         // editor, which may not be written on the disk yet. The places of
@@ -288,7 +290,7 @@ impl Server {
     /// The names that are declared in a file.
     fn names(&self, uri: &str) -> Option<Names> {
         let text = self.files.get(uri)?;
-        let path = path_of(uri);
+        let path = path_of(uri)?;
         let label = path.to_string_lossy().to_string();
         let mut parser = Parser::new(text, &label).ok()?;
         let program = parser.parse_program().ok()?;
@@ -383,7 +385,9 @@ impl Server {
         let Some(text) = self.files.get(uri) else {
             return Value::Null;
         };
-        let path = path_of(uri);
+        let Some(path) = path_of(uri) else {
+            return Value::Null;
+        };
         let label = path.to_string_lossy().to_string();
         let mut parser = match Parser::new(text, &label) {
             Ok(parser) => parser,
@@ -414,7 +418,9 @@ impl Server {
         let Some(text) = self.files.get(uri) else {
             return Value::List(Vec::new());
         };
-        let path = path_of(uri);
+        let Some(path) = path_of(uri) else {
+            return Value::List(Vec::new());
+        };
         let label = path.to_string_lossy().to_string();
         let mut parser = match Parser::new(text, &label) {
             Ok(parser) => parser,
@@ -1191,31 +1197,138 @@ fn message_with_hint(message: &str, hint: Option<&str>) -> String {
 }
 
 /// The path of a file, from the name the protocol uses.
-fn path_of(uri: &str) -> PathBuf {
-    let path = uri.strip_prefix("file://").unwrap_or(uri);
-    PathBuf::from(percent_decode(path))
+fn path_of(uri: &str) -> Option<PathBuf> {
+    let (scheme, rest) = uri.split_once(':')?;
+    if !scheme.eq_ignore_ascii_case("file") {
+        return None;
+    }
+    let uri_path = rest.strip_prefix("//").unwrap_or(rest);
+    if !uri_path.starts_with('/') && !uri_path.contains('/') {
+        return None;
+    }
+    if uri_path.contains('?') || uri_path.contains('#') {
+        return None;
+    }
+    let path = if uri_path.starts_with('/') {
+        uri_path.to_string()
+    } else {
+        let (authority, path) = uri_path.split_once('/')?;
+        if !authority.eq_ignore_ascii_case("localhost") {
+            return None;
+        }
+        format!("/{path}")
+    };
+    let path = percent_decode(&path)?;
+    if path.contains('\0') {
+        return None;
+    }
+    #[cfg(windows)]
+    let path = {
+        let drive_path = path
+            .strip_prefix('/')
+            .filter(|candidate| {
+                candidate.as_bytes().get(1) == Some(&b':')
+                    && candidate.as_bytes()[0].is_ascii_alphabetic()
+            })
+            .unwrap_or(&path);
+        drive_path.replace('/', "\\")
+    };
+    #[cfg(not(windows))]
+    let path = path;
+    Some(PathBuf::from(path))
 }
 
-/// The text of a name, with the marks that are written as `%xx`.
-fn percent_decode(text: &str) -> String {
-    let mut out = String::new();
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        let mut code = String::new();
-        for _ in 0..2 {
-            match chars.next() {
-                Some(c) => code.push(c),
-                None => break,
-            }
-        }
-        match u8::from_str_radix(&code, 16) {
-            Ok(byte) => out.push(byte as char),
-            Err(_) => out.push('%'),
+fn file_uri(path: &str) -> String {
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    #[cfg(not(windows))]
+    let path = path.to_string();
+    let path = if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    };
+    let mut uri = String::from("file://");
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-._~:".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push('%');
+            uri.push(char::from(HEX[(byte >> 4) as usize]));
+            uri.push(char::from(HEX[(byte & 0x0f) as usize]));
         }
     }
-    out
+    uri
+}
+
+/// Decode percent escapes as URI octets, then validate the UTF-8 path.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return None;
+            }
+            let high = hex_value(bytes[index + 1])?;
+            let low = hex_value(bytes[index + 2])?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            let character = text[index..].chars().next()?;
+            let mut encoded = [0; 4];
+            decoded.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+            index += character.len_utf8();
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod uri_tests {
+    use super::path_of;
+    use std::path::PathBuf;
+
+    #[test]
+    fn file_uri_decodes_utf8_octets_without_changing_plus() {
+        assert_eq!(
+            path_of("file:///tmp/caf%C3%A9+a%20b.vey"),
+            Some(PathBuf::from("/tmp/café+a b.vey"))
+        );
+        assert_eq!(
+            path_of("file://localhost/tmp/caf%C3%A9.vey"),
+            Some(PathBuf::from("/tmp/café.vey"))
+        );
+        assert_eq!(
+            path_of("FILE:/tmp/plain.vey"),
+            Some(PathBuf::from("/tmp/plain.vey"))
+        );
+    }
+
+    #[test]
+    fn malformed_and_non_local_file_uris_are_rejected() {
+        for uri in [
+            "file:///tmp/%",
+            "file:///tmp/%2",
+            "file:///tmp/%GG",
+            "file:///tmp/%FF",
+            "file:///tmp/%00",
+            "file:///tmp/a?query",
+            "file:///tmp/a#fragment",
+            "file://example.test/tmp/a",
+        ] {
+            assert_eq!(path_of(uri), None, "{uri}");
+        }
+    }
 }
