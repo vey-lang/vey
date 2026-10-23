@@ -14,17 +14,21 @@ struct Server(Child);
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-        // The server runs in a group of its own, so that the node process
-        // under the compiler ends as well and leaves nothing behind.
+        // Kill the isolated process group before reaping its leader. Reaping
+        // first releases its PID/PGID and can let a later signal hit an
+        // unrelated process group if the identifier is reused.
         #[cfg(unix)]
         let _ = Command::new("kill")
-            .arg("-TERM")
+            .arg("-s")
+            .arg("KILL")
+            .arg("--")
             .arg(format!("-{}", self.0.id()))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        #[cfg(not(unix))]
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 

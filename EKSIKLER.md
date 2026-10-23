@@ -12,9 +12,9 @@ Vey, **derleyici + tip denetleyici + tarayıcı/Node runtime + CLI** içeren bir
 
 **Güncel, doğrulanmış durum (23 Ekim 2026):** sınırsız generic `TypeVar` artık tüm tiplere uymaz; `unknown` daraltılmadan `object` sayılamaz; Promise olmayan `await` gerçek operand tipini korur; mutable array/tuple, dictionary ve yazılabilir object/named/interface alanları alias üzerinden covariant genişletilemez. Fresh literal bağlamlaması ve mevcut nested alias'ların korunması regresyon testleriyle doğrulandı. `mount.update()` statik↔fonksiyon geçişlerinde effect'i durdurup gerektiğinde yeniden kuruyor; fonksiyon→fonksiyon geçişinde eski bağımlılıklar temizlenip yenileri izleniyor. Optional route parametreleri kalan desen uymadığında geri dönüp atlanabiliyor; browser ve server testlerinde constraint, required parametre ve wildcard davranışı doğrulandı. Body limiti aşıldığında `Content-Length` preflight ve chunked overflow yolları 413 sonrasında `Connection: close` ile bağlantıyı kapatıyor; incomplete chunked gövde testi de socket kapanışını doğruluyor.
 
-**Testler:** `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` → **207/207 geçti** (runtime 83, DOM 15, types 74, CLI 31, README 4). Body-limit testleri declared `Content-Length` ile 413/`Connection: close` başlığını, chunked incomplete gövdeyle de 413 sonrası socket kapanışını doğruluyor. Runtime hedefindeki gerçek-browser mount regression testi Chromium 154 ile çalıştı; browser/server route regresyonları da geçti. Chromium yoksa gerçek-browser testi açıkça skip eder. `cargo test --test server -- --nocapture --test-threads=1` ilk testte exit **143 (SIGTERM)** ile sonlandı; tam-suite sonucu **doğrulanmış değil**. Rustfmt denetimi hâlâ depo genelinde önceden var olan format farkları gösteriyor.
+**Testler:** `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` → **234/234 geçti** (runtime 100, DOM 15, types 74, CLI 41, README 4). Son `cargo test --all-targets` → **356/356 geçti** (main unit 8, CLI 41, dev 5, DOM 15, lang 62, README 4, regressions 43, runtime 100, server 4, types 74). Server test harness'ında `kill` çağrısına `--` eklendi; negatif PGID artık doğru hedefleniyor ve process group lideri reap edilmeden sonlandırılıyor. Seri server hedefi 0,49 saniyede 4/4 geçti; önceki `SIGTERM/143` tam suite'te tekrarlanmadı. Body-limit testleri declared `Content-Length` ile 413/`Connection: close` başlığını, chunked incomplete gövdeyle de 413 sonrası socket kapanışını doğruluyor. Runtime hedefindeki gerçek-browser mount regression testi Chromium 154 ile çalıştı; browser/server route regresyonları da geçti. Deploy testleri stale Vey dosyalarının temizlenmesini, host dosyalarının korunmasını, output-overlap/çakışma/traversal/symlink reddini ve hardlink güvenli güncellemeyi doğruluyor. Chromium yoksa gerçek-browser testi açıkça skip eder. `src/cli/deploy.rs` ile `tests/server.rs` rustfmt kontrolü geçti; depo genelinde ise önceden var olan format farkları bulunuyor.
 
-**Açık yüksek öncelikli riskler:** LSP rename kapsamı/protokol/Unicode konumları ve deploy hedefinde eski dosyaların kalması. Ayrıntılar [güncel denetim raporunda](AUDIT_START.md).
+**Açık yüksek öncelikli riskler:** kısıtlı generic üye erişiminin tam bound-aware doğrulanması, `migrate` dry-run exit status sözleşmesi ve `build.minify` ayarının no-op kalması. LSP rename/protokol ve yerel deploy hedefinin güvenli senkronizasyonu kapatıldı; kalan bulguların durumu [güncel denetim raporunda](AUDIT_START.md).
 
 **Dokümantasyon notu:** bu dosyanın sonraki bölümlerindeki bazı 22 Ekim durumları güncel değildir; örneğin `TypeVar` evrensel uyumluluğu, LSP rename'in yokluğu, config/lint/build durumu. Güncel durumun özeti yukarıdaki paragraf ve ilgili iş kalemlerinde ayrıca belirtilmiştir.
 
@@ -1330,9 +1330,9 @@ Kurallar: uzun satır (`MAX_LINE = 100`), derin iç içe (`MAX_DEPTH = 4`), yak�
 **`vey deploy`** (`src/cli/deploy.rs`):
 - Hiçbir deploy hedefi yok (Vercel/Netlify/Cloudflare/S3/GitHub Pages).
 - Yalnızca yerel klasöre kopyalama (`deploy.rs:49-61`).
-- `copy_folder` (`deploy.rs:65-85`) **hedefteki bayat dosyaları silmiyor** → eski build artıkları kalır.
+- ~~`copy_folder` hedefteki bayat dosyaları silmiyor~~ ✅ düzeltildi: yalnızca doğrulanmış Vey deploy manifestindeki artık dosyalar silinir; unmanaged kullanıcı dosyaları korunur, çakışmalar ve manifest traversal/symlink girişimleri reddedilir. Testler: `tests/cli.rs::deploy_removes_only_stale_vey_files_and_keeps_host_files`, `deploy_refuses_to_overwrite_an_unmanaged_target_file`, `deploy_rejects_a_manifest_path_that_escapes_the_target`, `deploy_does_not_follow_a_target_symlink_parent`.
 - Kimlik doğrulama/secret yönetimi yok, build-time env injection yok, preview/rollback yok.
-- `-o` (build çıktısı) ile `--target` (yayın hedefi) **çakışıyor**.
+- `-o` (build çıktısı) ile `--target` (yayın hedefi) aynı/örtüşen klasörleri gösterirse işlem artık reddedilir; ayrı klasörlerle yerel deploy çalışır.
 
 **`vey add`** (`src/cli/add.rs`):
 - ~~JSON'u string manipülasyonuyla düzenliyor~~ ✅ düzeltildi: `package.json`, CLI'nin JSON parser'ı ile yapısal olarak güncelleniyor; paket adının başka bir string değerinde geçmesi bağımlılığın eklenmesini engellemiyor ve bozuk JSON değiştirilmeden reddediliyor. Testler: `tests/cli.rs::add_writes_a_package_name_that_already_appears_in_a_string_value`, `tests/cli.rs::add_rejects_invalid_package_json_without_changing_it`.
@@ -2016,7 +2016,7 @@ Bu altı madde, dili "deneyebilir bir şey" olmaktan "güvenilir bir şey" olmay
 7. **Test runner gelişmiş** — watch, coverage, parallel, snapshot yok (E8).
 8. **Dev server** — polling yerine fs.watch, HMR (hot module replacement) yok (E4/E5).
 9. **Build: minify, tree-shake, code split** — minify var; code split yok.
-10. **Deploy** — stub (E14).
+10. **Deploy** — yerel `--target` senkronizasyonu eklendi; Vercel/Netlify/Cloudflare/S3/GitHub Pages entegrasyonları hâlâ özellik kapsamı açığıdır (E14).
 11. **Docs generation** — doc comment → HTML var; **API doc site** yok.
 12. **Migrate** — codemod yok (E13).
 13. **Telemetry / crash reporting** — yok (E18).

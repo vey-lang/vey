@@ -33,7 +33,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 4. CLI, build ve yayınlama davranışı
 
-- [ ] `deploy` hedefinde kaynak build'de olmayan stale dosyaların kontrollü ve güvenli temizliğini tanımla; hedefte kullanıcı dosyaları koruma testleri ekle.
+- [x] `deploy --target` için sürümlü/validasyonu yapılmış sahiplik manifesti ekle; yalnızca önceki Vey deploy'undan kalan stale dosyaları sil, unmanaged host dosyalarını koru, collision/traversal/symlink ve hardlink alias senaryolarını regresyonla test et.
 - [ ] `migrate` dry-run exit status sözleşmesini belirle ve CI kullanımına göre test et.
 - [ ] `[build].minify` ayarı için gerçek build davranışı ekle veya config şemasından tamamen çıkar; şu an dokümantasyonda no-op olduğu belirtiliyor.
 - [ ] Lint'in config dosyasını hedef dosyanın proje kökünden çözmesini sağla.
@@ -41,7 +41,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **350 geçti, 0 kaldı**; runtime 100, server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
-- [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
+- [x] Tam `cargo test --all-targets` çalıştır: **356 geçti, 0 kaldı**; CLI 41, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
+- [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build ve deploy iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

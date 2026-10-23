@@ -203,7 +203,7 @@ usage:
   vey explain <file>:<line>:<col>  say the type of an expression
   vey docs [file|dir] [-o out]     write the documentation of the program
   vey migrate [file|dir]           bring the program to this version
-  vey deploy [entry|dir]           build the site and say where it is
+  vey deploy [entry|dir]           build and safely sync a local target
   vey lsp                         the language server
   vey add <package>               add a package of npm to the project
   vey version                     print version
@@ -359,7 +359,9 @@ that may be written there.
 "#,
         "deploy" => r#"usage: vey deploy [entry|dir] [--target <dir>]
 
-Build the site and say where it is, so that a host may serve it.
+Build the site and synchronize a local folder for a static host. Stale files
+from earlier Vey deployments are removed; files not owned by Vey are kept,
+and collisions with unmanaged files are refused.
 
   --target <dir>   the folder the site is copied to
   -h, --help         this message

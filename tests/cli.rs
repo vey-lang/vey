@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::temp_dir;
+use common::{stderr, temp_dir};
 
 fn vey() -> Command {
     Command::new(env!("CARGO_BIN_EXE_vey"))
@@ -835,6 +835,190 @@ fn a_build_keeps_a_file_that_is_added_to_the_folder_of_the_build() {
     assert!(second.status.success());
     assert!(output.join("mine.txt").is_file());
     assert!(output.join("index.html").is_file());
+}
+
+#[test]
+fn deploy_removes_only_stale_vey_files_and_keeps_host_files() {
+    let dir = temp_dir("deploy-stale");
+    let project = dir.join("project");
+    let target = dir.join("host");
+    write(&project.join("main.vey"), PAGE);
+    write(
+        &project.join("about.vey"),
+        "component About() { main { h1 { \"About\" } } }\nbind(\"#app\", About())\n",
+    );
+
+    let first = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(target.join("about.html").is_file());
+    assert!(target.join("about.js").is_file());
+
+    write(&target.join("host-owned.txt"), "keep at the host\n");
+    write(&target.join("assets/host-owned.txt"), "also keep this\n");
+    fs::remove_file(project.join("about.vey")).unwrap();
+    write(&project.join("main.vey"), &PAGE.replace("Hi", "Updated"));
+
+    let second = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert!(!target.join("about.html").exists());
+    assert!(!target.join("about.js").exists());
+    assert!(!target.join("about.vey").exists());
+    assert!(target.join("host-owned.txt").is_file());
+    assert!(target.join("assets/host-owned.txt").is_file());
+    assert!(fs::read_to_string(target.join("index.js"))
+        .unwrap()
+        .contains("Updated"));
+}
+
+#[test]
+fn deploy_refuses_to_overwrite_an_unmanaged_target_file() {
+    let dir = temp_dir("deploy-collision");
+    let project = dir.join("project");
+    let target = dir.join("host");
+    write(&project.join("main.vey"), PAGE);
+    write(&target.join("index.html"), "host-owned index\n");
+
+    let output = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(target.join("index.html")).unwrap(),
+        "host-owned index\n"
+    );
+}
+
+#[test]
+fn deploy_rejects_a_target_inside_the_build_output() {
+    let dir = temp_dir("deploy-overlap");
+    let project = dir.join("project");
+    let output_dir = dir.join("built");
+    let target = output_dir.join("host");
+    write(&project.join("main.vey"), PAGE);
+
+    let output = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("-o")
+        .arg(&output_dir)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!target.exists());
+    assert!(output_dir.join("index.html").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn deploy_replaces_managed_files_without_mutating_hard_link_aliases() {
+    let dir = temp_dir("deploy-hardlink");
+    let project = dir.join("project");
+    let target = dir.join("host");
+    let protected = dir.join("protected.txt");
+    write(&project.join("main.vey"), PAGE);
+
+    let first = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(first.status.success(), "{}", stderr(&first));
+
+    write(&protected, "external data\n");
+    fs::remove_file(target.join("index.js")).unwrap();
+    fs::hard_link(&protected, target.join("index.js")).unwrap();
+    write(&project.join("main.vey"), &PAGE.replace("Hi", "Updated"));
+
+    let second = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(fs::read_to_string(protected).unwrap(), "external data\n");
+    assert!(fs::read_to_string(target.join("index.js"))
+        .unwrap()
+        .contains("Updated"));
+}
+
+#[test]
+fn deploy_rejects_a_manifest_path_that_escapes_the_target() {
+    let dir = temp_dir("deploy-manifest-traversal");
+    let project = dir.join("project");
+    let target = dir.join("host");
+    write(&project.join("main.vey"), PAGE);
+    write(&dir.join("precious.txt"), "must remain\n");
+    write(
+        &target.join(".vey-deploy-manifest"),
+        "VEY-DEPLOY-MANIFEST-1\n2e2e2f70726563696f75732e747874\n",
+    );
+
+    let output = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(dir.join("precious.txt")).unwrap(),
+        "must remain\n"
+    );
+    assert!(fs::read_to_string(target.join(".vey-deploy-manifest"))
+        .unwrap()
+        .contains("2e2e2f"));
+}
+
+#[cfg(unix)]
+#[test]
+fn deploy_does_not_follow_a_target_symlink_parent() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("deploy-symlink");
+    let project = dir.join("project");
+    let target = dir.join("host");
+    let outside = dir.join("outside");
+    write(&project.join("main.vey"), PAGE);
+    write(&project.join("public/assets/app.svg"), "<svg>site</svg>");
+    write(&outside.join("app.svg"), "host-owned asset");
+    fs::create_dir_all(&target).unwrap();
+    symlink(&outside, target.join("assets")).unwrap();
+
+    let output = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(outside.join("app.svg")).unwrap(),
+        "host-owned asset"
+    );
 }
 
 /// A message of the language server, written in the shape it wants.
