@@ -2622,6 +2622,8 @@ fn the_language_server_navigates_to_unopened_imported_modules() {
                 ",\"context\":{\"includeDeclaration\":true}",
             ),
             (10, "textDocument/rename", ",\"newName\":\"afterUpdate\""),
+            (11, "textDocument/rename", ",\"newName\":\"return\""),
+            (12, "textDocument/rename", ",\"newName\":\"bad name\""),
         ] {
             let params = format!(
                 "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":2,\"character\":2}}{}}}",
@@ -2718,6 +2720,8 @@ assert.deepEqual(Object.keys(updatedChanges).sort(), [mainUri, mathUri, replacem
 assert.deepEqual(updatedChanges[mathUri].map(edit => edit.newText), ["afterUpdate"]);
 assert.deepEqual(updatedChanges[mainUri].map(edit => edit.newText), ["afterUpdate"]);
 assert.deepEqual(updatedChanges[replacementUri].map(edit => edit.newText), ["afterUpdate"]);
+assert.equal(result(11), null);
+assert.equal(result(12), null);
 const localReferences = result(4);
 assert.deepEqual(localReferences.map(item => [item.uri, item.range.start.line, item.range.start.character]), [
     [mathUri, 2, 6],

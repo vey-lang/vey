@@ -298,6 +298,9 @@ impl Server {
                     Some(Value::Text(text)) => text.clone(),
                     _ => return None,
                 };
+                if !is_rename_identifier(&new_name) {
+                    return Some(answer(id, Value::Null));
+                }
                 Some(answer(id, self.rename(&uri, line, col, &new_name)))
             }
             "textDocument/didClose" => {
@@ -909,6 +912,14 @@ fn error_answer(id: Value, code: i64, message: &str) -> Value {
             ]),
         ),
     ])
+}
+
+fn is_rename_identifier(name: &str) -> bool {
+    let mut lexer = vey::lexer::Lexer::new(name, "<rename>");
+    matches!(
+        lexer.next_token(),
+        Ok(token) if token.kind == vey::lexer::TokKind::Ident && token.value == name
+    ) && matches!(lexer.next_token(), Ok(token) if token.kind == vey::lexer::TokKind::Eof)
 }
 
 /// What the server can do.
