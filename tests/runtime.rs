@@ -1062,6 +1062,41 @@ async function requestCookie(trustProxy) {
 }
 
 #[test]
+fn sessions_expire_and_are_limited_by_configuration() {
+    let text = run_runtime(
+        "session-limits",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+runtime.session.configure({ ttl: 25, idleTimeout: 0, maxSessions: 1 });
+app.get("/start", () => { runtime.session.set("value", "kept"); return runtime.session.get("value"); });
+app.get("/check", () => runtime.session.get("value") || "missing");
+function request(path, cookie) {
+  return new Promise(resolve => {
+    const opts = { hostname: "127.0.0.1", port: app.port(), path, headers: cookie ? { Cookie: cookie } : {} };
+    http.get(opts, res => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => resolve({ body, cookie: res.headers["set-cookie"] ? res.headers["set-cookie"][0].split(";")[0] : cookie }));
+    });
+  });
+}
+app.start(async () => {
+  const first = await request("/start");
+  const second = await request("/start");
+  const limited = await request("/check", first.cookie);
+  await new Promise(resolve => setTimeout(resolve, 35));
+  const expired = await request("/check", second.cookie);
+  console.log(JSON.stringify([first.body, limited.body, expired.body]));
+  await app.stop();
+  process.exit(0);
+});
+"#,
+    );
+    assert!(text.contains(r#"["kept","missing","missing"]"#), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",

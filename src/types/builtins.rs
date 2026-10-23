@@ -620,6 +620,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("set", builtin_function(vec![string(), any()], any())),
             ("end", builtin_function(vec![], Type::Void)),
             ("id", builtin_function(vec![], any())),
+            ("configure", builtin_function(vec![any()], any())),
         ])),
         _ => None,
     }

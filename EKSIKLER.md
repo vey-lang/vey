@@ -1084,8 +1084,8 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 ### D11 · SSE eksikleri 🟡 **id/retry/heartbeat eklendi**
 `src/runtime/server.js:790-845` — `stream.send(data, id)`, `stream.event(name, data, id)`, `stream.retry(ms)` ve `stream.heartbeat(ms)` artık mevcut; bağlantı kapanınca heartbeat timer'ı temizleniyor. SSE status override, Last-Event-ID ile otomatik resume ve daha gelişmiş backpressure hâlâ eksik. Test: `tests/runtime.rs::sse_stream_supports_ids_retry_and_heartbeats`.
 
-### D12 · Oturum deposu yalnızca bellekte, takılabilir arayüz yok
-`src/runtime/session.js` — oturum deposu modül-genel ve yalnızca bellekte; TTL/idle timeout, maksimum oturum ve temizlik job'ı yok → **sınırsız bellek büyümesi**. `session.regenerate()` var; `flash` ve `touch()` yok. Session ID ve data map'leri prototype pollution'a karşı `Object.create(null)` ile oluşturuluyor. Test: `tests/runtime.rs::a_prototype_named_session_cookie_cannot_pollute_object_prototypes`.
+### D12 · Oturum deposu yalnızca bellekte, takılabilir arayüz yok 🟡 **TTL/idle/max cleanup eklendi**
+`src/runtime/session.js` artık `session.configure({ ttl, idleTimeout, maxSessions })` destekliyor; erişimde idle zamanı yenileniyor, süresi dolan kayıtlar temizleniyor ve 60 saniyelik unref edilmiş cleanup job'ı çalışıyor. Takılabilir harici store, `flash`/`touch` ve dağıtık oturum desteği hâlâ eksik. Test: `tests/runtime.rs::sessions_expire_and_are_limited_by_configuration`.
 
 ### D13 · Sunucu tarafı KV/cache deposu yok
 `src/runtime/storage.js` — `storage`/`sessionStorage` **tarayıcıya özel**; Node'da hata fırlatıyor. Backend uygulamaları `Map`/`fs` ile kendi deposunu yazmak zorunda.

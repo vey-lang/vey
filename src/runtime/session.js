@@ -11,6 +11,49 @@ function veySession(ctx) {
 
   // The sessions that are open, by their name.
   var sessions = Object.create(null);
+  var metadata = Object.create(null);
+  var settings = {
+    ttl: 24 * 60 * 60 * 1000,
+    idleTimeout: 30 * 60 * 1000,
+    maxSessions: 10000
+  };
+
+  function remove(id) {
+    delete sessions[id];
+    delete metadata[id];
+  }
+
+  function expired(record, now) {
+    return (settings.ttl > 0 && now - record.createdAt >= settings.ttl) ||
+      (settings.idleTimeout > 0 && now - record.lastAccess >= settings.idleTimeout);
+  }
+
+  function cleanup() {
+    var now = Date.now();
+    for (var id in metadata) {
+      if (expired(metadata[id], now)) remove(id);
+    }
+    var ids = Object.keys(metadata);
+    while (settings.maxSessions > 0 && ids.length > settings.maxSessions) {
+      var oldest = ids.shift();
+      var oldestTime = metadata[oldest] ? metadata[oldest].lastAccess : Infinity;
+      for (var i = 0; i < ids.length; i++) {
+        var candidate = metadata[ids[i]];
+        if (candidate && candidate.lastAccess < oldestTime) {
+          oldest = ids[i];
+          oldestTime = candidate.lastAccess;
+        }
+      }
+      remove(oldest);
+      ids = Object.keys(metadata);
+    }
+  }
+
+  var cleanupTimer = null;
+  if (isNode && typeof setInterval === "function") {
+    cleanupTimer = setInterval(cleanup, 60000);
+    if (cleanupTimer && cleanupTimer.unref) cleanupTimer.unref();
+  }
 
   // The storage of the request, which keeps the session of a request with
   // its answer even when the handler waits for something.
@@ -63,6 +106,8 @@ function veySession(ctx) {
     store.id = newId();
     store.data = Object.create(null);
     sessions[store.id] = store.data;
+    metadata[store.id] = { createdAt: Date.now(), lastAccess: Date.now() };
+    cleanup();
     store.started = true;
     return store.id;
   }
@@ -88,7 +133,7 @@ function veySession(ctx) {
       if (!store) {
         throw veyError("session.regenerate() is only available while a request is handled.");
       }
-      if (store.id) delete sessions[store.id];
+      if (store.id) remove(store.id);
       return begin(store);
     },
 
@@ -96,6 +141,7 @@ function veySession(ctx) {
     get: function (key) {
       var store = current();
       if (!store || !store.data) return null;
+      if (metadata[store.id]) metadata[store.id].lastAccess = Date.now();
       var value = store.data[String(key)];
       return value === undefined ? null : value;
     },
@@ -108,6 +154,7 @@ function veySession(ctx) {
       }
       if (!store.id) session.start();
       store.data[String(key)] = value;
+      if (metadata[store.id]) metadata[store.id].lastAccess = Date.now();
       return value;
     },
 
@@ -115,7 +162,7 @@ function veySession(ctx) {
     end: function () {
       var store = current();
       if (!store || !store.id) return;
-      delete sessions[store.id];
+      remove(store.id);
       store.id = null;
       store.data = null;
       store.ended = true;
@@ -125,6 +172,15 @@ function veySession(ctx) {
     id: function () {
       var store = current();
       return store && store.id ? store.id : null;
+    },
+
+    configure: function (options) {
+      var opts = options || {};
+      if (opts.ttl !== undefined) settings.ttl = Math.max(0, Number(opts.ttl));
+      if (opts.idleTimeout !== undefined) settings.idleTimeout = Math.max(0, Number(opts.idleTimeout));
+      if (opts.maxSessions !== undefined) settings.maxSessions = Math.max(0, Math.floor(Number(opts.maxSessions)));
+      cleanup();
+      return this;
     }
   };
 
@@ -138,7 +194,9 @@ function veySession(ctx) {
     // connection, so that the cookie of the answer may say so too.
     open: function (cookies, secure) {
       var id = cookies && cookies[COOKIE] ? String(cookies[COOKIE]) : null;
+      cleanup();
       var data = id && sessions[id] ? sessions[id] : null;
+      if (data && metadata[id]) metadata[id].lastAccess = Date.now();
       return {
         id: data ? id : null,
         data: data,
