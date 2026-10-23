@@ -21,7 +21,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] Statik dosya containment denetimini descriptor tabanlı açılış/stream ile güçlendir; `fstat` ve açılmış descriptor hedefini doğrula, tam GET ve byte-range okumalarında aynı descriptor'ı kullan. Path swap, stream öncesi symlink swap ve range-open yarışlarını regresyon testleriyle kapsa.
 - [x] `res.sendFile`/`res.download` için dosyayı bir kez aç, `fstat` ile doğrula ve aynı descriptor'dan stream et; HEAD/timeout/error/disconnect cleanup, `drain` backpressure, session finish hook'ları, güvenli download adları ve path-swap regresyonlarını test et.
 - [x] HTTP caller abort'unu retry'den ayır; pre-abort/in-flight abort, 5xx ve network-error backoff iptali, toplam timeout sonrası yeniden denememe ve external listener cleanup senaryolarını test et.
-- [ ] SSE backpressure için sınırlı tampon veya yavaş istemciyi kapatma politikası ekle.
+- [x] SSE `write()` backpressure'ında stream ve heartbeat'i durdurup yavaş istemciyi kapat; tek frame'i 1 MiB ile sınırla ve iki durumu deterministik regresyonlarla test et.
 
 ## 3. LSP doğruluğu ve protokol uyumu
 
@@ -41,7 +41,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **348 geçti, 0 kaldı**; runtime 98, server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
+- [x] Tam `cargo test --all-targets` çalıştır: **350 geçti, 0 kaldı**; runtime 100, server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

@@ -20,20 +20,21 @@
 11. **LSP rename aynı yazımdaki bağımsız bağlamları karıştırabiliyordu.** Name index artık lexical scope'larda binding kimlikleri çözüyor; rename/definition/references yalnızca aynı bağlamaya bağlı tokenları döndürüyor. Shadowing, kardeş fonksiyonlar ve assignment hedef/değerleri regresyonla doğrulanıyor. Deklarasyon tokenları ve açık import alias'ları doğru aralıkta; LSP UTF-16 sütunları giriş/çıkışta dönüştürülüyor ve token içi imleç, astral Unicode, tam identifier-range test ediliyor.
 12. **LSP file URI percent-decoding'i çok baytlı UTF-8 yollarını bozuyordu.** `%xx` kaçışları byte olarak biriktirilip bütün yol UTF-8 doğrulamasından geçiriliyor; scheme büyük/küçük harf duyarsız, yerel `localhost` authority kabul ediliyor. Bozuk kaçışlar, geçersiz UTF-8, NUL, query/fragment ve uzak authority reddediliyor. Tanıların Unicode dosya URI'ları da çıkışta percent-encode ediliyor. Percent-encoded `café` dizinindeki import ve ayrıca geçerli/bozuk URI biçimleri test ediliyor.
 13. **LSP framing/lifecycle ve bilinmeyen yöntem yanıtları JSON-RPC ile uyumsuzdu.** `exit` döngüyü hemen kapatıyor (öncesinde `shutdown` yoksa status 1); temiz EOF, bozuk/eksik frame'den ayrılıyor. Geçersiz frame parse error ile kapanıyor, Content-Length doğrulanıyor ve 64 MiB sınırı uygulanıyor. Bilinmeyen request `-32601`, geçersiz request `-32600` alıyor; unknown notification yanıtlanmıyor. Subprocess ve unit testleri bu davranışları kilitliyor.
+14. **SSE yanıtları backpressure'a uymadığı için yavaş istemciye sınırsız event yazılabiliyordu.** `response.write()` `false` döndürürse stream ve heartbeat derhal durdurulup socket kapatılıyor; tek SSE frame'i 1 MiB ile sınırlandırılıyor. Deterministik regresyonlar `write()` backpressure sonucunu enjekte edip tek deneme/kapamayı, ayrıca oversized frame'in yazılmamasını doğruluyor.
 
-Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; mutable-container alias ihlalleri ve `mount.update()` lifecycle geçişleri doğrulanır; optional route ve body-limit senaryoları browser/server testleriyle kapsanır; statik servis için containment/path/stream/range symlink yarışları sınanır. `sendFile` için path swap, HEAD descriptor kapanışı, yanıt timeout/finish ve client disconnect sonrası cleanup, `drain` backpressure, session cookie; `download` için kontrol karakteri sanitizasyonu ve Unicode header encoding test edilir. HTTP için pre-abort, in-flight abort, 5xx/network retry backoff iptali, toplam timeout ve listener cleanup doğrulanır. LSP rename için outer/inner/sibling scope'ları, yazma hedefi, astral identifier ve açık import alias'ının gerçek token aralıkları doğrulanır; percent-encoded Unicode file URI, malformed escapes, UTF-8 doğrulaması ve remote authority reddi de test edilir. JSON-RPC için `exit`/`shutdown`, invalid ve incomplete frame parse-error yanıtları, unknown request/notification ayrımı ve aşırı uzun Content-Length sınırı doğrulanır.
+Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; mutable-container alias ihlalleri ve `mount.update()` lifecycle geçişleri doğrulanır; optional route ve body-limit senaryoları browser/server testleriyle kapsanır; statik servis için containment/path/stream/range symlink yarışları sınanır. `sendFile` için path swap, HEAD descriptor kapanışı, yanıt timeout/finish ve client disconnect sonrası cleanup, `drain` backpressure, session cookie; `download` için kontrol karakteri sanitizasyonu ve Unicode header encoding test edilir. HTTP için pre-abort, in-flight abort, 5xx/network retry backoff iptali, toplam timeout ve listener cleanup doğrulanır. LSP rename için outer/inner/sibling scope'ları, yazma hedefi, astral identifier ve açık import alias'ının gerçek token aralıkları doğrulanır; percent-encoded Unicode file URI, malformed escapes, UTF-8 doğrulaması ve remote authority reddi de test edilir. JSON-RPC için `exit`/`shutdown`, invalid ve incomplete frame parse-error yanıtları, unknown request/notification ayrımı ve aşırı uzun Content-Length sınırı doğrulanır. SSE için backpressure'da tek yazımdan sonra socket kapanışı, heartbeat/write lifecycle ve 1 MiB üstü frame'in reddi doğrulanır.
 
 ## Test ve doğrulama durumu
 
 | Komut | Sonuç |
 |---|---|
-| `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` | **227 geçti, 0 kaldı:** CLI 35, DOM 15, README 4, runtime 98, types 74. |
-| `cargo test --all-targets` | **348 geçti, 0 kaldı.** `main` unit 8, CLI 35, dev 5, DOM 15, lang 62, README 4, regressions 43, runtime 98, server 4, types 74. Önceki `SIGTERM/143` bu çalıştırmada tekrarlanmadı. |
+| `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` | **229 geçti, 0 kaldı:** CLI 35, DOM 15, README 4, runtime 100, types 74. |
+| `cargo test --all-targets` | **350 geçti, 0 kaldı.** `main` unit 8, CLI 35, dev 5, DOM 15, lang 62, README 4, regressions 43, runtime 100, server 4, types 74. Önceki `SIGTERM/143` bu çalıştırmada tekrarlanmadı. |
 | `an_oversized_incomplete_chunked_body_gets_413_and_closes_the_connection` ve declared-length body-limit testi | Geçti: düzeltme öncesi raw TCP repro 413 + `Connection: keep-alive` döndürüp bağlantıyı 1 saniye açık bırakıyordu; düzeltme sonrası 413 + `Connection: close` ve socket kapanışı doğrulanıyor. Declared-length istek de istemci keep-alive talep etse dahi kapatılıyor. |
 | Optional route browser/server regresyonları | Geçti: constrained optional, literal, required-parametre fallback'ı, wildcard skip/consume ve consume-first tie-break doğrulanıyor. |
 | `mount_update_transitions_work_in_headless_chromium_when_available` | Geçti: Vey'in birleştirilmiş runtime kaynağı gerçek Chromium 154 DOM'unda çalıştırıldı; tarayıcı yoksa test açıkça skip eder. |
 | `git diff --check` | Geçti. |
-| `cargo fmt --all -- --check` | Repo genelinde önceden var olan biçim farkları gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. İlgisiz dosyalar topluca yeniden formatlanmadı; yeni HTTP/sendFile ve LSP protokol test bloklarında ek rustfmt farkı kalmadı. |
+| `cargo fmt --all -- --check` | Repo genelinde önceden var olan biçim farkları gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. İlgisiz dosyalar topluca yeniden formatlanmadı; yeni HTTP/sendFile, LSP protokol ve SSE test bloklarında ek rustfmt farkı kalmadı. |
 
 Tip-güvenliği commitleri `5fa2002` ve `800c332`, mount lifecycle düzeltmesi `f3d9967`, ilgili durum raporu `0f39b00`, route düzeltmesi/testleri `33b9269` ve body bağlantı politikası `7a0236f` `main` dalına pushlandı. Route durumu dokümantasyon commit'i `5561d80` de `main`'dedir; statik dosya TOCTOU düzeltmesi de `main`'e pushlandı. Server hedefi kaynak kodu kendi alt süreci process group üzerinden kapatıyor; `SIGTERM/143` bu tam-suite çalıştırmasında tekrarlanmadı.
 
@@ -41,7 +42,7 @@ Tip-güvenliği commitleri `5fa2002` ve `800c332`, mount lifecycle düzeltmesi `
 
 ### Runtime/server
 
-- SSE yanıtlarında yavaş istemcilere karşı backpressure/buffer sınırı politikası hâlâ ele alınmıyor (`src/runtime/server.js:908-922`). HTTP caller abort ve `sendFile`/`download` descriptor yaşam döngüsü regresyonlarla kapatıldı.
+Şu anda bu kategoride doğrulanmış açık yüksek öncelikli bulgu yok. SSE backpressure, HTTP caller abort ve `sendFile`/`download` descriptor yaşam döngüsü regresyonlarla kapatıldı.
 
 ### CLI/LSP ve deploy
 
@@ -52,11 +53,10 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 
 ## Dokümantasyon durumu
 
-`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup, statik dosya TOCTOU, `sendFile`/`download` descriptor yaşam döngüsü, HTTP caller-abort/retry ve LSP scope-aware rename/UTF-16 name ranges/file-URI decoding/JSON-RPC lifecycle maddeleri regresyon testleriyle kapandı. SSE backpressure, kısıtlı generic üye erişimi, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
+`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup, statik dosya TOCTOU, `sendFile`/`download` descriptor yaşam döngüsü, HTTP caller-abort/retry, SSE backpressure ve LSP scope-aware rename/UTF-16 name ranges/file-URI decoding/JSON-RPC lifecycle maddeleri regresyon testleriyle kapandı. Kısıtlı generic üye erişimi, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
 
 ## Öncelikli sonraki işler
 
-1. SSE backpressure için sınırlı buffer veya yavaş istemciyi kapatma politikası belirlemek ve regresyon testi eklemek.
-2. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
-3. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
-4. Rust format kontrolü için depo sözleşmesini netleştir; önceden var olan repo-geniş format farklarını ayrı değişiklik olarak ele al.
+1. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
+2. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
+3. Rust format kontrolü için depo sözleşmesini netleştir; önceden var olan repo-geniş format farklarını ayrı değişiklik olarak ele al.

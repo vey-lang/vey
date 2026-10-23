@@ -881,6 +881,7 @@ function veyServer(ctx) {
     function makeStream(response, onClose, extra) {
       var open = true;
       var heartbeatTimer = null;
+      var maxFrameBytes = 1024 * 1024;
       var headers = {};
       for (var key in extra || {}) headers[key] = extra[key];
       headers["Content-Type"] = "text/event-stream; charset=utf-8";
@@ -888,12 +889,47 @@ function veyServer(ctx) {
       headers["Connection"] = "keep-alive";
       headers["X-Accel-Buffering"] = "no";
       response.writeHead(200, headers);
+      var clearHeartbeat = function () {
+        if (heartbeatTimer !== null) {
+          hostClearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      };
+      var stop = function (destroyResponse) {
+        if (!open) return;
+        open = false;
+        clearHeartbeat();
+        try {
+          if (destroyResponse && typeof response.destroy === "function") response.destroy();
+          else response.end();
+        } catch (ignored) { }
+        if (onClose) onClose();
+      };
+      var writeFrame = function (frame) {
+        if (!open) return false;
+        if (Buffer.byteLength(frame, "utf8") > maxFrameBytes) {
+          stop(true);
+          return false;
+        }
+        var writable;
+        try {
+          writable = response.write(frame);
+        } catch (err) {
+          stop(true);
+          return false;
+        }
+        if (writable === false) {
+          stop(true);
+          return false;
+        }
+        return true;
+      };
       // The visitor may go away at any time. When that happens the stream
       // is closed, so that the server does not wait for it for ever.
       var ended = function () {
         if (!open) return;
         open = false;
-        if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
+        clearHeartbeat();
         if (onClose) onClose();
       };
       if (response.on) {
@@ -907,36 +943,35 @@ function veyServer(ctx) {
       return {
         send: function (data, id) {
           if (!open) return;
-          if (id !== undefined) response.write("id: " + String(id) + "\n");
-          response.write("data: " + String(data) + "\n\n");
+          var frame = "";
+          if (id !== undefined) frame += "id: " + String(id) + "\n";
+          frame += "data: " + String(data) + "\n\n";
+          writeFrame(frame);
         },
         event: function (name, data, id) {
           if (!open) return;
-          response.write("event: " + String(name) + "\n");
-          if (id !== undefined) response.write("id: " + String(id) + "\n");
-          response.write("data: " + String(data) + "\n\n");
+          var frame = "event: " + String(name) + "\n";
+          if (id !== undefined) frame += "id: " + String(id) + "\n";
+          frame += "data: " + String(data) + "\n\n";
+          writeFrame(frame);
         },
         retry: function (milliseconds) {
           if (!open) return;
-          response.write("retry: " + String(Math.max(0, Number(milliseconds))) + "\n\n");
+          writeFrame("retry: " + String(Math.max(0, Number(milliseconds))) + "\n\n");
           return this;
         },
         heartbeat: function (milliseconds) {
-          if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
+          clearHeartbeat();
           var delay = Number(milliseconds);
           if (open && delay > 0) {
             heartbeatTimer = hostSetInterval(function () {
-              if (open) response.write(": heartbeat\n\n");
+              if (open) writeFrame(": heartbeat\n\n");
             }, delay);
           }
           return this;
         },
         close: function () {
-          if (!open) return;
-          open = false;
-          if (heartbeatTimer !== null) hostClearInterval(heartbeatTimer);
-          try { response.end(); } catch (ignored) { }
-          if (onClose) onClose();
+          stop(false);
         }
       };
     }

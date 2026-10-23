@@ -2875,6 +2875,78 @@ app.start(() => {
 }
 
 #[test]
+fn sse_stops_writing_when_the_client_is_backpressured() {
+    let text = run_runtime(
+        "sse-backpressure",
+        r#"
+const http = require("node:http");
+const originalWrite = http.ServerResponse.prototype.write;
+let sseWrites = 0;
+http.ServerResponse.prototype.write = function (chunk, ...args) {
+  if (this.req && this.req.url === "/events") {
+    sseWrites++;
+    return false;
+  }
+  return originalWrite.call(this, chunk, ...args);
+};
+const app = runtime.server(0, { shutdownTimeout: 250 });
+app.sse("/events", (req, stream) => {
+  for (let i = 0; i < 100; i++) stream.send("event-" + i);
+});
+app.start(() => {
+  const request = http.get("http://127.0.0.1:" + app.port() + "/events", (res) => {
+    res.on("error", () => {});
+    res.resume();
+  });
+  request.on("error", () => {});
+  setTimeout(async () => {
+    await app.stop();
+    console.log(sseWrites);
+    process.exit(0);
+  }, 50);
+});
+setTimeout(() => process.exit(2), 1500);
+"#,
+    );
+    assert_eq!(text.lines().last(), Some("1"), "{text}");
+}
+
+#[test]
+fn sse_rejects_an_oversized_single_frame() {
+    let text = run_runtime(
+        "sse-frame-size",
+        r#"
+const http = require("node:http");
+const originalWrite = http.ServerResponse.prototype.write;
+let sseWrites = 0;
+http.ServerResponse.prototype.write = function (chunk, ...args) {
+  if (this.req && this.req.url === "/events") sseWrites++;
+  return originalWrite.call(this, chunk, ...args);
+};
+const app = runtime.server(0, { shutdownTimeout: 250 });
+app.sse("/events", (req, stream) => {
+  stream.send("x".repeat(1024 * 1024 + 1));
+  stream.send("after oversized event");
+});
+app.start(() => {
+  const request = http.get("http://127.0.0.1:" + app.port() + "/events", (res) => {
+    res.on("error", () => {});
+    res.resume();
+  });
+  request.on("error", () => {});
+  setTimeout(async () => {
+    await app.stop();
+    console.log(sseWrites);
+    process.exit(0);
+  }, 50);
+});
+setTimeout(() => process.exit(2), 1500);
+"#,
+    );
+    assert_eq!(text.lines().last(), Some("0"), "{text}");
+}
+
+#[test]
 fn websocket_64_bit_lengths_are_checked_before_reading_the_payload() {
     let text = run_runtime(
         "websocket-64-bit-length",
