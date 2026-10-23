@@ -28,3 +28,9 @@ node --enable-source-maps /tmp/hello.cjs
 | `server.vey` | a server with a route |
 | `npm-package.vey` | a package of npm (`npm install marked` first) |
 | `veylang/` | the site of the language, written in Vey |
+| `veyboard/` | a whole application: a board of tasks and notes, with a server and a file |
+
+A folder is an example that is a project of its own. `veylang/` is the site of
+the language, and `veyboard/` is an application made with `vey new`: a
+dashboard, tasks and notes kept in a file, with its own server, styles and
+tests. Each folder has a README that says how to run it and what it shows.

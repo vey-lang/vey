@@ -1,0 +1,19 @@
+# The settings of the project.
+#
+# The options of the command line are stronger than these.
+
+# The port that the server listens on.
+port = 4000
+
+# The host that the server listens on.
+host = "127.0.0.1"
+
+# The title of the site.
+title = "Veyboard"
+
+# The folder the site is written to.
+out = ".dist"
+
+[lint]
+# The length of a line that is still easy to read.
+maxLine = 100

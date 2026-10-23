@@ -1,0 +1,20 @@
+// The entry of Veyboard.
+//
+// The board is a server of Node: it is built into one program and run.
+// Everything the program needs is a folder to keep the data in and the
+// port to listen on, and both have a sane stand-in when the environment
+// says nothing:
+//
+//   VEYBOARD_DATA   the folder of the data      (default: data)
+//   PORT            the port to listen on       (default: 4000)
+//
+// The parts of the board live in the modules next to this file, so that
+// a test may use them without starting a server.
+
+use "./app.vey" as app
+
+let dir = env("VEYBOARD_DATA", "data")
+let port = int(env("PORT", "4000"))
+
+let board = app.create(dir, port)
+board.start()

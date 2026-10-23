@@ -1,0 +1,6 @@
+/.dist
+.vey/
+/node_modules
+*.cjs
+/data
+.DS_Store

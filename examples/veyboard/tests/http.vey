@@ -1,0 +1,380 @@
+// The board as it is used: a server on a port of its own, requests that
+// go through it, and the file that keeps what they did.
+
+use "../src/app.vey" as veyboard
+
+/// A folder of its own for every test.
+fn tempDir() -> string {
+  let dir = path.join("/tmp", "veyboard-http-" + uuid())
+  fs.mkdir(dir)
+  return dir
+}
+
+/// Wait until the server listens, so that the requests find it.
+fn ready(instance) {
+  for _ in 0..200 {
+    if instance.port() != 0 {
+      return
+    }
+    await sleep(10)
+  }
+  error("the server did not start")
+}
+
+/// A form body from the fields of it.
+fn formBody(fields: [{ name: string, value: string }]) -> string {
+  let parts: [string] = []
+  for field in fields {
+    parts = append(parts, url.encode(field.name) + "=" + url.encode(field.value))
+  }
+  return join(parts, "&")
+}
+
+/// A request that does not follow the redirect, so the answer itself is
+/// looked at.
+fn post(base: string, at: string, body: string) {
+  return await http.post(base + at, body, {
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+  })
+}
+
+fn get(base: string, at: string) {
+  return await http.get(base + at, { redirect: "manual" })
+}
+
+/// A server of the board, started for the work of one test and stopped
+/// after it, whatever the work did.
+fn withBoard(dir: string, work) {
+  let instance = veyboard.create(dir, 0)
+  instance.start()
+  await ready(instance)
+  let failure = ""
+  try {
+    await work("http://127.0.0.1:" + str(instance.port()))
+  } catch err {
+    failure = str(err.message)
+  }
+  await instance.stop()
+  if failure != "" {
+    error(failure)
+  }
+}
+
+test("the dashboard answers, with the pages around it", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let page = await get(base, "/")
+      assertEquals(page.status, 200)
+      let body = await page.text()
+      assertContains(body, "<!doctype html>")
+      assertContains(body, "Veyboard")
+      assertContains(body, "The board is empty")
+      let css = await get(base, "/styles.css")
+      assertEquals(css.status, 200)
+      assertContains(css.headers.get("content-type"), "text/css")
+      let favicon = await get(base, "/favicon.svg")
+      assertEquals(favicon.status, 200)
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a task is made through the form and shows up on the board", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let made = await post(base, "/tasks", formBody([
+      { name: "title", value: "Write the report" },
+      { name: "priority", value: "high" },
+      { name: "due", value: "2026-11-01" },
+      { name: "tags", value: "work, writing" },
+      { name: "back", value: "/tasks" },
+      ]))
+      assertEquals(made.status, 302)
+      assertEquals(made.headers.get("location"), "/tasks")
+
+      let list = await get(base, "/tasks")
+      let body = await list.text()
+      assertContains(body, "Write the report")
+      assertContains(body, "high")
+      assertContains(body, "work")
+      assertContains(body, "writing")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a task is added from the dashboard, in the quick card", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      // The empty board asks for a first task instead of showing numbers.
+      assertNotContains(await (await get(base, "/")).text(), "quick-add")
+      await post(base, "/tasks", formBody([{ name: "title", value: "First" }, { name: "back", value: "/tasks" }]))
+
+      // Once there is a board, the quick form is on the dashboard and
+      // sends the task back to the page it came from.
+      assertContains(await (await get(base, "/")).text(), "quick-add")
+      let made = await post(base, "/tasks", formBody([
+      { name: "title", value: "From the dashboard" },
+      { name: "priority", value: "high" },
+      { name: "back", value: "/" },
+      ]))
+      assertEquals(made.status, 302)
+      assertEquals(made.headers.get("location"), "/")
+      let list = await (await get(base, "/tasks?status=all")).text()
+      assertContains(list, "From the dashboard")
+      assertContains(list, "high")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a form that does not pass is answered with its words, and nothing is saved", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let refused = await post(base, "/tasks", formBody([
+      { name: "title", value: "   " },
+      { name: "due", value: "2026-02-30" },
+      { name: "back", value: "/tasks" },
+      ]))
+      assertEquals(refused.status, 200)
+      let body = await refused.text()
+      assertContains(body, "a title is needed")
+      assertContains(body, "a due date is a day such as 2026-10-23")
+      // The list still holds nothing.
+      let list = await get(base, "/tasks")
+      assertContains(await list.text(), "No tasks yet")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a task is finished, opened again, edited and deleted", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      await post(base, "/tasks", formBody([
+      { name: "title", value: "Old title" },
+      { name: "priority", value: "low" },
+      { name: "back", value: "/tasks" },
+      ]))
+      let listed = await (await get(base, "/tasks?status=all")).text()
+      let id = idIn(listed)
+      assert(id != "", "the task has an id in its address")
+
+      let finished = await post(base, "/tasks/" + id + "/toggle", formBody([{ name: "back", value: "/tasks" }]))
+      assertEquals(finished.status, 302)
+      let doneList = await (await get(base, "/tasks?status=done")).text()
+      assertContains(doneList, "Old title")
+
+      await post(base, "/tasks/" + id + "/toggle", formBody([{ name: "back", value: "/tasks" }]))
+      let openList = await (await get(base, "/tasks?status=open")).text()
+      assertContains(openList, "Old title")
+
+      let edited = await post(base, "/tasks/" + id, formBody([
+      { name: "title", value: "New title" },
+      { name: "priority", value: "high" },
+      { name: "due", value: "" },
+      { name: "tags", value: "" },
+      { name: "back", value: "/tasks" },
+      ]))
+      assertEquals(edited.status, 302)
+      let afterEdit = await (await get(base, "/tasks?status=all")).text()
+      assertContains(afterEdit, "New title")
+      assertNotContains(afterEdit, "Old title")
+
+      let asking = await get(base, "/tasks/" + id + "/delete")
+      assertEquals(asking.status, 200)
+      assertContains(await asking.text(), "Delete")
+
+      let gone = await post(base, "/tasks/" + id + "/delete", formBody([{ name: "back", value: "/tasks" }]))
+      assertEquals(gone.status, 302)
+      let empty = await (await get(base, "/tasks")).text()
+      assertContains(empty, "No tasks yet")
+
+      // The activity kept a line of each thing that was done.
+      let activityPage = await (await get(base, "/activity")).text()
+      assertContains(activityPage, "task created")
+      assertContains(activityPage, "task completed")
+      assertContains(activityPage, "task reopened")
+      assertContains(activityPage, "task edited")
+      assertContains(activityPage, "task deleted")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+/// The shape of an id in an address.
+const ID_SHAPE = regex('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+/// The id of the first task of a list page, as its address shows it.
+fn idIn(page: string) -> string {
+  let mark = "/tasks/"
+  for index in 0..len(page) {
+    if slice(page, index, index + len(mark)) == mark {
+      let rest = slice(page, index + len(mark), index + len(mark) + 36)
+      if ID_SHAPE.test(rest) {
+        return rest
+      }
+    }
+  }
+  return ""
+}
+
+test("a note is written, linked and pinned, searched and deleted", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      await post(base, "/tasks", formBody([
+      { name: "title", value: "The task of the note" },
+      { name: "back", value: "/tasks" },
+      ]))
+      let taskId = idIn(await (await get(base, "/tasks?status=all")).text())
+
+      let made = await post(base, "/notes", formBody([
+      { name: "title", value: "Plan the week" },
+      { name: "body", value: "Monday: rest\nTuesday: work" },
+      { name: "tags", value: "home" },
+      { name: "taskId", value: taskId },
+      { name: "pinned", value: "yes" },
+      { name: "back", value: "/notes" },
+      ]))
+      assertEquals(made.status, 302)
+
+      let list = await (await get(base, "/notes")).text()
+      assertContains(list, "Plan the week")
+      assertContains(list, "Pinned")
+      assertContains(list, "For: The task of the note")
+      let noteId = noteIdIn(list)
+      assert(noteId != "", "the note has an id in its address")
+
+      let found = await (await get(base, "/notes?q=Tuesday")).text()
+      assertContains(found, "Plan the week")
+      let missing = await (await get(base, "/notes?q=nothingthere")).text()
+      assertContains(missing, "No notes match")
+
+      let unpinned = await post(base, "/notes/" + noteId + "/pin", formBody([{ name: "back", value: "/notes" }]))
+      assertEquals(unpinned.status, 302)
+      assertContains(await (await get(base, "/notes")).text(), "1 note")
+
+      await post(base, "/notes/" + noteId + "/delete", formBody([{ name: "back", value: "/notes" }]))
+      assertContains(await (await get(base, "/notes")).text(), "No notes yet")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+fn noteIdIn(page: string) -> string {
+  let mark = "/notes/"
+  for index in 0..len(page) {
+    if slice(page, index, index + len(mark)) == mark {
+      let rest = slice(page, index + len(mark), index + len(mark) + 36)
+      if ID_SHAPE.test(rest) {
+        return rest
+      }
+    }
+  }
+  return ""
+}
+
+test("an address that is not there is a 404, a method that is not there a 405", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let missing = await get(base, "/nothing/here")
+      assertEquals(missing.status, 404)
+      assertContains(await missing.text(), "There is no page here")
+
+      await post(base, "/tasks", formBody([{ name: "title", value: "A task" }, { name: "back", value: "/tasks" }]))
+      let id = idIn(await (await get(base, "/tasks?status=all")).text())
+      let wrong = await get(base, "/tasks/" + id + "/toggle")
+      assertEquals(wrong.status, 405)
+      assertEquals(wrong.headers.get("allow"), "POST")
+
+      let unknown = await get(base, "/tasks/" + "00000000-0000-0000-0000-000000000000" + "/edit")
+      assertEquals(unknown.status, 404)
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a form of another site is refused, a form of this one is not", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let stranger = await http.post(base + "/tasks", formBody([{ name: "title", value: "From elsewhere" }]), {
+        redirect: "manual",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "origin": "https://elsewhere.example",
+        },
+      })
+      assertEquals(stranger.status, 403)
+      let here = await http.post(base + "/tasks", formBody([{ name: "title", value: "From here" }, { name: "back", value: "/tasks" }]), {
+        redirect: "manual",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "origin": base,
+        },
+      })
+      assertEquals(here.status, 302)
+      assertContains(await (await get(base, "/tasks?status=all")).text(), "From here")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("the board is the same after the server is started again", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      await post(base, "/tasks", formBody([
+      { name: "title", value: "Survives a restart" },
+      { name: "priority", value: "high" },
+      { name: "back", value: "/tasks" },
+      ]))
+      await post(base, "/notes", formBody([
+      { name: "title", value: "A note that stays" },
+      { name: "body", value: "Words" },
+      { name: "back", value: "/notes" },
+      ]))
+    })
+    // The first server is stopped. A new one starts over the same folder.
+    await withBoard(dir, fn(base) {
+      let tasksPage = await (await get(base, "/tasks?status=all")).text()
+      assertContains(tasksPage, "Survives a restart")
+      let notesPage = await (await get(base, "/notes")).text()
+      assertContains(notesPage, "A note that stays")
+      let activityPage = await (await get(base, "/activity")).text()
+      assertContains(activityPage, "task created")
+      assertContains(activityPage, "note created")
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})
+
+test("a body that is too big is refused before it is read", fn() {
+  let dir = tempDir()
+  try {
+    await withBoard(dir, fn(base) {
+      let big = text.repeat("x", 150000)
+      let refused = await post(base, "/tasks", formBody([{ name: "title", value: big }]))
+      assertEquals(refused.status, 413)
+    })
+  } finally {
+    fs.remove(dir)
+  }
+})

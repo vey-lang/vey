@@ -1,0 +1,319 @@
+// Where the board is kept.
+//
+// The whole board lives in one JSON file in the folder of the data. The
+// file is read when the server starts and written after every change, so
+// the board is still there after a restart. Nothing else in the program
+// touches the file system: this module is the only one that does.
+//
+// Two habits keep the data from being lost:
+//
+//   - A write goes to a file of its own first, the last good file is kept
+//     as a backup, and only then does the new file take its place. A
+//     crash in the middle leaves a file that still reads.
+//   - A read that holds junk does not throw and does not throw the data
+//     away. Every record is checked on its own and repaired when a field
+//     is wrong, the backup is tried when the file itself cannot be read,
+//     and what was done is told in words.
+
+use "./dates.vey" as dates
+use "./tasks.vey" as tasks
+use "./notes.vey" as notes
+use "./activity.vey" as activity
+
+/// The name of the file of the data, in the folder of the data.
+export const FILE = "veyboard.json"
+
+/// The shape of the data of the version that this program writes.
+export type Data = {
+  version: number
+  tasks: [tasks.Task]
+  notes: [notes.Note]
+  activity: [activity.Entry]
+}
+
+/// The board as it is before anything was made.
+export fn empty() -> Data {
+  return { version: 1, tasks: [], notes: [], activity: [] }
+}
+
+/// The folder of the data and the path of the file in it.
+fn pathOf(dir: string) -> string {
+  return path.join(dir, FILE)
+}
+
+fn backupOf(dir: string) -> string {
+  return path.join(dir, FILE + ".bak")
+}
+
+/// The data of the folder: the file when it reads, the backup when the
+/// file itself does not, and an empty board when neither is there. The
+/// messages tell what had to be done, so that the one who opens the
+/// board is never left guessing.
+export fn load(dir: string, now: number) -> { data: Data, messages: [string] } {
+  let main = readData(pathOf(dir), now)
+  if main != null {
+    return { data: main.data, messages: main.messages }
+  }
+  let backup = readData(backupOf(dir), now)
+  if backup != null {
+    let messages = append(backup.messages, "the data file was broken, the backup was used instead")
+    return { data: backup.data, messages: messages }
+  }
+  if fs.exists(pathOf(dir)) {
+    return { data: empty(), messages: ["the data file could not be read, an empty board is shown"] }
+  }
+  return { data: empty(), messages: [] }
+}
+
+/// The data of one file, or nothing when it is not there or does not
+/// read.
+fn readData(file: string, now: number) -> { data: Data, messages: [string] } | null {
+  if !fs.exists(file) {
+    return null
+  }
+  let source = ""
+  try {
+    source = fs.read(file)
+  } catch {
+    return null
+  }
+  let raw: any = null
+  try {
+    raw = json.parse(source)
+  } catch {
+    return null
+  }
+  if type(raw) != "object" {
+    return null
+  }
+  let found = sanitize(raw, now)
+  return found
+}
+
+/// A whole file taken apart record by record. A record that is not a
+/// record at all is left out; a record with a wrong field is repaired,
+/// so that one bad line does not cost the rest of the board.
+fn sanitize(raw, now: number) -> { data: Data, messages: [string] } {
+  let messages: [string] = []
+  let data = empty()
+
+  let rawTasks = raw.tasks
+  if type(rawTasks) == "list" {
+    for value in rawTasks {
+      let task = sanitizeTask(value, now)
+      if task != null {
+        data.tasks = append(data.tasks, task)
+      } else {
+        messages = append(messages, "a line of the data was not a task and was left out")
+      }
+    }
+  }
+
+  let rawNotes = raw.notes
+  if type(rawNotes) == "list" {
+    for value in rawNotes {
+      let note = sanitizeNote(value, data.tasks, now)
+      if note != null {
+        data.notes = append(data.notes, note)
+      } else {
+        messages = append(messages, "a line of the data was not a note and was left out")
+      }
+    }
+  }
+
+  let rawActivity = raw.activity
+  if type(rawActivity) == "list" {
+    for value in rawActivity {
+      let entry = sanitizeEntry(value)
+      if entry != null {
+        data.activity = append(data.activity, entry)
+      }
+    }
+  }
+
+  if len(data.tasks) > 0 or len(data.notes) > 0 or len(data.activity) > 0 {
+    // The repairs are counted once, so that a hundred wrong records do
+    // not print a hundred lines.
+    if len(messages) > 0 {
+      messages = append(messages, "some records were repaired while reading")
+    }
+  }
+  return { data: data, messages: unique(messages) }
+}
+
+/// One task of the data, or nothing when the line is not a task.
+fn sanitizeTask(value, now: number) -> tasks.Task | null {
+  if type(value) != "object" {
+    return null
+  }
+  let id = idOf(value.id)
+  let due: string | null = null
+  if type(value.due) == "string" and dates.isDate(value.due) {
+    due = value.due
+  }
+  let priority = "medium"
+  if type(value.priority) == "string" {
+    for one in tasks.PRIORITIES {
+      if lower(value.priority) == one {
+        priority = one
+      }
+    }
+  }
+  let completed: number | null = null
+  if type(value.completed) == "number" {
+    completed = value.completed
+  }
+  return {
+    id: id,
+    title: textOf(value.title, "untitled task"),
+    done: value.done == true,
+    priority: priority,
+    due: due,
+    tags: tagsOf(value.tags),
+    created: numOf(value.created, now),
+    updated: numOf(value.updated, now),
+    completed: completed,
+  }
+}
+
+/// One note of the data, or nothing when the line is not a note.
+fn sanitizeNote(value, known: [tasks.Task], now: number) -> notes.Note | null {
+  if type(value) != "object" {
+    return null
+  }
+  let taskId: string | null = null
+  if type(value.taskId) == "string" {
+    for task in known {
+      if task.id == value.taskId {
+        taskId = value.taskId
+      }
+    }
+  }
+  return {
+    id: idOf(value.id),
+    title: textOf(value.title, "untitled note"),
+    body: textOf(value.body, ""),
+    tags: tagsOf(value.tags),
+    pinned: value.pinned == true,
+    taskId: taskId,
+    created: numOf(value.created, now),
+    updated: numOf(value.updated, now),
+  }
+}
+
+/// One line of the activity, or nothing when it holds no usable moment.
+fn sanitizeEntry(value) -> activity.Entry | null {
+  if type(value) != "object" {
+    return null
+  }
+  if type(value.at) != "number" {
+    return null
+  }
+  let kind = textOf(value.kind, "")
+  if !activity.isKnown(kind) {
+    return null
+  }
+  // The words of a line are short by design; a long one is cut.
+  return { id: idOf(value.id), kind: kind, text: textOf(value.text, ""), at: value.at }
+}
+
+/// An id that may be used in an address: the one of the record when it
+/// looks like one, and a new one when it does not.
+fn idOf(value) -> string {
+  if type(value) == "string" and ID_SHAPE.test(value) {
+    return value
+  }
+  return uuid()
+}
+
+const ID_SHAPE = regex('^[A-Za-z0-9-]{8,64}$')
+
+/// A field that has to hold text, with a value to fall back on.
+fn textOf(value, fallback: string) -> string {
+  if type(value) == "string" {
+    if len(value) > notes.BODY_MAX {
+      return slice(value, 0, notes.BODY_MAX)
+    }
+    return value
+  }
+  return fallback
+}
+
+/// A field that has to hold a number.
+fn numOf(value, fallback: number) -> number {
+  if type(value) == "number" and value >= 0 {
+    return value
+  }
+  return fallback
+}
+
+/// A field that has to hold a list of tags.
+fn tagsOf(value) -> [string] {
+  let out: [string] = []
+  if type(value) != "list" {
+    return out
+  }
+  for one in value {
+    if type(one) == "string" {
+      let tag = lower(trim(one))
+      if tag != "" and len(tag) <= 24 and !has(out, tag) {
+        out = append(out, tag)
+      }
+    }
+    if len(out) >= 8 {
+      break
+    }
+  }
+  return out
+}
+
+fn has(list: [string], value: string) -> bool {
+  for one in list {
+    if one == value {
+      return true
+    }
+  }
+  return false
+}
+
+/// The data written to the folder.
+///
+/// A failure comes back as an error and leaves the last good file where
+/// it was, so that the caller may keep the old data in memory as well.
+export fn save(dir: string, data: Data) -> Result<null, string> {
+  if !fs.exists(dir) {
+    fs.mkdir(dir)
+  }
+  let text = json.stringify(data)
+  let file = pathOf(dir)
+  let temp = file + ".tmp"
+  // The new data goes to a file of its own first.
+  try {
+    fs.write(temp, text)
+  } catch {
+    return err("the new data could not be written")
+  }
+  // The file that is being replaced is kept as a backup.
+  if fs.exists(file) {
+    try {
+      fs.write(backupOf(dir), fs.read(file))
+    } catch {
+      // A backup that cannot be written does not stop the save: the
+      // file itself is still good.
+    }
+  }
+  // Only now does the new file take the place of the old one. A rename
+  // is one step for the file system, so a crash cannot leave half a
+  // file behind.
+  try {
+    let nodeFs = require("node:fs")
+    nodeFs.renameSync(temp, file)
+  } catch {
+    try {
+      fs.write(file, text)
+    } catch {
+      return err("the data could not be written")
+    }
+  }
+  return ok(null)
+}

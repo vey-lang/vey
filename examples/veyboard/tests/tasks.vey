@@ -1,0 +1,171 @@
+// The work on the tasks of the board.
+
+use "../src/tasks.vey" as tasks
+
+fn make(title: string, priority: string, due: string | null, now: number) {
+  return tasks.make(uuid(), {
+    title: title,
+    priority: priority,
+    due: due,
+    tags: ["work"],
+  }, now)
+}
+
+test("a task is made open, with the moment it was made", fn() {
+  let task = make("Write the report", "high", "2026-11-01", 1000)
+  assertEquals(task.title, "Write the report")
+  assertEquals(task.priority, "high")
+  assertEquals(task.done, false)
+  assertEquals(task.completed, null)
+  assertEquals(task.created, 1000)
+  assertEquals(task.updated, 1000)
+  assertDeepEquals(task.tags, ["work"])
+})
+
+test("a task keeps its id and its beginning when it is edited", fn() {
+  let task = make("Write", "low", null, 1000)
+  let changed = tasks.revise(task, {
+    title: "Write the report",
+    priority: "high",
+    due: "2026-11-01",
+    tags: ["work", "writing"],
+  }, 2000)
+  assertEquals(changed.id, task.id)
+  assertEquals(changed.created, 1000)
+  assertEquals(changed.updated, 2000)
+  assertEquals(changed.title, "Write the report")
+  assertEquals(changed.due, "2026-11-01")
+  assertDeepEquals(changed.tags, ["work", "writing"])
+})
+
+test("a task is finished and taken back", fn() {
+  let task = make("Ship it", "medium", null, 1000)
+  let done = tasks.setDone(task, true, 2000)
+  assertEquals(done.done, true)
+  assertEquals(done.completed, 2000)
+  assertEquals(done.updated, 2000)
+  let back = tasks.setDone(done, false, 3000)
+  assertEquals(back.done, false)
+  assertEquals(back.completed, null)
+  assertEquals(back.updated, 3000)
+})
+
+test("finishing a finished task changes nothing", fn() {
+  let task = make("Ship it", "medium", null, 1000)
+  let done = tasks.setDone(task, true, 2000)
+  let again = tasks.setDone(done, true, 3000)
+  assertEquals(again.completed, 2000)
+  assertEquals(again.updated, 2000)
+})
+
+test("a task is late only when it is open and its day has passed", fn() {
+  let open = make("Late", "high", "2026-10-22", 1000)
+  assert(tasks.isOverdue(open, "2026-10-23"), "yesterday is late")
+  assert(!tasks.isOverdue(open, "2026-10-22"), "today is not late")
+  assert(!tasks.isOverdue(open, "2026-10-21"), "tomorrow is not late")
+  let done = tasks.setDone(open, true, 2000)
+  assert(!tasks.isOverdue(done, "2026-10-23"), "a finished task is never late")
+  let noDue = make("Someday", "low", null, 1000)
+  assert(!tasks.isOverdue(noDue, "2026-10-23"), "a task without a day is never late")
+})
+
+test("a task is due today only when it is open and due today", fn() {
+  let task = make("Today", "high", "2026-10-23", 1000)
+  assert(tasks.isDueToday(task, "2026-10-23"), "it is due today")
+  assert(!tasks.isDueToday(task, "2026-10-24"), "it is not due tomorrow")
+  let done = tasks.setDone(task, true, 2000)
+  assert(!tasks.isDueToday(done, "2026-10-23"), "a finished task is not due")
+})
+
+test("priorities are ranked from the loudest to the quietest", fn() {
+  assertEquals(tasks.priorityRank("high"), 3)
+  assertEquals(tasks.priorityRank("medium"), 2)
+  assertEquals(tasks.priorityRank("low"), 1)
+  assert(tasks.priorityRank("nonsense") == 1, "an unknown priority is quiet")
+})
+
+test("a task is found by id and taken out by id", fn() {
+  let first = make("One", "low", null, 1000)
+  let second = make("Two", "high", null, 2000)
+  let all = [first, second]
+  assertEquals(tasks.byId(all, second.id).title, "Two")
+  assertEquals(tasks.byId(all, "missing"), null)
+  assertEquals(len(tasks.without(all, first.id)), 1)
+  assertEquals(tasks.without(all, first.id)[0].id, second.id)
+})
+
+test("a changed task takes the place of the old one", fn() {
+  let first = make("One", "low", null, 1000)
+  let second = make("Two", "high", null, 2000)
+  let changed = tasks.revise(first, { title: "One, again", priority: "low", due: null, tags: [] }, 3000)
+  let all = tasks.updated([first, second], changed)
+  assertEquals(len(all), 2)
+  assertEquals(all[0].title, "One, again")
+  assertEquals(all[1].title, "Two")
+})
+
+test("the tasks behind a filter are the ones that stand behind it", fn() {
+  let first = make("Write the report", "high", "2026-11-01", 1000)
+  let second = make("Read the report", "low", null, 2000)
+  let third = tasks.setDone(make("Send the report", "medium", null, 3000), true, 4000)
+  let all = [first, second, third]
+
+  assertEquals(len(tasks.select(all, tasks.noFilter())), 2)
+  assertEquals(len(tasks.select(all, { status: "done", priority: "", tag: "", query: "" })), 1)
+  assertEquals(len(tasks.select(all, { status: "all", priority: "", tag: "", query: "" })), 3)
+  assertEquals(len(tasks.select(all, { status: "all", priority: "high", tag: "", query: "" })), 1)
+  assertEquals(len(tasks.select(all, { status: "all", priority: "medium", tag: "", query: "" })), 1)
+  assertEquals(len(tasks.select(all, { status: "open", priority: "", tag: "work", query: "" })), 2)
+  assertEquals(len(tasks.select(all, { status: "open", priority: "", tag: "home", query: "" })), 0)
+  // The search looks at the title without regard to case.
+  assertEquals(len(tasks.select(all, { status: "open", priority: "", tag: "", query: "REPORT" })), 2)
+  assertEquals(len(tasks.select(all, { status: "open", priority: "", tag: "", query: "write" })), 1)
+  assertEquals(len(tasks.select(all, { status: "open", priority: "", tag: "", query: "nothing" })), 0)
+  assertEquals(len(tasks.select(all, { status: "open", priority: "high", tag: "work", query: "write" })), 1)
+})
+
+test("the tasks are ordered by deadline, priority or the day they were made", fn() {
+  let late = make("Late", "low", "2026-10-20", 1000)
+  let soon = make("Soon", "high", "2026-10-25", 2000)
+  let someday = make("Someday", "medium", null, 3000)
+  let all = [someday, soon, late]
+
+  let byDue = tasks.order(all, "due")
+  assertEquals(byDue[0].title, "Late")
+  assertEquals(byDue[1].title, "Soon")
+  assertEquals(byDue[2].title, "Someday")
+
+  let byPriority = tasks.order(all, "priority")
+  assertEquals(byPriority[0].title, "Soon")
+  assertEquals(byPriority[1].title, "Someday")
+  assertEquals(byPriority[2].title, "Late")
+
+  let byCreated = tasks.order(all, "created")
+  assertEquals(byCreated[0].title, "Someday")
+  assertEquals(byCreated[1].title, "Soon")
+  assertEquals(byCreated[2].title, "Late")
+})
+
+test("two tasks on the same day are told apart by priority", fn() {
+  let low = make("Low one", "low", "2026-10-25", 1000)
+  let high = make("High one", "high", "2026-10-25", 2000)
+  let ordered = tasks.order([low, high], "due")
+  assertEquals(ordered[0].title, "High one")
+})
+
+test("every tag of the tasks is told once, in order", fn() {
+  let first = tasks.make(uuid(), { title: "a", priority: "low", due: null, tags: ["work", "home"] }, 1000)
+  let second = tasks.make(uuid(), { title: "b", priority: "low", due: null, tags: ["home", "urgent"] }, 2000)
+  assertDeepEquals(tasks.allTags([first, second]), ["home", "urgent", "work"])
+  assertDeepEquals(tasks.allTags([]), [])
+})
+
+test("open and done cut the list in two", fn() {
+  let first = make("One", "low", null, 1000)
+  let second = tasks.setDone(make("Two", "low", null, 2000), true, 3000)
+  let all = [first, second]
+  assertEquals(len(tasks.open(all)), 1)
+  assertEquals(tasks.open(all)[0].title, "One")
+  assertEquals(len(tasks.done(all)), 1)
+  assertEquals(tasks.done(all)[0].title, "Two")
+})

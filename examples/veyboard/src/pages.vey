@@ -1,0 +1,462 @@
+// The pages of the board, and what each of them shows.
+//
+// Every page is a component that renders from the data it is given, so a
+// test may render any page with `html()` and look at what it says,
+// without a server, a browser or a wait. The counting and the collecting
+// is done by the plain functions next to the components: a component
+// keeps no value of its own, so a page is a plain function of its data.
+
+use "./dates.vey" as dates
+use "./tasks.vey" as tasks
+use "./notes.vey" as notes
+use "./activity.vey" as activity
+use "./format.vey" as format
+use "./site.vey" as site
+
+/// The state a list of tasks is seen through, from the fields of a
+/// query.
+export type Filters = { status: string, priority: string, tag: string, query: string, sort: string }
+
+/// The numbers of the board, counted from the tasks and nothing else.
+export type Overview = { total: number, done: number, open: number, overdue: number, dueToday: number }
+
+/// The numbers of the board.
+export fn overview(all: [tasks.Task], today: string) -> Overview {
+  let done = 0
+  let overdue = 0
+  let dueToday = 0
+  for task in all {
+    if task.done {
+      done += 1
+    }
+    if tasks.isOverdue(task, today) {
+      overdue += 1
+    }
+    if tasks.isDueToday(task, today) {
+      dueToday += 1
+    }
+  }
+  return {
+    total: len(all),
+    done: done,
+    open: len(all) - done,
+    overdue: overdue,
+    dueToday: dueToday,
+  }
+}
+
+/// The tasks of the day: the late ones first, then the ones due today.
+export fn todays(all: [tasks.Task], today: string) -> [tasks.Task] {
+  let wanted: [tasks.Task] = []
+  for task in all {
+    if tasks.isOverdue(task, today) or tasks.isDueToday(task, today) {
+      wanted = append(wanted, task)
+    }
+  }
+  return tasks.order(wanted, "due")
+}
+
+/// What is coming: the next open tasks with a day to keep, the nearest
+/// one first.
+export fn coming(all: [tasks.Task], today: string) -> [tasks.Task] {
+  let wanted: [tasks.Task] = []
+  for task in tasks.open(all) {
+    let due = task.due
+    if due != null {
+      if dates.compare(due, today) > 0 {
+        wanted = append(wanted, task)
+      }
+    }
+  }
+  return slice(tasks.order(wanted, "due"), 0, 5)
+}
+
+/// The notes that were changed last.
+export fn byUpdated(list: [notes.Note]) -> [notes.Note] {
+  return sort(list, fn(a: notes.Note, b: notes.Note) {
+    return b.updated - a.updated
+  })
+}
+
+/// The notes of the dashboard: the four that were changed last.
+export fn latestNotes(list: [notes.Note]) -> [notes.Note] {
+  return slice(byUpdated(list), 0, 4)
+}
+
+/// The title of the task a note is linked to, or nothing.
+export fn titleOf(all: [tasks.Task], id: string | null) -> string {
+  if id == null {
+    return ""
+  }
+  let task = tasks.byId(all, id)
+  if task == null {
+    return ""
+  }
+  return task.title
+}
+
+/// A board that has neither a task nor a note.
+export fn isFresh(data) -> bool {
+  return len(data.tasks) == 0 and len(data.notes) == 0
+}
+
+/// The tasks a list shows, behind the filters and in their order.
+export fn shownTasks(data, filters: Filters) -> [tasks.Task] {
+  let filter = { status: filters.status, priority: filters.priority, tag: filters.tag, query: filters.query }
+  return tasks.order(tasks.select(data.tasks, filter), filters.sort)
+}
+
+/// Whether the filters of a list keep anything out.
+export fn isFiltered(filters: Filters) -> bool {
+  return filters.priority != "" or filters.tag != "" or filters.query != "" or filters.status != "open"
+}
+
+/// The notes a list shows, behind the search of the moment.
+export fn shownNotes(data, query: string) -> [notes.Note] {
+  return notes.order(notes.search(data.notes, query))
+}
+
+/// The dashboard: the numbers of the board, what today asks for, what is
+/// coming, the notes that were touched last, and the week behind.
+export component Dashboard({ data, today, now }) {
+  div.pane {
+    site.PageHead title={greet(now)} note={format.dayLabel(today) + " · " + format.plural(overview(data.tasks, today).open, "open task")} action="New task" actionHref="/tasks/new"
+    if isFresh(data) {
+      site.EmptyState title="The board is empty" body="Make a task to fill the day, or write a note to keep an idea." action="Make the first task" actionHref="/tasks/new"
+    } else {
+      site.QuickAdd()
+      div.stats {
+        site.StatTile label="Total tasks" value={overview(data.tasks, today).total} note={format.plural(len(data.notes), "note")} tone=""
+        site.StatTile label="Done" value={overview(data.tasks, today).done} note={doneNote(overview(data.tasks, today))} tone="is-good"
+        site.StatTile label="Still open" value={overview(data.tasks, today).open} note={format.plural(overview(data.tasks, today).dueToday, "due today")} tone=""
+        site.StatTile label="Overdue" value={overview(data.tasks, today).overdue} note={pickNote(overview(data.tasks, today).overdue)} tone={site.pick(overview(data.tasks, today).overdue > 0, "is-warn", "")}
+      }
+      div.grid-two {
+        section.card {
+          h2 { "Today" }
+          TodayList data=data today=today
+        }
+        section.card {
+          h2 { "Coming up" }
+          UpcomingList data=data today=today
+        }
+      }
+      div.grid-two {
+        section.card {
+          h2 { "This week" }
+          site.WeekBars days={activity.perDay(data.activity, today, 7)}
+        }
+        section.card {
+          h2 { "Recently edited" }
+          RecentNotes data=data now=now
+        }
+      }
+    }
+  }
+}
+
+fn greet(now: number) -> string {
+  let hour = date.parts(now).hour
+  if hour < 12 {
+    return "Good morning"
+  }
+  if hour < 18 {
+    return "Good afternoon"
+  }
+  return "Good evening"
+}
+
+fn doneNote(counts: Overview) -> string {
+  if counts.total == 0 {
+    return "nothing yet"
+  }
+  return str(math.round((counts.done * 100) / counts.total)) + "% of all"
+}
+
+fn pickNote(overdue: number) -> string {
+  if overdue == 0 {
+    return "all clear"
+  }
+  return "needs a look"
+}
+
+/// The tasks of the day, under the heading of the panel they are in.
+component TodayList({ data, today }) {
+  if len(todays(data.tasks, today)) == 0 {
+    p.quiet { "Nothing is due today." }
+  } else {
+    ul.task-list.compact {
+      for task in todays(data.tasks, today) {
+        site.TaskRow task=task today=today back="/"
+      }
+    }
+  }
+}
+
+/// What is coming, under the heading of the panel it is in.
+component UpcomingList({ data, today }) {
+  if len(coming(data.tasks, today)) == 0 {
+    p.quiet { "Nothing is on the horizon. New tasks with a due date appear here." }
+  } else {
+    ul.task-list.compact {
+      for task in coming(data.tasks, today) {
+        site.TaskRow task=task today=today back="/"
+      }
+    }
+  }
+}
+
+/// The notes that were changed last, as the dashboard shows them.
+component RecentNotes({ data, now }) {
+  if len(latestNotes(data.notes)) == 0 {
+    p.quiet { "No notes yet." }
+  } else {
+    ul.note-list.compact {
+      for note in latestNotes(data.notes) {
+        site.NoteCard note=note taskTitle={titleOf(data.tasks, note.taskId)} now=now
+      }
+    }
+  }
+}
+
+/// The list of tasks, with the bar to search and filter it over it.
+export component TasksList({ data, filters, today }) {
+  div.pane {
+    site.PageHead title="Tasks" note={taskNote(data.tasks, shownTasks(data, filters))} action="New task" actionHref="/tasks/new"
+    site.Toolbar action="/tasks" query=filters.query status=filters.status priority=filters.priority sort=filters.sort tag=filters.tag
+    if len(tasks.allTags(data.tasks)) > 0 {
+      div.chip-row {
+        for tag in tasks.allTags(data.tasks) {
+          a.chip class={site.pick(tag == filters.tag, "is-active", "")} href={tagHref(filters, tag)} { tag }
+        }
+        if filters.tag != "" {
+          a.chip href={clearTag(filters)} { "Clear tag" }
+        }
+      }
+    }
+    if len(shownTasks(data, filters)) == 0 {
+      NoTasks all=data.tasks
+    } else {
+      ul.task-list {
+        for task in shownTasks(data, filters) {
+          site.TaskRow task=task today=today back={listHref(filters)}
+        }
+      }
+    }
+    if isFiltered(filters) {
+      a.clear-filters href="/tasks" { "Clear filters" }
+    }
+  }
+}
+
+/// What the list says when it holds nothing: about the board, or about
+/// the filters of the moment.
+component NoTasks({ all }) {
+  if len(all) == 0 {
+    site.EmptyState title="No tasks yet" body="A task has a title, a priority, and a day to keep." action="Make the first task" actionHref="/tasks/new"
+  } else {
+    site.EmptyState title="No tasks match" body="Nothing stands behind the filters of this list." action="Clear the filters" actionHref="/tasks"
+  }
+}
+
+fn taskNote(all: [tasks.Task], shown: [tasks.Task]) -> string {
+  let open = len(tasks.open(all))
+  let total = len(all)
+  if len(shown) == total {
+    return format.plural(total, "task") + " · " + str(open) + " open"
+  }
+  return "showing " + format.plural(len(shown), "task") + " of " + str(total)
+}
+
+/// The address of the list of tasks as the filters now stand.
+fn listHref(filters: Filters) -> string {
+  return "/tasks" + format.qs(filterFields(filters))
+}
+
+fn tagHref(filters: Filters, tag: string) -> string {
+  let fields = [
+  { name: "status", value: filters.status },
+  { name: "priority", value: filters.priority },
+  { name: "sort", value: filters.sort },
+  { name: "tag", value: tag },
+  ]
+  return "/tasks" + format.qs(fields)
+}
+
+fn clearTag(filters: Filters) -> string {
+  let fields = [
+  { name: "status", value: filters.status },
+  { name: "priority", value: filters.priority },
+  { name: "sort", value: filters.sort },
+  ]
+  return "/tasks" + format.qs(fields)
+}
+
+fn filterFields(filters: Filters) -> [{ name: string, value: string }] {
+  return [
+  { name: "status", value: filters.status },
+  { name: "priority", value: filters.priority },
+  { name: "tag", value: filters.tag },
+  { name: "q", value: filters.query },
+  { name: "sort", value: filters.sort },
+  ]
+}
+
+/// The page a task is made or edited on. The values of the form are the
+/// ones of the task when there is one, and what was typed when the form
+/// did not pass.
+export component TaskPane({ task, values, errors, back }) {
+  div.pane.narrow {
+    site.PageHead title={site.pick(task == null, "New task", "Edit task")} note="" action="" actionHref=""
+    site.TaskForm action={taskAction(task)} task=task values=values errors=errors back=back
+  }
+}
+
+fn taskAction(task) -> string {
+  if task == null {
+    return "/tasks"
+  }
+  return "/tasks/" + task.id
+}
+
+/// The page that asks before a task is thrown away.
+export component TaskDeletePane({ task, back }) {
+  div.pane.narrow {
+    site.PageHead title="Delete task" note="" action="" actionHref=""
+    site.ConfirmCard question={"Delete “" + task.title + "”?"} detail="The task is gone for good, and so is its place in the lists." action={"/tasks/" + task.id + "/delete"} label="Delete task" back=back
+  }
+}
+
+/// The list of notes, with the way to search it.
+export component NotesList({ data, query, now }) {
+  div.pane {
+    site.PageHead title="Notes" note={noteNote(data.notes, shownNotes(data, query))} action="New note" actionHref="/notes/new"
+    form.toolbar method="get" action="/notes" {
+      div.search {
+        label {
+          span.sr-only { "Search notes" }
+          input.input name="q" type="search" value=query placeholder="Search titles and bodies…" {
+          }
+        }
+      }
+      button.btn type="submit" { "Search" }
+      if query != "" {
+        a.btn href="/notes" { "Clear" }
+      }
+    }
+    if len(shownNotes(data, query)) == 0 {
+      NoNotes all=data.notes
+    } else {
+      ul.note-list {
+        for note in shownNotes(data, query) {
+          site.NoteCard note=note taskTitle={titleOf(data.tasks, note.taskId)} now=now
+        }
+      }
+    }
+  }
+}
+
+/// What the list of notes says when it holds nothing.
+component NoNotes({ all }) {
+  if len(all) == 0 {
+    site.EmptyState title="No notes yet" body="A note keeps an idea, a list or a piece of a plan." action="Write the first note" actionHref="/notes/new"
+  } else {
+    site.EmptyState title="No notes match" body="Nothing holds the words you searched for." action="Clear the search" actionHref="/notes"
+  }
+}
+
+fn noteNote(all: [notes.Note], found: [notes.Note]) -> string {
+  let pinned = 0
+  for note in all {
+    if note.pinned {
+      pinned += 1
+    }
+  }
+  if len(found) == len(all) {
+    return format.plural(len(all), "note") + " · " + str(pinned) + " pinned"
+  }
+  return "showing " + format.plural(len(found), "note") + " of " + str(len(all))
+}
+
+/// The page a note is made or edited on.
+export component NotePane({ note, values, errors, taskOptions, back }) {
+  div.pane.narrow {
+    site.PageHead title={site.pick(note == null, "New note", "Edit note")} note="" action="" actionHref=""
+    site.NoteForm action={noteAction(note)} note=note values=values errors=errors taskOptions=taskOptions back=back
+  }
+}
+
+fn noteAction(note) -> string {
+  if note == null {
+    return "/notes"
+  }
+  return "/notes/" + note.id
+}
+
+/// The page that asks before a note is thrown away.
+export component NoteDeletePane({ note, back }) {
+  div.pane.narrow {
+    site.PageHead title="Delete note" note="" action="" actionHref=""
+    site.ConfirmCard question={"Delete “" + note.title + "”?"} detail="The words of the note are gone for good." action={"/notes/" + note.id + "/delete"} label="Delete note" back=back
+  }
+}
+
+/// The activity of the board: the week behind, and the lines of what was
+/// done, the newest first, under the day they belong to.
+export component ActivityPane({ data, today }) {
+  div.pane {
+    site.PageHead title="Activity" note="Counted from what was actually done on this board." action="" actionHref=""
+    section.card {
+      h2 { "This week" }
+      site.WeekBars days={activity.perDay(data.activity, today, 7)}
+    }
+    if len(data.activity) == 0 {
+      site.EmptyState title="Nothing has happened yet" body="Making, finishing, editing and deleting all leave a line here." action="New task" actionHref="/tasks/new"
+    } else {
+      ActivityDays entries=data.activity
+    }
+  }
+}
+
+/// The lines of the activity, under the day they belong to.
+component ActivityDays(entries: [activity.Entry]) {
+  for group in groupDays(entries) {
+    div.day-group {
+      h3.day-head { format.dayLabel(group.day) }
+      ul.activity-list {
+        for entry in group.lines {
+          site.ActivityRow entry=entry
+        }
+      }
+    }
+  }
+}
+
+/// The lines cut apart by the day they belong to.
+export fn groupDays(entries: [activity.Entry]) -> [{ day: string, lines: [activity.Entry] }] {
+  let groups: [{ day: string, lines: [activity.Entry] }] = []
+  for entry in entries {
+    let day = date.format(entry.at, "YYYY-MM-DD")
+    if len(groups) > 0 and groups[len(groups) - 1].day == day {
+      let last = groups[len(groups) - 1]
+      last.lines = append(last.lines, entry)
+    } else {
+      groups = append(groups, { day: day, lines: [entry] })
+    }
+  }
+  return groups
+}
+
+/// The page of an address that does not exist.
+export component NotFoundPane(path: string) {
+  div.pane.narrow {
+    site.PageHead title="404" note="" action="" actionHref=""
+    div.confirm {
+      h2 { "There is no page here" }
+      p.quiet { "Nothing was found at " + path + "." }
+      div.form-actions {
+        a.btn.btn-primary href="/" { "Back to the dashboard" }
+      }
+    }
+  }
+}

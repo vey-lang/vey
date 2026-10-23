@@ -1,0 +1,13 @@
+{
+  "name": "veyboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Veyboard: a single-user productivity board, written with Vey.",
+  "scripts": {
+    "dev": "npm start",
+    "start": "vey build --node -o server.cjs && node --enable-source-maps server.cjs",
+    "build": "vey build --node -o server.cjs",
+    "test": "vey test",
+    "check": "vey check"
+  }
+}

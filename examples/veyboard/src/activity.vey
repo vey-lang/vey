@@ -1,0 +1,88 @@
+// The activity of Veyboard.
+//
+// Every meaningful change of the board writes a line here, and the
+// summaries of the dashboard are counted from these records and from
+// nothing else.
+
+use "./dates.vey" as dates
+
+/// A line of the activity: what was done, in short words.
+export type Entry = {
+  id: string
+  kind: string
+  text: string
+  at: number
+}
+
+/// How many lines are kept. The oldest fall off the end.
+export const KEEP = 200
+
+/// The kinds of lines that the board writes.
+export const KINDS = [
+"task-created",
+"task-edited",
+"task-completed",
+"task-reopened",
+"task-deleted",
+"note-created",
+"note-edited",
+"note-pinned",
+"note-unpinned",
+"note-deleted",
+]
+
+/// Whether the board knows a kind of line.
+export fn isKnown(kind: string) -> bool {
+  for one in KINDS {
+    if one == kind {
+      return true
+    }
+  }
+  return false
+}
+
+/// A new line, at the given time.
+export fn make(id: string, kind: string, text: string, now: number) -> Entry {
+  return { id: id, kind: kind, text: text, at: now }
+}
+
+/// The history with a new line at the front, without more than KEEP
+/// lines.
+export fn add(list: [Entry], kind: string, text: string, now: number) -> [Entry] {
+  let entry = make(uuid(), kind, text, now)
+  let out = append([entry], ...list)
+  if len(out) > KEEP {
+    return slice(out, 0, KEEP)
+  }
+  return out
+}
+
+/// The counts of the last days, oldest first. A day without lines has a
+/// count of zero, so that the week keeps its shape.
+export fn perDay(list: [Entry], today: string, days: number) -> [{ day: string, count: number }] {
+  let counts: [{ day: string, count: number }] = []
+  for index in 0..days {
+    let day = dates.addDays(today, index - (days - 1))
+    let count = 0
+    for entry in list {
+      if isoOfDay(entry.at) == day {
+        count += 1
+      }
+    }
+    counts = append(counts, { day: day, count: count })
+  }
+  return counts
+}
+
+/// The day an epoch time belongs to, written as the start of a day.
+fn isoOfDay(at: number) -> string {
+  return date.format(at, "YYYY-MM-DD")
+}
+
+/// The last lines of the history.
+export fn recent(list: [Entry], howMany: number) -> [Entry] {
+  if len(list) <= howMany {
+    return list
+  }
+  return slice(list, 0, howMany)
+}

@@ -1,0 +1,162 @@
+// What the forms send is checked here before it may come near the data.
+//
+// Every function hands back a `Result`: the value when the input is good,
+// and the words to show the one that typed it when it is not. Nothing
+// here touches a clock, a screen or a file.
+
+use "./dates.vey" as dates
+use "./tasks.vey" as tasks
+
+/// How long a title may be, and the body of a note.
+export const TITLE_MAX = 120
+export const BODY_MAX = 20000
+
+/// How many tags a thing may carry, how long a tag may be.
+export const TAGS_MAX = 8
+export const TAG_MAX = 24
+
+/// A field of a form that did not pass: its name and the words to show.
+export type Problem = { field: string, message: string }
+
+/// The text of a field as it came, or an empty text when there was
+/// nothing. Numbers and booleans of a form are turned into their text.
+export fn asText(value) -> string {
+  if value == null {
+    return ""
+  }
+  if type(value) == "string" {
+    return value
+  }
+  if type(value) == "number" or type(value) == "boolean" {
+    return str(value)
+  }
+  return ""
+}
+
+/// A title: neither empty nor too long.
+export fn checkTitle(value) -> Result<string, string> {
+  let clean = trim(asText(value))
+  if clean == "" {
+    return err("a title is needed")
+  }
+  if len(clean) > TITLE_MAX {
+    return err("the title may hold {TITLE_MAX} letters at most")
+  }
+  return ok(clean)
+}
+
+/// The body of a note. It may be empty, and it is capped so that a
+/// mistake cannot fill the disk.
+export fn body(value) -> Result<string, string> {
+  let clean = asText(value)
+  if len(clean) > BODY_MAX {
+    return err("the note may hold {BODY_MAX} letters at most")
+  }
+  return ok(clean)
+}
+
+/// A priority: one of the three of the board. An empty field is the
+/// middle one.
+export fn priority(value) -> Result<string, string> {
+  let clean = lower(trim(asText(value)))
+  if clean == "" {
+    return ok("medium")
+  }
+  for one in tasks.PRIORITIES {
+    if clean == one {
+      return ok(clean)
+    }
+  }
+  return err("a priority is high, medium or low")
+}
+
+/// A due day: empty for none, or a real calendar day.
+export fn due(value) -> Result<string | null, string> {
+  let clean = trim(asText(value))
+  if clean == "" {
+    return ok(null)
+  }
+  if !dates.isDate(clean) {
+    return err("a due date is a day such as 2026-10-23")
+  }
+  return ok(clean)
+}
+
+/// The tags of a thing: cut apart on commas, lowercased, without
+/// repeats.
+export fn tags(value) -> Result<[string], string> {
+  let clean = trim(asText(value))
+  if clean == "" {
+    return ok([])
+  }
+  let parts = split(clean, ",")
+  let out: [string] = []
+  for part in parts {
+    let tag = lower(trim(part))
+    if tag == "" {
+      continue
+    }
+    if len(tag) > TAG_MAX {
+      return err("a tag may hold {TAG_MAX} letters at most")
+    }
+    if !contains(out, tag) {
+      out = append(out, tag)
+    }
+    if len(out) > TAGS_MAX {
+      return err("a thing may carry {TAGS_MAX} tags at most")
+    }
+  }
+  return ok(out)
+}
+
+/// Whether a list holds a value.
+fn contains(list: [string], value: string) -> bool {
+  for one in list {
+    if one == value {
+      return true
+    }
+  }
+  return false
+}
+
+/// The id of the task a note belongs to: empty for none, and it has to
+/// name a task that exists.
+export fn taskId(value, known: [tasks.Task]) -> Result<string | null, string> {
+  let clean = trim(asText(value))
+  if clean == "" {
+    return ok(null)
+  }
+  for task in known {
+    if task.id == clean {
+      return ok(clean)
+    }
+  }
+  return err("that task is not on the board")
+}
+
+/// The page to go back to after a form is sent. Only the paths of this
+/// site are let through, so that a link cannot be turned into a way out
+/// of it.
+export fn back(value) -> string {
+  let clean = trim(asText(value))
+  if clean == "" or !startsWith(clean, "/") {
+    return "/"
+  }
+  if startsWith(clean, "//") or includes(clean, "\\") or includes(clean, "\n") or includes(clean, "\r") {
+    return "/"
+  }
+  return clean
+}
+
+/// A parameter of a query or a field of a form, with a value to fall
+/// back on when it is not there or is not text.
+export fn param(source, name: string, fallback: string) -> string {
+  if source == null {
+    return fallback
+  }
+  let value = asText(source[name])
+  if value == "" {
+    return fallback
+  }
+  return value
+}

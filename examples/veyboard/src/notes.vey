@@ -1,0 +1,163 @@
+// The notes of Veyboard.
+//
+// A note is a title, the text under it, tags, and a link to the task it
+// belongs to. Like the tasks, the work here takes the clock as an
+// argument, so that a test may wait for nothing.
+
+/// How long the body of a note may be, as the data keeps it.
+export const BODY_MAX = 20000
+
+/// A note of the board.
+export type Note = {
+  id: string
+  title: string
+  body: string
+  tags: [string]
+  pinned: bool
+  taskId: string | null
+  created: number
+  updated: number
+}
+
+/// The shape of the fields a note is made of.
+export type Fields = {
+  title: string
+  body: string
+  tags: [string]
+  taskId: string | null
+}
+
+/// A new note, at the given time.
+export fn make(id: string, fields: Fields, now: number) -> Note {
+  return {
+    id: id,
+    title: fields.title,
+    body: fields.body,
+    tags: fields.tags,
+    pinned: false,
+    taskId: fields.taskId,
+    created: now,
+    updated: now,
+  }
+}
+
+/// The note with new fields, noted as changed at the given time.
+export fn revise(note: Note, fields: Fields, now: number) -> Note {
+  return { ...note, title: fields.title, body: fields.body, tags: fields.tags, taskId: fields.taskId, updated: now }
+}
+
+/// The note pinned to the top, or let back down.
+export fn setPinned(note: Note, pinned: bool, now: number) -> Note {
+  if note.pinned == pinned {
+    return note
+  }
+  return { ...note, pinned: pinned, updated: now }
+}
+
+/// The note of an id, or nothing when there is none.
+export fn byId(list: [Note], id: string) -> Note | null {
+  for note in list {
+    if note.id == id {
+      return note
+    }
+  }
+  return null
+}
+
+/// The list without the note of an id.
+export fn without(list: [Note], id: string) -> [Note] {
+  let out: [Note] = []
+  for note in list {
+    if note.id != id {
+      out = append(out, note)
+    }
+  }
+  return out
+}
+
+/// The list with a note in the place of the one it was made from.
+export fn updated(list: [Note], note: Note) -> [Note] {
+  let out: [Note] = []
+  for one in list {
+    if one.id == note.id {
+      out = append(out, note)
+    } else {
+      out = append(out, one)
+    }
+  }
+  return out
+}
+
+/// Whether a note holds a wanted part in its title or its body, without
+/// regard to case.
+export fn holds(note: Note, wanted: string) -> bool {
+  if wanted == "" {
+    return true
+  }
+  let needle = lower(wanted)
+  return includes(lower(note.title), needle) or includes(lower(note.body), needle)
+}
+
+/// The notes that hold a wanted part.
+export fn search(list: [Note], wanted: string) -> [Note] {
+  let out: [Note] = []
+  for note in list {
+    if holds(note, wanted) {
+      out = append(out, note)
+    }
+  }
+  return out
+}
+
+/// The notes with the pinned ones first, and the rest by the ones that
+/// were changed last.
+export fn order(list: [Note]) -> [Note] {
+  return sort(list, fn(a, b) {
+    if a.pinned != b.pinned {
+      if a.pinned {
+        return -1
+      }
+      return 1
+    }
+    return b.updated - a.updated
+  })
+}
+
+/// Whether a note carries a tag.
+export fn hasTag(note: Note, tag: string) -> bool {
+  for one in note.tags {
+    if one == tag {
+      return true
+    }
+  }
+  return false
+}
+
+/// Every tag of the notes, sorted and without repeats.
+export fn allTags(list: [Note]) -> [string] {
+  let tags: [string] = []
+  for note in list {
+    for tag in note.tags {
+      tags = append(tags, tag)
+    }
+  }
+  return sort(unique(tags))
+}
+
+/// The first words of the body of a note, so that a list may show what
+/// the note is about.
+export fn excerpt(note: Note, max: number) -> string {
+  let text = trim(note.body)
+  // The first line that holds something.
+  for line in split(text, "\n") {
+    let clean = trim(line)
+    if clean != "" {
+      text = clean
+      break
+    }
+  }
+  if len(text) <= max {
+    return text
+  }
+  return slice(text, 0, max) + "…"
+}

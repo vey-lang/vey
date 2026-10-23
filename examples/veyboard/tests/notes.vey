@@ -1,0 +1,116 @@
+// The work on the notes of the board.
+
+use "../src/notes.vey" as notes
+
+fn make(title: string, body: string, now: number) {
+  return notes.make(uuid(), {
+    title: title,
+    body: body,
+    tags: ["home"],
+    taskId: null,
+  }, now)
+}
+
+test("a note is made open, pinned to nothing", fn() {
+  let note = make("Plan", "The plan", 1000)
+  assertEquals(note.title, "Plan")
+  assertEquals(note.body, "The plan")
+  assertEquals(note.pinned, false)
+  assertEquals(note.taskId, null)
+  assertEquals(note.created, 1000)
+  assertEquals(note.updated, 1000)
+})
+
+test("a note keeps its beginning when it is edited", fn() {
+  let note = make("Plan", "The plan", 1000)
+  let changed = notes.revise(note, {
+    title: "Plan the week",
+    body: "Monday: rest",
+    tags: ["home", "time"],
+    taskId: "some-task",
+  }, 2000)
+  assertEquals(changed.id, note.id)
+  assertEquals(changed.created, 1000)
+  assertEquals(changed.updated, 2000)
+  assertEquals(changed.title, "Plan the week")
+  assertEquals(changed.body, "Monday: rest")
+  assertEquals(changed.taskId, "some-task")
+})
+
+test("a note is pinned and let down again", fn() {
+  let note = make("Plan", "The plan", 1000)
+  let pinned = notes.setPinned(note, true, 2000)
+  assertEquals(pinned.pinned, true)
+  assertEquals(pinned.updated, 2000)
+  let back = notes.setPinned(pinned, false, 3000)
+  assertEquals(back.pinned, false)
+  assertEquals(back.updated, 3000)
+})
+
+test("pinning a pinned note changes nothing", fn() {
+  let note = notes.setPinned(make("Plan", "The plan", 1000), true, 2000)
+  let again = notes.setPinned(note, true, 3000)
+  assertEquals(again.updated, 2000)
+})
+
+test("a note is found and taken out by id", fn() {
+  let first = make("One", "", 1000)
+  let second = make("Two", "", 2000)
+  let all = [first, second]
+  assertEquals(notes.byId(all, second.id).title, "Two")
+  assertEquals(notes.byId(all, "missing"), null)
+  assertEquals(len(notes.without(all, first.id)), 1)
+})
+
+test("a changed note takes the place of the old one", fn() {
+  let first = make("One", "", 1000)
+  let second = make("Two", "", 2000)
+  let changed = notes.revise(first, { title: "One, again", body: "", tags: [], taskId: null }, 3000)
+  let all = notes.updated([first, second], changed)
+  assertEquals(all[0].title, "One, again")
+  assertEquals(all[1].title, "Two")
+})
+
+test("a note is searched in its title and in its body", fn() {
+  let note = notes.make(uuid(), {
+    title: "Grocery list",
+    body: "milk, bread, coffee",
+    tags: [],
+    taskId: null,
+  }, 1000)
+  assert(notes.holds(note, "grocery"), "the title holds the word")
+  assert(notes.holds(note, "COFFEE"), "the body holds the word, in any case")
+  assert(notes.holds(note, ""), "an empty search holds everything")
+  assert(!notes.holds(note, "tea"), "a word that is not there is not held")
+  assertEquals(len(notes.search([note], "bread")), 1)
+  assertEquals(len(notes.search([note], "tea")), 0)
+})
+
+test("the notes that were pinned come first, then the last changed", fn() {
+  let old = make("Old", "", 1000)
+  let fresh = make("Fresh", "", 3000)
+  let pinned = notes.setPinned(make("Pinned", "", 2000), true, 2500)
+  let ordered = notes.order([old, fresh, pinned])
+  assertEquals(ordered[0].title, "Pinned")
+  assertEquals(ordered[1].title, "Fresh")
+  assertEquals(ordered[2].title, "Old")
+})
+
+test("the excerpt is the first line with something in it", fn() {
+  let note = notes.make(uuid(), {
+    title: "T",
+    body: "\n\n  The first real line.  \nThe second line.",
+    tags: [],
+    taskId: null,
+  }, 1000)
+  assertEquals(notes.excerpt(note, 100), "The first real line.")
+  assertEquals(notes.excerpt(note, 10), "The first …")
+  let empty = make("T", "   \n  ", 1000)
+  assertEquals(notes.excerpt(empty, 10), "")
+})
+
+test("every tag of the notes is told once, in order", fn() {
+  let first = notes.make(uuid(), { title: "a", body: "", tags: ["home", "work"], taskId: null }, 1000)
+  let second = notes.make(uuid(), { title: "b", body: "", tags: ["work"], taskId: null }, 2000)
+  assertDeepEquals(notes.allTags([first, second]), ["home", "work"])
+})

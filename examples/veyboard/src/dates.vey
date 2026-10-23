@@ -1,0 +1,138 @@
+// Dates as plain calendar days.
+//
+// Due dates are written as "YYYY-MM-DD". The days are counted with the
+// civil calendar of Howard Hinnant, so that a due date never moves because
+// of the time zone of the machine, and every function here is plain
+// arithmetic that a test may check without a clock.
+
+/// The shape of a day: four digits, a dash, two digits, a dash, two digits.
+const SHAPE = regex('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+
+/// The first year a task may be due in, and the last.
+const MIN_YEAR = 1970
+const MAX_YEAR = 2200
+
+/// Whether a text is a real calendar day, such as "2028-02-29" in a leap
+/// year and never "2026-13-01".
+export fn isDate(text: string) -> bool {
+  if !SHAPE.test(text) {
+    return false
+  }
+  let year = int(slice(text, 0, 4))
+  let month = int(slice(text, 5, 7))
+  let day = int(slice(text, 8, 10))
+  if year < MIN_YEAR or year > MAX_YEAR {
+    return false
+  }
+  if month < 1 or month > 12 {
+    return false
+  }
+  return day >= 1 and day <= daysInMonth(year, month)
+}
+
+/// Whether a year is a leap year.
+export fn isLeap(year: number) -> bool {
+  return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+}
+
+/// The number of the days of a month.
+export fn daysInMonth(year: number, month: number) -> number {
+  if month == 2 {
+    if isLeap(year) {
+      return 29
+    }
+    return 28
+  }
+  if month == 4 or month == 6 or month == 9 or month == 11 {
+    return 30
+  }
+  return 31
+}
+
+/// The number of days from 1970-01-01 to a day.
+export fn toDays(text: string) -> number {
+  let year = int(slice(text, 0, 4))
+  let month = int(slice(text, 5, 7))
+  let day = int(slice(text, 8, 10))
+  let shifted = year
+  if month <= 2 {
+    shifted = year - 1
+  }
+  let era = math.floor(shifted / 400)
+  let yearOfEra = shifted - era * 400
+  let shiftedMonth = month - 3
+  if month <= 2 {
+    shiftedMonth = month + 9
+  }
+  let dayOfYear = math.floor((153 * shiftedMonth + 2) / 5) + day - 1
+  let dayOfEra = yearOfEra * 365 + math.floor(yearOfEra / 4) - math.floor(yearOfEra / 100) + dayOfYear
+  return era * 146097 + dayOfEra - 719468
+}
+
+/// The day that is the given number of days from 1970-01-01.
+export fn fromDays(days: number) -> string {
+  let shifted = days + 719468
+  let era = math.floor(shifted / 146097)
+  let dayOfEra = shifted - era * 146097
+  let yearOfEra = math.floor(
+  (dayOfEra - math.floor(dayOfEra / 1460) + math.floor(dayOfEra / 36524) - math.floor(dayOfEra / 146096)) / 365
+  )
+  let year = yearOfEra + era * 400
+  let dayOfYear = dayOfEra - (365 * yearOfEra + math.floor(yearOfEra / 4) - math.floor(yearOfEra / 100))
+  let monthPart = math.floor((5 * dayOfYear + 2) / 153)
+  let day = dayOfYear - math.floor((153 * monthPart + 2) / 5) + 1
+  // The months march from March: 0 is March, 9 is December, 10 and 11
+  // are January and February of the next year.
+  let month = monthPart - 9
+  if monthPart < 10 {
+    month = monthPart + 3
+  }
+  let fullYear = year
+  if month <= 2 {
+    fullYear = year + 1
+  }
+  return write(fullYear, month, day)
+}
+
+/// A day written as text, with the parts padded so that they stay in
+/// columns.
+export fn write(year: number, month: number, day: number) -> string {
+  let monthText = text.padStart(str(month), 2, "0")
+  let dayText = text.padStart(str(day), 2, "0")
+  return text.padStart(str(year), 4, "0") + "-" + monthText + "-" + dayText
+}
+
+/// The day of an epoch time, in the time zone of the machine.
+export fn today(now: number) -> string {
+  let parts = date.parts(now)
+  return write(parts.year, parts.month, parts.day)
+}
+
+/// The day that is the given number of days after a day.
+export fn addDays(day: string, amount: number) -> string {
+  return fromDays(toDays(day) + amount)
+}
+
+/// The number of days from one day to another.
+export fn daysUntil(from: string, to: string) -> number {
+  return toDays(to) - toDays(from)
+}
+
+/// How one day stands to another: a negative number when it is before.
+export fn compare(a: string, b: string) -> number {
+  let difference = toDays(a) - toDays(b)
+  if difference < 0 {
+    return -1
+  }
+  if difference > 0 {
+    return 1
+  }
+  return 0
+}
+
+/// The day of the week: 0 is Sunday, 6 is Saturday. 1970-01-01 was a
+/// Thursday.
+export fn weekday(day: string) -> number {
+  let days = toDays(day)
+  return (days + 4) % 7
+}

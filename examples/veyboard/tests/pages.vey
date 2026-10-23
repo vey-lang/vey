@@ -1,0 +1,223 @@
+// The pages, rendered from data and looked at. No server, no browser:
+// `html()` writes what the page would say.
+
+use "../src/tasks.vey" as tasks
+use "../src/notes.vey" as notes
+use "../src/activity.vey" as activity
+use "../src/pages.vey" as pages
+
+fn board() {
+  let now = time.now()
+  let late = tasks.make(uuid(), {
+    title: "Pay the bills",
+    priority: "high",
+    due: "2020-01-01",
+    tags: ["home"],
+  }, now - 5000)
+  let todayTask = tasks.make(uuid(), {
+    title: "Write the report",
+    priority: "medium",
+    due: "2026-10-23",
+    tags: ["work"],
+  }, now - 4000)
+  let done = tasks.setDone(tasks.make(uuid(), {
+    title: "Call the bank",
+    priority: "low",
+    due: null,
+    tags: [],
+  }, now - 3000), true, now - 2000)
+  let note = notes.make(uuid(), {
+    title: "Ideas for the week",
+    body: "A quiet week",
+    tags: ["home"],
+    taskId: todayTask.id,
+  }, now - 1000)
+  return {
+    data: { version: 1, tasks: [late, todayTask, done], notes: [note], activity: activity.add([], "task-created", "Write the report", now) },
+    today: "2026-10-23",
+    now: now,
+  }
+}
+
+test("the dashboard counts the tasks that are there", fn() {
+  let sample = board()
+  let page = html(pages.Dashboard({ data: sample.data, today: sample.today, now: sample.now }))
+  // Three tasks in all: one open and late, one due today, one done.
+  assertContains(page, "Total tasks")
+  assertContains(page, ">3<")
+  assertContains(page, ">1<")
+  assertContains(page, "Overdue")
+  assertContains(page, "Write the report")
+  assertContains(page, "Pay the bills")
+  assertContains(page, "Ideas for the week")
+  // The note is linked to the task it belongs to.
+  assertContains(page, "For: Write the report")
+})
+
+test("the dashboard of an empty board invites the first task", fn() {
+  let empty = { version: 1, tasks: [], notes: [], activity: [] }
+  let page = html(pages.Dashboard({ data: empty, today: "2026-10-23", now: time.now() }))
+  assertContains(page, "The board is empty")
+  assertContains(page, "Make the first task")
+  assertNotContains(page, "Total tasks")
+})
+
+test("a late task is said to be late, a finished one is not", fn() {
+  let sample = board()
+  let page = html(pages.Dashboard({ data: sample.data, today: sample.today, now: sample.now }))
+  assertContains(page, "Overdue")
+  // The chip of the late task is marked, and the words say so.
+  assertContains(page, "is-overdue")
+  assertContains(page, "Pay the bills")
+})
+
+test("the list of tasks shows the filters it is seen through", fn() {
+  let sample = board()
+  let filters = { status: "open", priority: "", tag: "", query: "", sort: "due" }
+  let page = html(pages.TasksList({ data: sample.data, filters: filters, today: sample.today }))
+  assertContains(page, "Write the report")
+  assertContains(page, "Pay the bills")
+  assertNotContains(page, "Call the bank")
+  assertContains(page, "open")
+
+  let doneOnly = { status: "done", priority: "", tag: "", query: "", sort: "due" }
+  let donePage = html(pages.TasksList({ data: sample.data, filters: doneOnly, today: sample.today }))
+  assertContains(donePage, "Call the bank")
+  assertNotContains(donePage, "Write the report")
+})
+
+test("a search that finds nothing says so, and the way back is there", fn() {
+  let sample = board()
+  let filters = { status: "all", priority: "", tag: "", query: "nothing at all", sort: "due" }
+  let page = html(pages.TasksList({ data: sample.data, filters: filters, today: sample.today }))
+  assertContains(page, "No tasks match")
+  assertContains(page, "Clear the filters")
+})
+
+test("a tag filters the list", fn() {
+  let sample = board()
+  let filters = { status: "all", priority: "", tag: "work", query: "", sort: "due" }
+  let page = html(pages.TasksList({ data: sample.data, filters: filters, today: sample.today }))
+  assertContains(page, "Write the report")
+  assertNotContains(page, "Pay the bills")
+  assertContains(page, "Clear tag")
+})
+
+test("a title is escaped, so it can hold anything", fn() {
+  let evil = tasks.make(uuid(), {
+    title: "<script>alert(\"x\")</script>",
+    priority: "low",
+    due: null,
+    tags: ["<b>"],
+  }, 1000)
+  let note = notes.make(uuid(), {
+    title: "A <b>note</b>",
+    body: "body <script>",
+    tags: [],
+    taskId: null,
+  }, 2000)
+  let data = { version: 1, tasks: [evil], notes: [note], activity: [] }
+  let listPage = html(pages.TasksList({ data: data, filters: { status: "all", priority: "", tag: "", query: "", sort: "created" }, today: "2026-10-23" }))
+  assertNotContains(listPage, "<script>alert")
+  assertContains(listPage, "&lt;script&gt;")
+  let notesPage = html(pages.NotesList({ data: data, query: "", now: time.now() }))
+  assertNotContains(notesPage, "<script>")
+  assertContains(notesPage, "&lt;b&gt;note&lt;/b&gt;")
+})
+
+test("the notes list puts the pinned note first and finds a word in a body", fn() {
+  let pinned = notes.setPinned(notes.make(uuid(), {
+    title: "Pinned one",
+    body: "hidden word: lantern",
+    tags: [],
+    taskId: null,
+  }, 1000), true, 1500)
+  let plain = notes.make(uuid(), {
+    title: "Plain one",
+    body: "",
+    tags: [],
+    taskId: null,
+  }, 2000)
+  let data = { version: 1, tasks: [], notes: [plain, pinned], activity: [] }
+  let page = html(pages.NotesList({ data: data, query: "", now: time.now() }))
+  assertContains(page, "Pinned one")
+  assertContains(page, "Pinned")
+  let order = indexOfText(page, "Pinned one") < indexOfText(page, "Plain one")
+  assert(order, "the pinned note comes before the plain one")
+  let found = html(pages.NotesList({ data: data, query: "lantern", now: time.now() }))
+  assertContains(found, "Pinned one")
+  assertNotContains(found, "Plain one")
+})
+
+fn indexOfText(haystack: string, needle: string) -> number {
+  // There is no index helper in the runtime, so the place is found by
+  // cutting the text in two at every letter.
+  for index in 0..len(haystack) {
+    if slice(haystack, index, index + len(needle)) == needle {
+      return index
+    }
+  }
+  return len(haystack)
+}
+
+test("an empty note list invites the first note", fn() {
+  let data = { version: 1, tasks: [], notes: [], activity: [] }
+  let page = html(pages.NotesList({ data: data, query: "", now: time.now() }))
+  assertContains(page, "No notes yet")
+  assertContains(page, "Write the first note")
+})
+
+test("the activity page groups the lines under their day", fn() {
+  let now = time.now()
+  let lines = activity.add([], "task-created", "One <b>", now)
+  lines = activity.add(lines, "task-completed", "One <b>", now + 1000)
+  let data = { version: 1, tasks: [], notes: [], activity: lines }
+  let page = html(pages.ActivityPane({ data: data, today: "2026-10-23" }))
+  assertContains(page, "task created")
+  assertContains(page, "task completed")
+  assertContains(page, "One &lt;b&gt;")
+  assertContains(page, "The last 7 days")
+})
+
+test("the form of a task keeps what was typed and says what is wrong", fn() {
+  let values = { title: "", priority: "high", due: "2026-02-30", tags: "work" }
+  let errors = { title: "a title is needed", due: "a due date is a day such as 2026-10-23" }
+  let page = html(pages.TaskPane({ task: null, values: values, errors: errors, back: "/tasks" }))
+  assertContains(page, "a title is needed")
+  assertContains(page, "a due date is a day such as 2026-10-23")
+  assertContains(page, "value=\"2026-02-30\"")
+  assertContains(page, "Create task")
+})
+
+test("the page of a missing address says what was looked for, escaped", fn() {
+  let page = html(pages.NotFoundPane("/there/<script>"))
+  assertContains(page, "There is no page here")
+  assertContains(page, "&lt;script&gt;")
+})
+
+test("the numbers of the dashboard are counted, not written", fn() {
+  let now = time.now()
+  let first = tasks.make(uuid(), { title: "One", priority: "low", due: null, tags: [] }, now)
+  let second = tasks.setDone(tasks.make(uuid(), { title: "Two", priority: "low", due: null, tags: [] }, now), true, now)
+  let counts = pages.overview([first, second], "2026-10-23")
+  assertEquals(counts.total, 2)
+  assertEquals(counts.done, 1)
+  assertEquals(counts.open, 1)
+  assertEquals(counts.overdue, 0)
+  assertEquals(counts.dueToday, 0)
+})
+
+test("todays tasks are the late ones and the ones due today", fn() {
+  let today = "2026-10-23"
+  let late = tasks.make(uuid(), { title: "Late", priority: "low", due: "2026-10-01", tags: [] }, 1)
+  let due = tasks.make(uuid(), { title: "Due", priority: "low", due: today, tags: [] }, 2)
+  let later = tasks.make(uuid(), { title: "Later", priority: "low", due: "2026-11-01", tags: [] }, 3)
+  let finished = tasks.setDone(tasks.make(uuid(), { title: "Done", priority: "low", due: today, tags: [] }, 4), true, 5)
+  let wanted = pages.todays([later, finished, due, late], today)
+  assertEquals(len(wanted), 2)
+  assertEquals(wanted[0].title, "Late")
+  assertEquals(wanted[1].title, "Due")
+  let coming = pages.coming([later, finished, due, late], today)
+  assertEquals(len(coming), 1)
+  assertEquals(coming[0].title, "Later")
+})

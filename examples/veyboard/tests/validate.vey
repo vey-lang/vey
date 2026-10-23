@@ -1,0 +1,86 @@
+// What a form sends is checked before it may come near the data.
+
+use "../src/validate.vey" as validate
+use "../src/tasks.vey" as tasks
+
+test("a title is trimmed and must hold something", fn() {
+  assertEquals(validate.checkTitle("  Write the report  ").value, "Write the report")
+  assert(!validate.checkTitle("").ok, "an empty title is refused")
+  assert(!validate.checkTitle("   ").ok, "a title of spaces is refused")
+  assert(!validate.checkTitle(null).ok, "a missing title is refused")
+  let long = "x"
+  repeat 130 {
+    long = long + "x"
+  }
+  assert(!validate.checkTitle(long).ok, "a title that is too long is refused")
+  assert(validate.checkTitle("x").ok, "one letter is enough")
+})
+
+test("a body may be empty and may not be endless", fn() {
+  assertEquals(validate.body("").value, "")
+  assertEquals(validate.body("two\nlines").value, "two\nlines")
+  let zero = validate.body(null)
+  assertEquals(zero.value, "")
+})
+
+test("a priority is one of the three, and an empty one is the middle", fn() {
+  assertEquals(validate.priority("high").value, "high")
+  assertEquals(validate.priority("LOW").value, "low")
+  assertEquals(validate.priority("").value, "medium")
+  assertEquals(validate.priority(null).value, "medium")
+  assert(!validate.priority("urgent").ok, "an invented priority is refused")
+})
+
+test("a due day is either nothing or a real day", fn() {
+  assertEquals(validate.due("").value, null)
+  assertEquals(validate.due(null).value, null)
+  assertEquals(validate.due("2026-10-23").value, "2026-10-23")
+  assertEquals(validate.due(" 2026-10-23 ").value, "2026-10-23")
+  assert(!validate.due("2026-02-30").ok, "february 30 does not exist")
+  assert(!validate.due("2026-13-01").ok, "there is no thirteenth month")
+  assert(!validate.due("tomorrow").ok, "a word is not a day")
+  assert(!validate.due("23/10/2026").ok, "the shape is year-month-day")
+})
+
+test("tags are cut apart, lowered, and told once", fn() {
+  assertDeepEquals(validate.tags("").value, [])
+  assertDeepEquals(validate.tags("  ").value, [])
+  assertDeepEquals(validate.tags("Work, home ,, WORK").value, ["work", "home"])
+  assertDeepEquals(validate.tags("one").value, ["one"])
+  assert(!validate.tags("this-tag-is-far-too-long-to-be-kept").ok, "a long tag is refused")
+  let many = "a, b, c, d, e, f, g, h, i"
+  assert(!validate.tags(many).ok, "too many tags are refused")
+})
+
+test("the linked task has to be a task of the board", fn() {
+  let task = tasks.make(uuid(), { title: "Write", priority: "low", due: null, tags: [] }, 1000)
+  assertEquals(validate.taskId("", [task]).value, null)
+  assertEquals(validate.taskId(task.id, [task]).value, task.id)
+  assert(!validate.taskId("not-a-task", [task]).ok, "an unknown task is refused")
+})
+
+test("the page to go back to stays on this site", fn() {
+  assertEquals(validate.back("/tasks"), "/tasks")
+  assertEquals(validate.back("/tasks?status=done"), "/tasks?status=done")
+  assertEquals(validate.back(""), "/")
+  assertEquals(validate.back("https://evil.example"), "/")
+  assertEquals(validate.back("//evil.example"), "/")
+  assertEquals(validate.back("/tasks\\..\\.."), "/")
+  assertEquals(validate.back("/tasks\nSet-Cookie: x"), "/")
+})
+
+test("a field of a query falls back when it is not there", fn() {
+  let query = { status: "done" }
+  assertEquals(validate.param(query, "status", "open"), "done")
+  assertEquals(validate.param(query, "sort", "due"), "due")
+  assertEquals(validate.param(null, "sort", "due"), "due")
+  assertEquals(validate.param(query, "empty", "fallback"), "fallback")
+})
+
+test("a field of a form is read as text, whatever it held", fn() {
+  assertEquals(validate.asText("text"), "text")
+  assertEquals(validate.asText(42), "42")
+  assertEquals(validate.asText(true), "true")
+  assertEquals(validate.asText(null), "")
+  assertEquals(validate.asText({ a: 1 }), "")
+})

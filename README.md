@@ -30,6 +30,10 @@ curl -fsSL https://veylang.tech/install.sh | sh
 The site of the language is at [veylang.tech](https://veylang.tech), and it is
 written in Vey. Its source is in `examples/veylang`.
 
+A whole application, Veyboard — tasks, notes and a dashboard, kept in a file —
+is in `examples/veyboard`. It was made with `vey new`, and its README says how
+to run it and how it is built.
+
 ## Commands
 
 ```sh

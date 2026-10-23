@@ -1,0 +1,272 @@
+// The tasks of Veyboard.
+//
+// Everything here works on plain values and takes the clock as an
+// argument, so that a test may check the work without a server, a screen
+// or a wait.
+
+use "./dates.vey" as dates
+
+/// The priorities a task may have, from the one that calls for action to
+/// the one that may wait.
+export const PRIORITIES = ["high", "medium", "low"]
+
+/// A task of the board.
+export type Task = {
+  id: string
+  title: string
+  done: bool
+  priority: string
+  due: string | null
+  tags: [string]
+  created: number
+  updated: number
+  completed: number | null
+}
+
+/// The shape of the fields a task is made of.
+export type Fields = {
+  title: string
+  priority: string
+  due: string | null
+  tags: [string]
+}
+
+/// A new task, at the given time.
+export fn make(id: string, fields: Fields, now: number) -> Task {
+  return {
+    id: id,
+    title: fields.title,
+    done: false,
+    priority: fields.priority,
+    due: fields.due,
+    tags: fields.tags,
+    created: now,
+    updated: now,
+    completed: null,
+  }
+}
+
+/// The task with new fields, noted as changed at the given time.
+export fn revise(task: Task, fields: Fields, now: number) -> Task {
+  return {
+    ...task,
+    title: fields.title,
+    priority: fields.priority,
+    due: fields.due,
+    tags: fields.tags,
+    updated: now,
+  }
+}
+
+/// The task marked as done, or taken back to be done.
+export fn setDone(task: Task, finished: bool, now: number) -> Task {
+  if task.done == finished {
+    return task
+  }
+  let completed: number | null = null
+  if finished {
+    completed = now
+  }
+  return { ...task, done: finished, completed: completed, updated: now }
+}
+
+/// Whether a task is late: open, with a due day that has passed.
+export fn isOverdue(task: Task, today: string) -> bool {
+  if task.done {
+    return false
+  }
+  let due = task.due
+  if due == null {
+    return false
+  }
+  return dates.compare(due, today) < 0
+}
+
+/// Whether a task is due today.
+export fn isDueToday(task: Task, today: string) -> bool {
+  if task.done {
+    return false
+  }
+  return task.due == today
+}
+
+/// How loudly a priority calls for action, so that the tasks may be
+/// sorted by it.
+export fn priorityRank(priority: string) -> number {
+  if priority == "high" {
+    return 3
+  }
+  if priority == "medium" {
+    return 2
+  }
+  return 1
+}
+
+/// The tasks that are open.
+export fn open(list: [Task]) -> [Task] {
+  return filter(list, fn(task) {
+    return !task.done
+  })
+}
+
+/// The tasks that are done.
+export fn done(list: [Task]) -> [Task] {
+  return filter(list, fn(task) {
+    return task.done
+  })
+}
+
+/// The task of an id, or nothing when there is none.
+export fn byId(list: [Task], id: string) -> Task | null {
+  for task in list {
+    if task.id == id {
+      return task
+    }
+  }
+  return null
+}
+
+/// The list without the task of an id.
+export fn without(list: [Task], id: string) -> [Task] {
+  let out: [Task] = []
+  for task in list {
+    if task.id != id {
+      out = append(out, task)
+    }
+  }
+  return out
+}
+
+/// The list with a task in the place of the one it was made from.
+export fn updated(list: [Task], task: Task) -> [Task] {
+  let out: [Task] = []
+  for one in list {
+    if one.id == task.id {
+      out = append(out, task)
+    } else {
+      out = append(out, one)
+    }
+  }
+  return out
+}
+
+/// The state a list may be seen through: what is kept and what is asked
+/// for.
+export type Filter = {
+  status: string
+  priority: string
+  tag: string
+  query: string
+}
+
+/// A filter that keeps everything.
+export fn noFilter() -> Filter {
+  return { status: "open", priority: "", tag: "", query: "" }
+}
+
+/// Whether a task stands behind a filter.
+export fn matches(task: Task, filter: Filter) -> bool {
+  if filter.status == "open" and task.done {
+    return false
+  }
+  if filter.status == "done" and !task.done {
+    return false
+  }
+  if filter.priority != "" and task.priority != filter.priority {
+    return false
+  }
+  if filter.tag != "" and !hasTag(task, filter.tag) {
+    return false
+  }
+  if filter.query != "" and !holds(task.title, filter.query) {
+    return false
+  }
+  return true
+}
+
+/// Whether a task carries a tag.
+export fn hasTag(task: Task, tag: string) -> bool {
+  for one in task.tags {
+    if one == tag {
+      return true
+    }
+  }
+  return false
+}
+
+/// Whether a text holds a wanted part, without regard to case.
+fn holds(text: string, wanted: string) -> bool {
+  return includes(lower(text), lower(wanted))
+}
+
+/// The tasks behind a filter.
+export fn select(list: [Task], filter: Filter) -> [Task] {
+  return filterList(list, filter)
+}
+
+fn filterList(list: [Task], filter: Filter) -> [Task] {
+  let out: [Task] = []
+  for task in list {
+    if matches(task, filter) {
+      out = append(out, task)
+    }
+  }
+  return out
+}
+
+/// The tasks in an order: by due day, by priority or by the day they were
+/// made. A task without a due day waits at the end.
+export fn order(list: [Task], by: string) -> [Task] {
+  return sort(list, fn(a: Task, b: Task) {
+    return compareTasks(a, b, by)
+  })
+}
+
+/// How one task stands to another in the order of a listing.
+fn compareTasks(a: Task, b: Task, by: string) -> number {
+  if by == "created" {
+    // The newest first.
+    if a.created != b.created {
+      return b.created - a.created
+    }
+  } else if by == "priority" {
+    let rank = priorityRank(b.priority) - priorityRank(a.priority)
+    if rank != 0 {
+      return rank
+    }
+  } else {
+    // By due day: a task without one waits, and two tasks on the same
+    // day are told apart by priority.
+    let dueA = a.due
+    let dueB = b.due
+    if dueA == null and dueB != null {
+      return 1
+    }
+    if dueA != null and dueB == null {
+      return -1
+    }
+    if dueA != null and dueB != null {
+      let byDay = dates.compare(dueA, dueB)
+      if byDay != 0 {
+        return byDay
+      }
+    }
+    let rank = priorityRank(b.priority) - priorityRank(a.priority)
+    if rank != 0 {
+      return rank
+    }
+  }
+  // Tasks made at the same moment keep their order.
+  return a.created - b.created
+}
+
+/// Every tag of the tasks, sorted and without repeats.
+export fn allTags(list: [Task]) -> [string] {
+  let tags: [string] = []
+  for task in list {
+    for tag in task.tags {
+      tags = append(tags, tag)
+    }
+  }
+  return sort(unique(tags))
+}

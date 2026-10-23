@@ -1,0 +1,60 @@
+// The lines of the activity, and the week counted from them.
+
+use "../src/activity.vey" as activity
+use "../src/dates.vey" as dates
+
+test("a line holds what was done and when", fn() {
+  let entry = activity.make("id-1", "task-created", "Write the report", 1000)
+  assertEquals(entry.id, "id-1")
+  assertEquals(entry.kind, "task-created")
+  assertEquals(entry.text, "Write the report")
+  assertEquals(entry.at, 1000)
+})
+
+test("a new line goes to the front", fn() {
+  let first = activity.make("a", "task-created", "One", 1000)
+  let lines = activity.add([first], "note-created", "Two", 2000)
+  assertEquals(len(lines), 2)
+  assertEquals(lines[0].text, "Two")
+  assertEquals(lines[1].text, "One")
+})
+
+test("the history does not grow without a bound", fn() {
+  let lines: [activity.Entry] = []
+  repeat activity.KEEP + 20 {
+    lines = activity.add(lines, "task-created", "A line", 1000)
+  }
+  assertEquals(len(lines), activity.KEEP)
+})
+
+test("the board knows the kinds it writes and refuses others", fn() {
+  assert(activity.isKnown("task-created"), "the board writes this one")
+  assert(activity.isKnown("note-deleted"), "and this one")
+  assert(!activity.isKnown("something-else"), "a strange kind is not known")
+})
+
+test("the week counts the lines of each day and keeps empty days", fn() {
+  let now = time.now()
+  let today = dates.today(now)
+  let yesterday = dates.addDays(today, -1)
+  // Two lines of today.
+  let lines = activity.add([], "task-created", "a", now)
+  lines = activity.add(lines, "task-created", "b", now)
+  let week = activity.perDay(lines, today, 7)
+  assertEquals(len(week), 7)
+  assertEquals(week[6].day, today)
+  assertEquals(week[6].count, 2)
+  assertEquals(week[5].day, yesterday)
+  assertEquals(week[5].count, 0)
+  assertEquals(week[0].day, dates.addDays(today, -6))
+})
+
+test("the recent lines are the first ones, at most", fn() {
+  let lines: [activity.Entry] = []
+  for index in 0..10 {
+    lines = activity.add(lines, "task-created", "Line " + str(index), 1000 + index)
+  }
+  assertEquals(len(activity.recent(lines, 3)), 3)
+  assertEquals(activity.recent(lines, 3)[0].text, "Line 9")
+  assertEquals(len(activity.recent(lines, 100)), 10)
+})

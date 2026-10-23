@@ -1,0 +1,108 @@
+// The words that tell a time in a short way.
+//
+// The moments of the board are epoch times, which are numbers, and the
+// due days are days such as "2026-10-23". Everything here turns those
+// into the words a list shows: "3h ago", "Tomorrow", "Fri, Oct 23".
+
+use "./dates.vey" as dates
+
+/// A moment as "3h ago", "just now", or the day when it is further away.
+export fn ago(at: number, now: number) -> string {
+  let seconds = math.floor((now - at) / 1000)
+  if seconds < 0 {
+    return "just now"
+  }
+  if seconds < 60 {
+    return "just now"
+  }
+  let minutes = math.floor(seconds / 60)
+  if minutes < 60 {
+    return "{minutes}m ago"
+  }
+  let hours = math.floor(minutes / 60)
+  if hours < 24 {
+    return "{hours}h ago"
+  }
+  let days = math.floor(hours / 24)
+  if days < 7 {
+    return "{days}d ago"
+  }
+  return shortDate(at)
+}
+
+/// A moment as "Oct 23", with the year when it is not this one. The
+/// month of `intl.monthName` counts from zero, so the month of a date
+/// part is one less.
+export fn shortDate(at: number) -> string {
+  let parts = date.parts(at)
+  let month = firstLetters(intl.monthName(parts.month - 1, "en-US"), 3)
+  let thisYear = date.parts(time.now()).year
+  if parts.year == thisYear {
+    return "{month} {parts.day}"
+  }
+  return "{month} {parts.day}, {parts.year}"
+}
+
+/// A moment as "14:05".
+export fn clock(at: number) -> string {
+  return date.format(at, "HH:mm")
+}
+
+/// A day as "Fri, Oct 23".
+export fn dayLabel(day: string) -> string {
+  let weekday = dates.weekday(day)
+  let month = int(slice(day, 5, 7))
+  let dayNumber = int(slice(day, 8, 10))
+  let monthName = firstLetters(intl.monthName(month - 1, "en-US"), 3)
+  return "{intl.dayName(weekday, "en-US")}, {monthName} {dayNumber}"
+}
+
+/// The first letters of a text.
+fn firstLetters(text: string, count: number) -> string {
+  if len(text) <= count {
+    return text
+  }
+  return slice(text, 0, count)
+}
+
+/// How a due day stands to today: "Overdue", "Today", "Tomorrow", or the
+/// number of days.
+export fn dueWords(due: string, today: string) -> string {
+  let days = dates.daysUntil(today, due)
+  if days < 0 {
+    return "Overdue"
+  }
+  if days == 0 {
+    return "Today"
+  }
+  if days == 1 {
+    return "Tomorrow"
+  }
+  if days < 30 {
+    return "In {days} days"
+  }
+  return dayLabel(due)
+}
+
+/// The word for a count: "1 task", "3 tasks".
+export fn plural(count: number, word: string) -> string {
+  if count == 1 {
+    return "{count} {word}"
+  }
+  return "{count} {word}s"
+}
+
+/// A query address from the fields of a filter. Fields that are empty
+/// are left out, so that an address stays as short as it can be.
+export fn qs(fields: [{ name: string, value: string }]) -> string {
+  let parts: [string] = []
+  for field in fields {
+    if field.value != "" {
+      parts = append(parts, "{url.encode(field.name)}={url.encode(field.value)}")
+    }
+  }
+  if len(parts) == 0 {
+    return ""
+  }
+  return "?" + join(parts, "&")
+}

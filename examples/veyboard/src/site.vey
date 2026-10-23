@@ -1,0 +1,515 @@
+// The parts the pages are built from.
+//
+// Everything here is plain markup that a server may render: no signal, no
+// script, no click handler that does nothing. A form sends itself, a link
+// goes somewhere, and the state of the board lives on the server.
+//
+// The values a component shows are computed by the plain functions next
+// to it and read where the markup needs them. A component keeps no value
+// of its own, which is what makes every page a plain function of its
+// data.
+
+use "./dates.vey" as dates
+use "./notes.vey" as notes
+use "./format.vey" as format
+
+/// One of two words, picked by a condition. The markup has no ternary,
+/// so the classes of an element are picked like this. The word that is
+/// not picked may be nothing at all, which leaves an attribute out of
+/// the page.
+export fn pick(condition: bool, whenTrue: string, whenFalse: string | null) -> string | null {
+  if condition {
+    return whenTrue
+  }
+  return whenFalse
+}
+
+/// The frame of a page: the side to choose with, and the main to work
+/// in. The head of the document is written by the server, around this.
+export component Shell({ active, flash, content }) {
+  div.app {
+    Sidebar active=active
+    main.main {
+      Flash flash=flash
+      content
+    }
+  }
+}
+
+/// The side of the page: who the board is for, and the way to the pages.
+export component Sidebar(active: string) {
+  aside.side {
+    a.brand href="/" {
+      img.brand-mark src="/logo.svg" alt="" width="28" height="28"
+      span { "Veyboard" }
+    }
+    nav.nav aria-label="Pages" {
+      NavItem href="/" label="Dashboard" active=active name="dash"
+      NavItem href="/tasks" label="Tasks" active=active name="tasks"
+      NavItem href="/notes" label="Notes" active=active name="notes"
+      NavItem href="/activity" label="Activity" active=active name="activity"
+    }
+    div.side-actions {
+      a.btn.btn-primary href="/tasks/new" { "New task" }
+      a.btn href="/notes/new" { "New note" }
+    }
+    p.side-foot { "A single-user board. Everything stays on this machine." }
+  }
+}
+
+/// One line of the side.
+export component NavItem({ href, label, active, name }) {
+  a.nav-item class={pick(active == name, "is-active", "")} href=href aria-current={pick(active == name, "page", null)} {
+    span { label }
+  }
+}
+
+/// The message of the last thing that was done, or of the one that went
+/// wrong.
+export component Flash(flash) {
+  if flash != null {
+    p.flash class={pick(flash.kind == "ok", "is-ok", "is-bad")} role="status" {
+      flash.text
+    }
+  }
+}
+
+/// One number of the dashboard, with the words around it.
+export component StatTile({ label, value, note, tone }) {
+  div.stat class=tone {
+    span.stat-value { str(value) }
+    span.stat-label { label }
+    if note != "" {
+      span.stat-note { note }
+    }
+  }
+}
+
+/// The priority of a task, as a small badge.
+export component PriorityBadge(priority: string) {
+  span.pri class={"pri-" + priority} { priorityLabel(priority) }
+}
+
+/// The words of a priority.
+fn priorityLabel(priority: string) -> string {
+  return match priority {
+    "high" => "High",
+    "low" => "Low",
+    _ => "Medium",
+  }
+}
+
+/// The due day of a task, in words. Never a colour alone.
+export component DueChip({ due, today, done }) {
+  if dueLabel(due, today, done) != "" {
+    span.due class={dueClass(due, today, done)} {
+      dueLabel(due, today, done)
+    }
+  }
+}
+
+/// The words of a due day: nothing for a task that is done and has no
+/// day, "No date" for one that waits.
+fn dueLabel(due: string | null, today: string, done: bool) -> string {
+  if due == null {
+    if done {
+      return ""
+    }
+    return "No date"
+  }
+  return format.dueWords(due, today)
+}
+
+/// The class of a due day: only a day that has passed is marked.
+fn dueClass(due: string | null, today: string, done: bool) -> string {
+  if due == null {
+    return "due-none"
+  }
+  if done {
+    return ""
+  }
+  if dates.compare(due, today) < 0 {
+    return "is-overdue"
+  }
+  return ""
+}
+
+/// The tags of a thing, each one a way to filter the tasks by it.
+export component TagList(tags: [string], base: string) {
+  if len(tags) > 0 {
+    span.tags {
+      for tag in tags {
+        a.tag href={base + "?tag=" + url.encode(tag)} { tag }
+      }
+    }
+  }
+}
+
+/// One task of a list.
+export component TaskRow({ task, today, back }) {
+  li.task class={pick(task.done, "is-done", "")} {
+    form.toggle method="post" action={"/tasks/" + task.id + "/toggle"} {
+      input type="hidden" name="back" value=back
+      button.check type="submit" aria-pressed={pick(task.done, "true", "false")} aria-label={pick(task.done, "Reopen", "Mark done") + ": " + task.title} {
+        if task.done {
+          svg.icon viewBox="0 0 16 16" aria-hidden="true" {
+            path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          }
+        }
+      }
+    }
+    div.task-body {
+      a.task-title href={"/tasks/" + task.id + "/edit?back=" + url.encode(back)} { task.title }
+      div.task-meta {
+        PriorityBadge(task.priority)
+        DueChip due=task.due today=today done=task.done
+        TagList(task.tags, "/tasks")
+        if doneLabel(task.completed) != "" {
+          span.meta-text { doneLabel(task.completed) }
+        }
+      }
+    }
+    div.task-actions {
+      a.row-link href={"/tasks/" + task.id + "/edit?back=" + url.encode(back)} { "Edit" }
+      a.row-link.row-danger href={"/tasks/" + task.id + "/delete?back=" + url.encode(back)} { "Delete" }
+    }
+  }
+}
+
+/// The words of the moment a task was finished.
+fn doneLabel(at: number | null) -> string {
+  if at == null {
+    return ""
+  }
+  return "Done " + format.shortDate(at)
+}
+
+/// A note of the list of notes.
+export component NoteCard({ note, taskTitle, now }) {
+  li.note class={pick(note.pinned, "is-pinned", "")} {
+    div.note-head {
+      a.note-title href={"/notes/" + note.id + "/edit"} { note.title }
+      if note.pinned {
+        span.pin-badge { "Pinned" }
+      }
+    }
+    if notes.excerpt(note, 180) != "" {
+      p.note-excerpt { notes.excerpt(note, 180) }
+    }
+    div.note-meta {
+      TagList(note.tags, "/notes")
+      if taskTitle != "" {
+        a.note-task href="/tasks" { "For: " + taskTitle }
+      }
+      span.meta-text { "Edited " + format.ago(note.updated, now) }
+    }
+  }
+}
+
+/// What a page says when there is nothing to show, and the way out of
+/// the emptiness.
+export component EmptyState({ title, body, action, actionHref }) {
+  div.empty {
+    svg.empty-icon viewBox="0 0 24 24" aria-hidden="true" {
+      rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"
+      path d="M8 9.5h8M8 13.5h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+    }
+    h3 { title }
+    p { body }
+    if action != "" {
+      a.btn.btn-primary href=actionHref { action }
+    }
+  }
+}
+
+/// The quick way to add a task from the dashboard, and the way to a
+/// note from the same card.
+export component QuickAdd() {
+  section.card.quick-add {
+    h2 { "Quick add" }
+    form.quick-form method="post" action="/tasks" {
+      input type="hidden" name="back" value="/"
+      div.field {
+        label.field-label {
+          span { "Task" }
+          input.input name="title" type="text" placeholder="What has to be done?" {
+          }
+        }
+      }
+      div.field {
+        label.field-label {
+          span { "Priority" }
+          select.input name="priority" {
+            for choice in priorityOptions() {
+              option value=choice.value selected={choice.value == "medium"} { choice.label }
+            }
+          }
+        }
+      }
+      button.btn.btn-primary type="submit" { "Add task" }
+    }
+    p.quick-note {
+      "A task is added at once. A note is one click away: "
+      a href="/notes/new" { "write a note" }
+      "."
+    }
+  }
+}
+
+/// A field of a form: the words over the box, the box, and the words
+/// when it did not pass.
+export component TextField({ label, name, value, error, hint, kind }) {
+  div.field class={pick(error != "", "has-error", "")} {
+    label.field-label {
+      span { label }
+      input.input name=name type={pick(kind == "", "text", kind)} value=value aria-invalid={pick(error != "", "true", null)} {
+      }
+    }
+    if hint != "" {
+      span.hint { hint }
+    }
+    if error != "" {
+      span.error role="alert" { error }
+    }
+  }
+}
+
+/// A field with a few choices.
+export component SelectField({ label, name, value, options, error }) {
+  div.field class={pick(error != "", "has-error", "")} {
+    label.field-label {
+      span { label }
+      select.input name=name {
+        for choice in options {
+          option value=choice.value selected={choice.value == value} { choice.label }
+        }
+      }
+    }
+    if error != "" {
+      span.error role="alert" { error }
+    }
+  }
+}
+
+/// The field a long text is written in.
+export component TextareaField({ label, name, value, error, hint }) {
+  div.field class={pick(error != "", "has-error", "")} {
+    label.field-label {
+      span { label }
+      textarea.input name=name rows="12" aria-invalid={pick(error != "", "true", null)} {
+        value
+      }
+    }
+    if hint != "" {
+      span.hint { hint }
+    }
+    if error != "" {
+      span.error role="alert" { error }
+    }
+  }
+}
+
+/// A field with a box to tick.
+export component CheckField({ label, name, checked, hint }) {
+  label.check-field {
+    input type="checkbox" name=name checked=checked value="yes"
+    span { label }
+    if hint != "" {
+      span.hint { hint }
+    }
+  }
+}
+
+/// The priorities of a task, as the choices of the form.
+export fn priorityOptions() -> [{ value: string, label: string }] {
+  return [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  ]
+}
+
+/// The ways a list of tasks may be seen.
+export fn statusOptions() -> [{ value: string, label: string }] {
+  return [
+  { value: "open", label: "Open" },
+  { value: "done", label: "Done" },
+  { value: "all", label: "All" },
+  ]
+}
+
+/// The ways a list of tasks may be filtered by priority.
+export fn filterPriorityOptions() -> [{ value: string, label: string }] {
+  return [
+  { value: "", label: "Any" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  ]
+}
+
+/// The ways a list of tasks may be sorted.
+export fn sortOptions() -> [{ value: string, label: string }] {
+  return [
+  { value: "due", label: "Deadline" },
+  { value: "priority", label: "Priority" },
+  { value: "created", label: "Newest" },
+  ]
+}
+
+/// The form a task is made with, and edited with.
+export component TaskForm({ action, task, values, errors, back }) {
+  form.panel method="post" action=action {
+    input type="hidden" name="back" value=back
+    TextField label="Title" name="title" value=values.title error={errText(errors, "title")} hint="What has to be done, in a few words." kind="text"
+    div.field-row {
+      SelectField label="Priority" name="priority" value=values.priority options=priorityOptions() error={errText(errors, "priority")}
+      TextField label="Due date" name="due" value=values.due error={errText(errors, "due")} hint="A day such as 2026-10-23, or empty." kind="date"
+    }
+    TextField label="Tags" name="tags" value=values.tags error={errText(errors, "tags")} hint="Comma-separated, such as work, home." kind="text"
+    div.form-actions {
+      button.btn.btn-primary type="submit" { pick(task == null, "Create task", "Save changes") }
+      a.btn href=back { "Cancel" }
+    }
+  }
+}
+
+/// The form a note is made with, and edited with.
+export component NoteForm({ action, note, values, errors, taskOptions, back }) {
+  form.panel method="post" action=action {
+    input type="hidden" name="back" value=back
+    TextField label="Title" name="title" value=values.title error={errText(errors, "title")} hint="" kind="text"
+    TextareaField label="Body" name="body" value=values.body error={errText(errors, "body")} hint="Plain lines. The first line is shown in lists."
+    div.field-row {
+      TextField label="Tags" name="tags" value=values.tags error={errText(errors, "tags")} hint="Comma-separated." kind="text"
+      SelectField label="Linked task" name="taskId" value=values.taskId options=taskOptions error={errText(errors, "taskId")}
+    }
+    CheckField label="Pin this note to the top" name="pinned" checked=values.pinned hint=""
+    div.form-actions {
+      button.btn.btn-primary type="submit" { pick(note == null, "Create note", "Save changes") }
+      a.btn href=back { "Cancel" }
+    }
+  }
+}
+
+/// The message of a field of a form, looked up in the messages.
+fn errText(errors, name: string) -> string {
+  if errors == null {
+    return ""
+  }
+  let value = errors[name]
+  if value == null or value == undefined {
+    return ""
+  }
+  return str(value)
+}
+
+/// The card that asks before something is thrown away.
+export component ConfirmCard({ question, detail, action, label, back }) {
+  div.confirm {
+    h2 { question }
+    p.confirm-detail { detail }
+    form method="post" action=action {
+      input type="hidden" name="back" value=back
+      div.form-actions {
+        button.btn.btn-danger type="submit" { label }
+        a.btn href=back { "Keep it" }
+      }
+    }
+  }
+}
+
+/// The shape of one bar of the week.
+export type Day = { day: string, count: number }
+
+/// The counts of the last days, as small bars. The numbers are there in
+/// words as well, so the bars are never the only thing to go by.
+export component WeekBars(days: [Day]) {
+  div.week {
+    for entry in days {
+      div.week-col title={entry.day + ": " + format.plural(entry.count, "action")} {
+        span.week-count { str(entry.count) }
+        div.week-bar class={pick(entry.count == 0, "is-zero", "")} style={barHeight(entry.count, peak(days))} {
+        }
+        span.week-day { slice(intl.dayName(dates.weekday(entry.day), "en-US"), 0, 3) }
+      }
+    }
+  }
+  p.week-total { "The last " + str(len(days)) + " days hold " + format.plural(totalOf(days), "action") + "." }
+}
+
+/// The highest count of the days.
+fn peak(days: [Day]) -> number {
+  let highest = 0
+  for entry in days {
+    if entry.count > highest {
+      highest = entry.count
+    }
+  }
+  return highest
+}
+
+fn barHeight(count: number, highest: number) -> string {
+  let height = 8
+  if highest > 0 {
+    height = 8 + math.round((count * 84) / highest)
+  }
+  return "height: " + str(height) + "px"
+}
+
+fn totalOf(days: [Day]) -> number {
+  let total = 0
+  for entry in days {
+    total += entry.count
+  }
+  return total
+}
+
+/// One line of the activity.
+export component ActivityRow(entry) {
+  li.activity-row {
+    span.activity-kind class={"kind-" + entry.kind} { kindLabel(entry.kind) }
+    span.activity-text { entry.text }
+    span.meta-text { format.clock(entry.at) }
+  }
+}
+
+/// The kind of a line, in words instead of the name of the record.
+fn kindLabel(kind: string) -> string {
+  return replace(kind, "-", " ")
+}
+
+/// The heading over the content of a page.
+export component PageHead({ title, note, action, actionHref }) {
+  div.page-head {
+    div {
+      h1 { title }
+      if note != "" {
+        p.page-note { note }
+      }
+    }
+    if action != "" {
+      a.btn.btn-primary href=actionHref { action }
+    }
+  }
+}
+
+/// The bar over a list: search, filters, and the way to sort.
+export component Toolbar({ action, query, status, priority, sort, tag }) {
+  form.toolbar method="get" action=action {
+    div.search {
+      label {
+        span.sr-only { "Search" }
+        input.input name="q" type="search" value=query placeholder="Search titles…" {
+        }
+      }
+    }
+    if action == "/tasks" {
+      SelectField label="Show" name="status" value=status options=statusOptions() error=""
+      SelectField label="Priority" name="priority" value=priority options=filterPriorityOptions() error=""
+    }
+    SelectField label="Sort by" name="sort" value=sort options=sortOptions() error=""
+    input type="hidden" name="tag" value=tag
+    button.btn type="submit" { "Apply" }
+  }
+}

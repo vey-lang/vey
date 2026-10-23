@@ -1,0 +1,591 @@
+// The server of Veyboard: the routes that make the board work.
+//
+// The handlers here are thin on purpose. They read what a request holds,
+// ask the domain modules for the change, hand the new data to the store,
+// and answer with a page or a redirect. The rules of the board itself
+// live in `tasks.vey`, `notes.vey` and `activity.vey`, the checking of
+// what a form sends lives in `validate.vey`, and the file is only
+// touched by `store.vey`.
+//
+// Every server keeps its board in a value of its own, made when the
+// server is made and reached by the handlers around it. Two servers may
+// therefore run side by side, each over its own folder, which is what a
+// test does. Node runs one request of a server at a time, and every
+// change is written before the answer is sent, so two changes of one
+// board never tread on each other.
+
+use "./dates.vey" as dates
+use "./tasks.vey" as tasks
+use "./notes.vey" as notes
+use "./activity.vey" as activity
+use "./validate.vey" as validate
+use "./store.vey" as data
+use "./pages.vey" as pages
+use "./site.vey" as site
+
+/// The stylesheet of the pages, read once.
+let cssText = ""
+
+/// The server of the board: the data is read, the routes are written,
+/// and the server is handed back, not started. The caller starts it, and
+/// a test may start it on a port of its own.
+export fn create(dir: string, port: number) {
+  let loaded = data.load(dir, time.now())
+  for message in loaded.messages {
+    print("veyboard: " + message)
+  }
+  cssText = readStyles()
+
+  // The board of this server: the folder it is kept in, and the data as
+  // it stands. The handlers below close over this value, so a second
+  // server has a board of its own.
+  let state = { dir: dir, data: loaded.data }
+
+  let app = server(port, { bodyLimit: 131072, exposeErrors: false })
+  app.use(security())
+  // A form of another site may not post to this one.
+  app.use(fn(req, res, next) {
+    if req.method == "POST" {
+      let origin = req.get("Origin")
+      if origin != null {
+        if origin != "" and origin != req.protocol + "://" + req.host {
+          res.status(403)
+          res.send("This form came from another site and was refused.")
+          return
+        }
+      }
+    }
+    next()
+  })
+
+  writeRoutes(app, state)
+
+  app.notFound(fn(req) {
+    return notFoundPage(req.path)
+  })
+
+  // The files of `public/` — the marks of the site — are served as they
+  // are, before the routes.
+  app.static("public")
+  return app
+}
+
+/// Every route of the board.
+fn writeRoutes(app, state) {
+  // The stylesheet of the pages. A node build keeps no collected
+  // stylesheet, so the server hands the file of the project out itself.
+  app.get("/styles.css", fn() {
+    return response(cssText, 200, { "Content-Type": "text/css; charset=utf-8" })
+  })
+
+  // -- the dashboard -------------------------------------------------
+
+  app.get("/", fn() {
+    let now = time.now()
+    let today = dates.today(now)
+    let content = pages.Dashboard({ data: state.data, today: today, now: now })
+    return htmlOf("Dashboard", "dash", takeFlash(), content)
+  })
+
+  // -- the tasks -----------------------------------------------------
+
+  app.get("/tasks", fn(req) {
+    let filters = readFilters(req.query)
+    let today = dates.today(time.now())
+    let content = pages.TasksList({ data: state.data, filters: filters, today: today })
+    return htmlOf("Tasks", "tasks", takeFlash(), content)
+  })
+
+  app.get("/tasks/new", fn() {
+    let values = { title: "", priority: "medium", due: "", tags: "" }
+    let content = pages.TaskPane({ task: null, values: values, errors: {}, back: "/tasks" })
+    return htmlOf("New task", "tasks", takeFlash(), content)
+  })
+
+  app.post("/tasks", fn(req) {
+    let back = validate.back(fieldText(req.body, "back"))
+    let parsed = taskFields(req.body)
+    if len(keys(parsed.problems)) > 0 {
+      let content = pages.TaskPane({ task: null, values: parsed.values, errors: parsed.problems, back: back })
+      return htmlOf("New task", "tasks", null, content)
+    }
+    let now = time.now()
+    let task = tasks.make(uuid(), parsed.fields, now)
+    let next = {
+      ...state.data,
+      tasks: append(state.data.tasks, task),
+      activity: activity.add(state.data.activity, "task-created", task.title, now),
+    }
+    return commit(state, next, "Task created", back)
+  })
+
+  app.get('/tasks/{id:uuid}/edit', fn(req) {
+    let task = tasks.byId(state.data.tasks, req.params.id)
+    if task == null {
+      return notFoundPage("/tasks/" + req.params.id)
+    }
+    let values = {
+      title: task.title,
+      priority: task.priority,
+      due: dueText(task.due),
+      tags: join(task.tags, ", "),
+    }
+    let content = pages.TaskPane({ task: task, values: values, errors: {}, back: backParam(req) })
+    return htmlOf("Edit task", "tasks", takeFlash(), content)
+  })
+
+  app.post('/tasks/{id:uuid}', fn(req) {
+    let task = tasks.byId(state.data.tasks, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if task == null {
+      return notFoundPage("/tasks/" + req.params.id)
+    }
+    let parsed = taskFields(req.body)
+    if len(keys(parsed.problems)) > 0 {
+      let content = pages.TaskPane({ task: task, values: parsed.values, errors: parsed.problems, back: back })
+      return htmlOf("Edit task", "tasks", null, content)
+    }
+    let now = time.now()
+    let changed = tasks.revise(task, parsed.fields, now)
+    let next = {
+      ...state.data,
+      tasks: tasks.updated(state.data.tasks, changed),
+      activity: activity.add(state.data.activity, "task-edited", changed.title, now),
+    }
+    return commit(state, next, "Task saved", back)
+  })
+
+  app.post('/tasks/{id:uuid}/toggle', fn(req) {
+    let task = tasks.byId(state.data.tasks, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if task == null {
+      return notFoundPage("/tasks/" + req.params.id)
+    }
+    let now = time.now()
+    let changed = tasks.setDone(task, !task.done, now)
+    let kind = "task-reopened"
+    let word = "Task reopened"
+    if changed.done {
+      kind = "task-completed"
+      word = "Task completed"
+    }
+    let next = {
+      ...state.data,
+      tasks: tasks.updated(state.data.tasks, changed),
+      activity: activity.add(state.data.activity, kind, changed.title, now),
+    }
+    return commit(state, next, word, back)
+  })
+
+  app.get('/tasks/{id:uuid}/delete', fn(req) {
+    let task = tasks.byId(state.data.tasks, req.params.id)
+    if task == null {
+      return notFoundPage("/tasks/" + req.params.id)
+    }
+    let content = pages.TaskDeletePane({ task: task, back: backParam(req) })
+    return htmlOf("Delete task", "tasks", takeFlash(), content)
+  })
+
+  app.post('/tasks/{id:uuid}/delete', fn(req) {
+    let task = tasks.byId(state.data.tasks, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if task == null {
+      return notFoundPage("/tasks/" + req.params.id)
+    }
+    let now = time.now()
+    let next = {
+      ...state.data,
+      tasks: tasks.without(state.data.tasks, task.id),
+      activity: activity.add(state.data.activity, "task-deleted", task.title, now),
+    }
+    return commit(state, next, "Task deleted", back)
+  })
+
+  // A task that is only looked at is turned around here.
+  app.get('/tasks/{id:uuid}/toggle', fn() {
+    return methodNotAllowed("POST")
+  })
+
+  // -- the notes -----------------------------------------------------
+
+  app.get("/notes", fn(req) {
+    let query = validate.param(req.query, "q", "")
+    let content = pages.NotesList({ data: state.data, query: query, now: time.now() })
+    return htmlOf("Notes", "notes", takeFlash(), content)
+  })
+
+  app.get("/notes/new", fn() {
+    let values = { title: "", body: "", tags: "", taskId: "", pinned: false }
+    let content = pages.NotePane({
+      note: null,
+      values: values,
+      errors: {},
+      taskOptions: taskOptions(state),
+      back: "/notes",
+    })
+    return htmlOf("New note", "notes", takeFlash(), content)
+  })
+
+  app.post("/notes", fn(req) {
+    let back = validate.back(fieldText(req.body, "back"))
+    let parsed = noteFields(req.body, state.data.tasks)
+    if len(keys(parsed.problems)) > 0 {
+      let content = pages.NotePane({
+        note: null,
+        values: parsed.values,
+        errors: parsed.problems,
+        taskOptions: taskOptions(state),
+        back: back,
+      })
+      return htmlOf("New note", "notes", null, content)
+    }
+    let now = time.now()
+    let note = notes.make(uuid(), parsed.fields, now)
+    if parsed.pinned {
+      note = notes.setPinned(note, true, now)
+    }
+    let next = {
+      ...state.data,
+      notes: append(state.data.notes, note),
+      activity: activity.add(state.data.activity, "note-created", note.title, now),
+    }
+    return commit(state, next, "Note created", back)
+  })
+
+  app.get('/notes/{id:uuid}/edit', fn(req) {
+    let note = notes.byId(state.data.notes, req.params.id)
+    if note == null {
+      return notFoundPage("/notes/" + req.params.id)
+    }
+    let values = {
+      title: note.title,
+      body: note.body,
+      tags: join(note.tags, ", "),
+      taskId: idText(note.taskId),
+      pinned: note.pinned,
+    }
+    let content = pages.NotePane({
+      note: note,
+      values: values,
+      errors: {},
+      taskOptions: taskOptions(state),
+      back: backParam(req),
+    })
+    return htmlOf("Edit note", "notes", takeFlash(), content)
+  })
+
+  app.post('/notes/{id:uuid}', fn(req) {
+    let note = notes.byId(state.data.notes, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if note == null {
+      return notFoundPage("/notes/" + req.params.id)
+    }
+    let parsed = noteFields(req.body, state.data.tasks)
+    if len(keys(parsed.problems)) > 0 {
+      let content = pages.NotePane({
+        note: note,
+        values: parsed.values,
+        errors: parsed.problems,
+        taskOptions: taskOptions(state),
+        back: back,
+      })
+      return htmlOf("Edit note", "notes", null, content)
+    }
+    let now = time.now()
+    let changed = notes.revise(note, parsed.fields, now)
+    if parsed.pinned != changed.pinned {
+      changed = notes.setPinned(changed, parsed.pinned, now)
+    }
+    let next = {
+      ...state.data,
+      notes: notes.updated(state.data.notes, changed),
+      activity: activity.add(state.data.activity, "note-edited", changed.title, now),
+    }
+    return commit(state, next, "Note saved", back)
+  })
+
+  app.post('/notes/{id:uuid}/pin', fn(req) {
+    let note = notes.byId(state.data.notes, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if note == null {
+      return notFoundPage("/notes/" + req.params.id)
+    }
+    let now = time.now()
+    let changed = notes.setPinned(note, !note.pinned, now)
+    let kind = "note-unpinned"
+    let word = "Note unpinned"
+    if changed.pinned {
+      kind = "note-pinned"
+      word = "Note pinned"
+    }
+    let next = {
+      ...state.data,
+      notes: notes.updated(state.data.notes, changed),
+      activity: activity.add(state.data.activity, kind, changed.title, now),
+    }
+    return commit(state, next, word, back)
+  })
+
+  app.get('/notes/{id:uuid}/delete', fn(req) {
+    let note = notes.byId(state.data.notes, req.params.id)
+    if note == null {
+      return notFoundPage("/notes/" + req.params.id)
+    }
+    let content = pages.NoteDeletePane({ note: note, back: backParam(req) })
+    return htmlOf("Delete note", "notes", takeFlash(), content)
+  })
+
+  app.post('/notes/{id:uuid}/delete', fn(req) {
+    let note = notes.byId(state.data.notes, req.params.id)
+    let back = validate.back(fieldText(req.body, "back"))
+    if note == null {
+      return notFoundPage("/notes/" + req.params.id)
+    }
+    let now = time.now()
+    let next = {
+      ...state.data,
+      notes: notes.without(state.data.notes, note.id),
+      activity: activity.add(state.data.activity, "note-deleted", note.title, now),
+    }
+    return commit(state, next, "Note deleted", back)
+  })
+
+  // -- the activity --------------------------------------------------
+
+  app.get("/activity", fn() {
+    let today = dates.today(time.now())
+    let content = pages.ActivityPane({ data: state.data, today: today })
+    return htmlOf("Activity", "activity", takeFlash(), content)
+  })
+}
+
+/// The new data of the board, kept and answered for. A change that the
+/// store refuses is taken back, so the memory and the file never tell
+/// different stories.
+fn commit(state, next, word: string, back: string) {
+  let previous = state.data
+  state.data = next
+  let saved = data.save(state.dir, next)
+  if saved.ok {
+    session.set("flash", { kind: "ok", text: word })
+    return redirect(back)
+  }
+  state.data = previous
+  session.set("flash", { kind: "bad", text: "The change was not kept: " + str(saved.error) })
+  return redirect(back)
+}
+
+/// The message of the last change, for the page that follows the
+/// redirect. It is taken once and put away.
+fn takeFlash() {
+  let flash = session.get("flash")
+  if flash == null {
+    return null
+  }
+  session.set("flash", null)
+  return flash
+}
+
+/// A whole page as an answer.
+fn htmlOf(title: string, active: string, flash, content) {
+  return response(document(title, active, flash, content), 200, { "Content-Type": "text/html; charset=utf-8" })
+}
+
+/// The page of an address that does not exist.
+fn notFoundPage(path: string) {
+  let content = pages.NotFoundPane(path)
+  return response(document("Not found", "", null, content), 404, { "Content-Type": "text/html; charset=utf-8" })
+}
+
+/// The answer to a request of a method that the address does not take.
+fn methodNotAllowed(allow: string) {
+  return response(
+  "This address takes " + allow + " and nothing else.",
+  405,
+  { "Allow": allow, "Content-Type": "text/plain; charset=utf-8" }
+  )
+}
+
+/// The whole document of a page: the head the markup of Vey may not
+/// write (a `body` tag is not a tag of the markup), and the frame of the
+/// page inside it. The title is escaped the same way every other text of
+/// a page is.
+fn document(title: string, active: string, flash, content) {
+  let shell = html(site.Shell({ active: active, flash: flash, content: content }))
+  return "<!doctype html>\n" +
+  "<html lang=\"en\">\n" +
+  "<head>\n" +
+  "<meta charset=\"utf-8\">\n" +
+  "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+  "<title>" + html(title + " · Veyboard") + "</title>\n" +
+  "<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\">\n" +
+  "<link rel=\"stylesheet\" href=\"/styles.css\">\n" +
+  "</head>\n" +
+  "<body>\n" + shell + "\n</body>\n" +
+  "</html>\n"
+}
+
+/// The text of a field of a form, whatever the form held.
+fn fieldText(body, name: string) -> string {
+  if body == null {
+    return ""
+  }
+  return validate.asText(body[name])
+}
+
+/// The page to go back to, from the field of a form.
+fn backParam(req) -> string {
+  return validate.back(req.query.back)
+}
+
+/// A due day for a field: none is an empty field.
+fn dueText(due: string | null) -> string {
+  if due == null {
+    return ""
+  }
+  return due
+}
+
+/// An id for a field: none is an empty field.
+fn idText(id: string | null) -> string {
+  if id == null {
+    return ""
+  }
+  return id
+}
+
+/// The fields of the task form, as they came and as they check out.
+fn taskFields(body) {
+  let values = {
+    title: fieldText(body, "title"),
+    priority: fieldText(body, "priority"),
+    due: fieldText(body, "due"),
+    tags: fieldText(body, "tags"),
+  }
+  let problems = {}
+  let title = validate.checkTitle(values.title)
+  let priority = validate.priority(values.priority)
+  let due = validate.due(values.due)
+  let tags = validate.tags(values.tags)
+  if !title.ok {
+    problems.title = title.error
+  }
+  if !priority.ok {
+    problems.priority = priority.error
+  }
+  if !due.ok {
+    problems.due = due.error
+  }
+  if !tags.ok {
+    problems.tags = tags.error
+  }
+  if len(keys(problems)) > 0 {
+    return { values: values, problems: problems, fields: null, pinned: false }
+  }
+  let fields = { title: title.value, priority: priority.value, due: due.value, tags: tags.value }
+  return { values: values, problems: problems, fields: fields, pinned: false }
+}
+
+/// The fields of the note form, as they came and as they check out.
+fn noteFields(body, known: [tasks.Task]) {
+  let pinned = false
+  if fieldText(body, "pinned") != "" {
+    pinned = true
+  }
+  let values = {
+    title: fieldText(body, "title"),
+    body: fieldText(body, "body"),
+    tags: fieldText(body, "tags"),
+    taskId: fieldText(body, "taskId"),
+    pinned: pinned,
+  }
+  let problems = {}
+  let title = validate.checkTitle(values.title)
+  let text = validate.body(values.body)
+  let tags = validate.tags(values.tags)
+  let task = validate.taskId(values.taskId, known)
+  if !title.ok {
+    problems.title = title.error
+  }
+  if !text.ok {
+    problems.body = text.error
+  }
+  if !tags.ok {
+    problems.tags = tags.error
+  }
+  if !task.ok {
+    problems.taskId = task.error
+  }
+  if len(keys(problems)) > 0 {
+    return { values: values, problems: problems, fields: null, pinned: pinned }
+  }
+  let fields = {
+    title: title.value,
+    body: text.value,
+    tags: tags.value,
+    taskId: task.value,
+  }
+  return { values: values, problems: problems, fields: fields, pinned: pinned }
+}
+
+/// The choices of the field that links a note to a task.
+fn taskOptions(state) {
+  let options = [{ value: "", label: "No task" }]
+  for task in tasks.order(state.data.tasks, "created") {
+    options = append(options, { value: task.id, label: shorten(task.title, 48) })
+  }
+  return options
+}
+
+/// A text made short enough for a choice of a list.
+fn shorten(text: string, max: number) -> string {
+  if len(text) <= max {
+    return text
+  }
+  return slice(text, 0, max) + "…"
+}
+
+/// The state a list of tasks is seen through, from the fields of a
+/// query. A field that is not one of the known ones is fallen back on,
+/// so that a strange address still shows a sane page.
+fn readFilters(query) -> pages.Filters {
+  let status = validate.param(query, "status", "open")
+  if !contains(["open", "done", "all"], status) {
+    status = "open"
+  }
+  let priority = validate.param(query, "priority", "")
+  if !contains(["high", "medium", "low", ""], priority) {
+    priority = ""
+  }
+  let sort = validate.param(query, "sort", "due")
+  if !contains(["due", "priority", "created"], sort) {
+    sort = "due"
+  }
+  let tag = lower(slice(validate.param(query, "tag", ""), 0, 24))
+  let text = slice(validate.param(query, "q", ""), 0, 120)
+  return { status: status, priority: priority, tag: tag, query: text, sort: sort }
+}
+
+/// Whether a list holds a value.
+fn contains(list: [string], value: string) -> bool {
+  for one in list {
+    if one == value {
+      return true
+    }
+  }
+  return false
+}
+
+/// The stylesheet of the pages, read from the project. A program that
+/// cannot read it still runs: the pages stay usable, if plain.
+fn readStyles() -> string {
+  let file = path.join("src", "styles", "site.css")
+  if fs.exists(file) {
+    try {
+      return fs.read(file)
+    } catch {
+      return "body { font-family: system-ui, sans-serif; }"
+    }
+  }
+  return "body { font-family: system-ui, sans-serif; }"
+}
