@@ -15,28 +15,30 @@
 6. **Optional route parametresi sonraki segmenti yanlışlıkla tüketiyordu.** Route matcher artık optional parametreyi önce tüketmeyi dener; kalan desen eşleşmezse parametreyi atlayarak geri döner. Başarısız `(patternIndex, pathIndex)` durumları memoize edilir. Aynı eşleştirici browser, server ve middleware tarafından kullanılır. İki yorumun da geçerli olduğu optional-before-wildcard durumunda önce tüketme kuralı korunur.
 7. **Body limiti aşıldığında request stream'i ve keep-alive bağlantısı bırakılıyordu.** `Content-Length` ön kontrolü ve streaming/chunked aşımında 413 yanıtı hazırlanırken Node response keep-alive dışı işaretleniyor ve `Connection: close` gönderiliyor. Böylece yanıt flush edildikten sonra okunmamış istek gövdesi olan bağlantı güvenle kapatılıyor; saldırgan kontrollü, sonu gelmeyen bir gövdeyi drain etmeye çalışılmıyor.
 8. **Statik dosya servisinde containment kontrolü ile path'i yeniden açma arasında TOCTOU vardı.** Dosya canonical path kontrolünden sonra bir kez açılıyor; `fstat` ile normal dosya ve dosya kimliği doğrulanıyor. Platform destekliyorsa açılmış descriptor'ın `/proc/self/fd` veya `/dev/fd` hedefi root içinde ayrıca doğrulanıyor; `O_NOFOLLOW` mevcutsa kullanılıyor. Tam GET stream'i ile byte-range okumaları aynı açılmış descriptor'ı kullanıyor; HEAD/304/error yollarında descriptor kapatılıyor.
+9. **`res.sendFile` / `res.download` path'i kontrol ettikten sonra yeniden açıyordu.** `stat` ile alınan kimlik açılmış descriptor'ın `fstat` sonucu ile karşılaştırılıyor; yalnızca doğrulanan descriptor metadata, tam gövde ve stream için kullanılıyor. HEAD/error/erken tamamlanma yollarında descriptor kapanıyor; aktif kaynak response finish/close ile durduruluyor ve `drain` gelene kadar pause ediliyor. Stream ilk byte'ı göndermeden önce finish hook'ları çalışıyor. İndirme adlarındaki kontrol karakterleri ve header ayraçları temizleniyor; Unicode adlar ASCII fallback ve RFC 5987 `filename*` ile aktarılıyor.
+10. **Harici HTTP abort sinyali retry tetikleyebiliyordu.** Önceden iptal edilmiş signal fetch'i başlatmıyor; in-flight iptal ve abort edilebilir retry beklemesi yeni denemeyi durduruyor. Genel timeout sonrası futile retry yapılmıyor ve istek tamamlanınca harici signal listener'ı kaldırılıyor.
 
-Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; array/tuple/object/dictionary alias ihlalleri reddedilir ve fresh literal'lar doğrulanır; `mount.update()` statik↔reaktif ve fonksiyon→fonksiyon geçişlerinde DOM, güncel bağımlılıklar ve cleanup doğrulanır; optional route parametreleri constraint/literal/required-parameter/wildcard senaryolarında hem browser hem server tarafında test edilir; body limit aşımlarında 413 sonrası bağlantı kapanışı ve handler'ın çalışmaması test edilir; statik dosya için containment sonrası path swap, stream öncesi symlink swap ve byte-range open swap ayrı ayrı sınanır.
+Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; mutable-container alias ihlalleri ve `mount.update()` lifecycle geçişleri doğrulanır; optional route ve body-limit senaryoları browser/server testleriyle kapsanır; statik servis için containment/path/stream/range symlink yarışları sınanır. `sendFile` için path swap, HEAD descriptor kapanışı, yanıt timeout/finish ve client disconnect sonrası cleanup, `drain` backpressure, session cookie; `download` için kontrol karakteri sanitizasyonu ve Unicode header encoding test edilir. HTTP için pre-abort, in-flight abort, 5xx/network retry backoff iptali, toplam timeout ve listener cleanup doğrulanır.
 
 ## Test ve doğrulama durumu
 
 | Komut | Sonuç |
 |---|---|
-| `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` | **210 geçti, 0 kaldı:** CLI 31, DOM 15, README 4, runtime 86, types 74. |
-| `cargo test --all-targets` | **327 geçti, 0 kaldı.** `main` unit 3, CLI 31, dev 5, DOM 15, lang 62, README 4, regressions 43, runtime 86, server 4, types 74. Önceki `SIGTERM/143` bu çalıştırmada tekrarlanmadı. |
+| `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` | **222 geçti, 0 kaldı:** CLI 31, DOM 15, README 4, runtime 98, types 74. |
+| `cargo test --all-targets` | **339 geçti, 0 kaldı.** `main` unit 3, CLI 31, dev 5, DOM 15, lang 62, README 4, regressions 43, runtime 98, server 4, types 74. Önceki `SIGTERM/143` bu çalıştırmada tekrarlanmadı. |
 | `an_oversized_incomplete_chunked_body_gets_413_and_closes_the_connection` ve declared-length body-limit testi | Geçti: düzeltme öncesi raw TCP repro 413 + `Connection: keep-alive` döndürüp bağlantıyı 1 saniye açık bırakıyordu; düzeltme sonrası 413 + `Connection: close` ve socket kapanışı doğrulanıyor. Declared-length istek de istemci keep-alive talep etse dahi kapatılıyor. |
 | Optional route browser/server regresyonları | Geçti: constrained optional, literal, required-parametre fallback'ı, wildcard skip/consume ve consume-first tie-break doğrulanıyor. |
 | `mount_update_transitions_work_in_headless_chromium_when_available` | Geçti: Vey'in birleştirilmiş runtime kaynağı gerçek Chromium 154 DOM'unda çalıştırıldı; tarayıcı yoksa test açıkça skip eder. |
 | `git diff --check` | Geçti. |
-| `cargo fmt --all -- --check` | Repo genelinde önceden var olan biçim farkları gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. İlgisiz dosyalar topluca yeniden formatlanmadı; yeni body/route testlerinde ek rustfmt farkı kalmadı. |
+| `cargo fmt --all -- --check` | Repo genelinde önceden var olan biçim farkları gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. İlgisiz dosyalar topluca yeniden formatlanmadı; yeni HTTP/sendFile test bloklarında ek rustfmt farkı kalmadı. |
 
-Tip-güvenliği commitleri `5fa2002` ve `800c332`, mount lifecycle düzeltmesi `f3d9967`, ilgili durum raporu `0f39b00`, route düzeltmesi/testleri `33b9269` ve body bağlantı politikası `7a0236f` `main` dalına pushlandı. Route durumu dokümantasyon commit'i `5561d80` de `main`'dedir. Server hedefi kaynak kodu kendi alt sürecini process group üzerinden kapatıyor; SIGTERM’in test çalıştırıcısına ulaşma sebebi ayrıca araştırılmalı.
+Tip-güvenliği commitleri `5fa2002` ve `800c332`, mount lifecycle düzeltmesi `f3d9967`, ilgili durum raporu `0f39b00`, route düzeltmesi/testleri `33b9269` ve body bağlantı politikası `7a0236f` `main` dalına pushlandı. Route durumu dokümantasyon commit'i `5561d80` de `main`'dedir; statik dosya TOCTOU düzeltmesi de `main`'e pushlandı. Server hedefi kaynak kodu kendi alt süreci process group üzerinden kapatıyor; `SIGTERM/143` bu tam-suite çalıştırmasında tekrarlanmadı.
 
 ## Henüz düzeltilmemiş, doğrulanmış yüksek öncelikli bulgular
 
 ### Runtime/server
 
-- Harici abort signal, retries açıksa geçici hata gibi yeniden denenebiliyor (`src/runtime/http.js:313-317`). SSE backpressure da ele alınmıyor (`src/runtime/server.js:817-839`).
+- SSE yanıtlarında yavaş istemcilere karşı backpressure/buffer sınırı politikası hâlâ ele alınmıyor (`src/runtime/server.js:908-922`). HTTP caller abort ve `sendFile`/`download` descriptor yaşam döngüsü regresyonlarla kapatıldı.
 
 ### CLI/LSP ve deploy
 
@@ -50,13 +52,13 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 
 ## Dokümantasyon durumu
 
-`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup ve statik dosya TOCTOU maddeleri regresyon testleriyle kapandı. Kısıtlı generic üye erişimi, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
+`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup, statik dosya TOCTOU, `sendFile`/`download` descriptor yaşam döngüsü ve HTTP caller-abort/retry maddeleri regresyon testleriyle kapandı. SSE backpressure, kısıtlı generic üye erişimi, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
 
 ## Öncelikli sonraki işler
 
 1. LSP rename'i ad metni yerine sembol/kapsam kimliğiyle çözmek; shadowing testi eklemek.
 2. LSP UTF-16 position/URI çözümleme ve `exit`/bozuk frame protokol davranışını düzeltmek.
-3. HTTP caller abort'unu retries'den ayırıp SSE backpressure politikası belirlemek.
+3. SSE backpressure için sınırlı buffer veya yavaş istemciyi kapatma politikası belirlemek ve regresyon testi eklemek.
 4. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
 5. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
 6. Rust format kontrolü için depo sözleşmesini netleştir; önceden var olan repo-geniş format farklarını ayrı değişiklik olarak ele al.

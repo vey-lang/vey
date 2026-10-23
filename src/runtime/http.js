@@ -239,9 +239,33 @@ function veyHttp(ctx) {
     };
   }
 
-  function wait(ms) {
+  function wait(ms, signal) {
     return new Promise(function (resolve) {
-      hostSetTimeout(resolve, ms);
+      var timer = null;
+      var listener = null;
+      var done = false;
+      function finish(value) {
+        if (done) return;
+        done = true;
+        if (timer !== null) hostClearTimeout(timer);
+        if (listener && signal && typeof signal.removeEventListener === "function") {
+          signal.removeEventListener("abort", listener);
+        }
+        resolve(value);
+      }
+      if (signal && signal.aborted) {
+        finish(false);
+        return;
+      }
+      if (signal && typeof signal.addEventListener === "function") {
+        listener = function () { finish(false); };
+        signal.addEventListener("abort", listener);
+        if (signal.aborted) {
+          finish(false);
+          return;
+        }
+      }
+      timer = hostSetTimeout(function () { finish(true); }, ms);
     });
   }
 
@@ -269,6 +293,7 @@ function veyHttp(ctx) {
     var retryDelay = opts.retryDelay === undefined ? 0 : Number(opts.retryDelay);
     var controller = null;
     var timer = null;
+    var externalAbortHandler = null;
 
     // A request with a timeout or retries needs a signal of its own. When the
     // caller already supplied one, forward its abort to the internal
@@ -278,21 +303,51 @@ function veyHttp(ctx) {
       controller = AbortController();
       opts.signal = controller.signal;
       if (externalSignal && typeof externalSignal.addEventListener === "function") {
-        externalSignal.addEventListener("abort", function () {
+        externalAbortHandler = function () {
           controller.abort(externalSignal.reason);
-        });
-        if (externalSignal.aborted) controller.abort(externalSignal.reason);
+        };
+        externalSignal.addEventListener("abort", externalAbortHandler);
+        if (externalSignal.aborted) externalAbortHandler();
       }
     }
     if (timeout > 0 && controller) {
       timer = hostSetTimeout(function () { controller.abort(); }, timeout);
     }
 
+    function isAborted() {
+      return !!(controller && controller.signal && controller.signal.aborted);
+    }
+
+    function abortReason() {
+      if (externalSignal && externalSignal.aborted && externalSignal.reason !== undefined && externalSignal.reason !== null) {
+        return externalSignal.reason;
+      }
+      if (controller && controller.signal && controller.signal.reason !== undefined && controller.signal.reason !== null) {
+        return controller.signal.reason;
+      }
+      var err = new Error("The request was aborted");
+      err.name = "AbortError";
+      return err;
+    }
+
+    function retryAfterWait(remaining, error) {
+      if (isAborted()) throw abortReason();
+      if (remaining <= 0) throw error;
+      return wait(retryDelay, controller && controller.signal).then(function (waited) {
+        if (!waited || isAborted()) throw abortReason();
+        return attempt(remaining - 1);
+      });
+    }
+
     function attempt(remaining) {
-      return fetchFn(url, opts).then(function (answer) {
+      if (isAborted()) return Promise.reject(abortReason());
+      var pending;
+      try { pending = fetchFn(url, opts); } catch (err) { pending = Promise.reject(err); }
+      return Promise.resolve(pending).then(function (answer) {
+        if (isAborted()) throw abortReason();
         // A server that is busy may be asked again.
         if (answer.status >= 500 && remaining > 0) {
-          return wait(retryDelay).then(function () { return attempt(remaining - 1); });
+          return retryAfterWait(remaining);
         }
         return answer.text().then(function (text) {
           // A JSON answer is a value, anything else is a text. The answer
@@ -311,20 +366,23 @@ function veyHttp(ctx) {
           });
         });
       }, function (err) {
-        if (remaining > 0) {
-          return wait(retryDelay).then(function () { return attempt(remaining - 1); });
-        }
-        throw err;
+        if (isAborted()) throw err;
+        return retryAfterWait(remaining, err);
       });
     }
 
     var waiting = attempt(retries);
-    if (!timer) return waiting;
     return waiting.then(function (answer) {
-      hostClearTimeout(timer);
+      if (timer !== null) hostClearTimeout(timer);
+      if (externalAbortHandler && externalSignal && typeof externalSignal.removeEventListener === "function") {
+        externalSignal.removeEventListener("abort", externalAbortHandler);
+      }
       return answer;
     }, function (err) {
-      hostClearTimeout(timer);
+      if (timer !== null) hostClearTimeout(timer);
+      if (externalAbortHandler && externalSignal && typeof externalSignal.removeEventListener === "function") {
+        externalSignal.removeEventListener("abort", externalAbortHandler);
+      }
       throw err;
     });
   }

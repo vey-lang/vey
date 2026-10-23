@@ -254,6 +254,7 @@ function veyShared(ctx) {
       status: 200,
       headers: {},
       finished: false,
+      finishDone: false,
       finish: [],
       // Whether the answer is written in parts.
       streaming: false,
@@ -262,32 +263,14 @@ function veyShared(ctx) {
       // The work that runs just before the body is written, so that a mark
       // of the answer may still be added.
       before: [],
+      beforeDone: false,
       transform: null,
       head: false
     };
 
-    function answer(body) {
-      if (state.finished) return;
-      state.finished = true;
-      // The parts of the answer that were written are the answer, so it
-      // is only ended.
-      if (state.streaming) {
-        if (!state.sent) {
-          state.sent = true;
-          response.writeHead(state.status, state.headers);
-        }
-        response.end();
-        for (var s = 0; s < state.finish.length; s++) {
-          try {
-            state.finish[s]();
-          } catch (err) {
-            // A mistake in a cleanup must not take the answer away.
-          }
-        }
-        return;
-      }
-      // The marks of the answer are added before the body is written, so
-      // that they are not lost when the answer ends by itself.
+    function runBeforeFinish() {
+      if (state.beforeDone) return;
+      state.beforeDone = true;
       for (var j = 0; j < state.before.length; j++) {
         try {
           state.before[j]();
@@ -295,6 +278,46 @@ function veyShared(ctx) {
           // A mistake in a mark must not take the answer away.
         }
       }
+    }
+
+    function runFinish() {
+      if (state.finishDone) return;
+      state.finishDone = true;
+      for (var i = 0; i < state.finish.length; i++) {
+        try {
+          state.finish[i]();
+        } catch (err) {
+          // A mistake in a cleanup must not take the answer away.
+        }
+      }
+    }
+
+    if (response && typeof response.on === "function") {
+      response.on("close", function () {
+        if (state.finished) return;
+        state.finished = true;
+        runFinish();
+      });
+    }
+
+    function answer(body) {
+      if (state.finished) return;
+      state.finished = true;
+      // The parts of the answer that were written are the answer, so it
+      // is only ended.
+      if (state.streaming) {
+        runBeforeFinish();
+        if (!state.sent) {
+          state.sent = true;
+          response.writeHead(state.status, state.headers);
+        }
+        response.end();
+        runFinish();
+        return;
+      }
+      // The marks of the answer are added before the body is written, so
+      // that they are not lost when the answer ends by itself.
+      runBeforeFinish();
       if (state.transform) {
         // The body of the answer is written in another shape, such as the
         // compressed form of it.
@@ -305,13 +328,7 @@ function veyShared(ctx) {
         }
       }
       writeAnswer(response, body, state.status, state.headers, state.head);
-      for (var i = 0; i < state.finish.length; i++) {
-        try {
-          state.finish[i]();
-        } catch (err) {
-          // A mistake in a cleanup must not take the answer away.
-        }
-      }
+      runFinish();
     }
 
     var res = {
@@ -400,6 +417,7 @@ function veyShared(ctx) {
       write: function (text) {
         if (state.finished) return res;
         state.streaming = true;
+        runBeforeFinish();
         if (!state.sent) {
           state.sent = true;
           response.writeHead(state.status, state.headers);
@@ -412,6 +430,7 @@ function veyShared(ctx) {
         if (state.finished || state.sent) return res;
         state.status = Number(code);
         if (headers) copyHeaders(state.headers, headers);
+        runBeforeFinish();
         state.streaming = true;
         state.sent = true;
         response.writeHead(state.status, state.headers);
@@ -420,6 +439,7 @@ function veyShared(ctx) {
       // Send headers now, leaving the body for a later write or end call.
       flushHeaders: function () {
         if (state.finished || state.sent) return res;
+        runBeforeFinish();
         state.sent = true;
         if (typeof response.flushHeaders === "function") {
           response.writeHead(state.status, state.headers);

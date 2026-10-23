@@ -1042,7 +1042,14 @@ function veyServer(ctx) {
       res.sendFile = function (file, options) {
         var settings = options || {};
         var filename = String(file);
-        fs.stat(filename, function (err, info) {
+        var openFlags = "r";
+        if (fs.constants && typeof fs.constants.O_RDONLY === "number") {
+          openFlags = fs.constants.O_RDONLY;
+          if (typeof fs.constants.O_NONBLOCK === "number") {
+            openFlags |= fs.constants.O_NONBLOCK;
+          }
+        }
+        fs.stat(filename, function (err, checkedInfo) {
           if (err) {
             if (!res.isFinished()) {
               res.status(err.code === "ENOENT" ? 404 : 500);
@@ -1050,32 +1057,144 @@ function veyServer(ctx) {
             }
             return;
           }
-          if (!info.isFile()) {
+          if (res.isFinished()) return;
+          if (!checkedInfo.isFile()) {
             res.status(404);
             res.send("Not found");
             return;
           }
-          if (settings.headers) {
-            for (var key in settings.headers) {
-              if (Object.prototype.hasOwnProperty.call(settings.headers, key)) {
-                res.set(key, settings.headers[key]);
+          fs.open(filename, openFlags, function (openError, opened) {
+            if (openError) {
+              if (!res.isFinished()) {
+                res.status(openError.code === "ENOENT" ? 404 : 500);
+                res.send(openError.code === "ENOENT" ? "Not found" : "Cannot read file");
               }
+              return;
             }
-          }
-          if (settings.type) res.contentType(settings.type);
-          res.set("Content-Length", String(info.size));
-          if (method === "HEAD") {
-            res.end();
-            return;
-          }
-          var stream = fs.createReadStream(filename);
-          stream.on("data", function (chunk) { res.write(chunk); });
-          stream.on("end", function () { res.end(); });
-          stream.on("error", function () {
-            if (!res.isFinished()) {
-              res.status(500);
-              res.end();
+            function closeOpened() {
+              if (opened === null) return;
+              var fd = opened;
+              opened = null;
+              try { fs.close(fd, function () { }); } catch (ignored) { }
             }
+            if (res.isFinished()) {
+              closeOpened();
+              return;
+            }
+            fs.fstat(opened, function (statError, info) {
+              if (statError) {
+                closeOpened();
+                if (!res.isFinished()) {
+                  res.status(500);
+                  res.send("Cannot read file");
+                }
+                return;
+              }
+              if (!info.isFile()) {
+                closeOpened();
+                if (!res.isFinished()) {
+                  res.status(404);
+                  res.send("Not found");
+                }
+                return;
+              }
+              if (!sameStaticFile(checkedInfo, info)) {
+                closeOpened();
+                if (!res.isFinished()) {
+                  res.status(403);
+                  res.send("Forbidden");
+                }
+                return;
+              }
+              if (res.isFinished()) {
+                closeOpened();
+                return;
+              }
+              if (settings.headers) {
+                for (var key in settings.headers) {
+                  if (Object.prototype.hasOwnProperty.call(settings.headers, key)) {
+                    res.set(key, settings.headers[key]);
+                  }
+                }
+              }
+              if (settings.type) res.contentType(settings.type);
+              res.set("Content-Length", String(info.size));
+              if (method === "HEAD") {
+                closeOpened();
+                res.end();
+                return;
+              }
+              var stream;
+              try {
+                stream = fs.createReadStream(filename, { fd: opened, autoClose: true });
+              } catch (streamError) {
+                closeOpened();
+                if (!res.isFinished()) {
+                  res.status(500);
+                  res.send("Cannot read file");
+                }
+                return;
+              }
+              opened = null;
+              var responseClose = null;
+              var responseFinish = null;
+              var drainListener = null;
+              function cleanupStream() {
+                if (responseClose) response.removeListener("close", responseClose);
+                if (responseFinish) response.removeListener("finish", responseFinish);
+                if (drainListener) response.removeListener("drain", drainListener);
+                responseClose = null;
+                responseFinish = null;
+                drainListener = null;
+              }
+              responseClose = function () {
+                if (!stream.destroyed) stream.destroy();
+                cleanupStream();
+              };
+              responseFinish = function () {
+                if (!stream.readableEnded && !stream.destroyed) stream.destroy();
+                cleanupStream();
+              };
+              response.on("close", responseClose);
+              response.on("finish", responseFinish);
+              stream.on("data", function (chunk) {
+                if (res.isFinished()) {
+                  stream.destroy();
+                  return;
+                }
+                try {
+                  res.write(chunk);
+                } catch (writeError) {
+                  stream.destroy();
+                  if (!res.isFinished()) {
+                    res.status(500);
+                    res.end();
+                  }
+                  return;
+                }
+                if (response.writableNeedDrain && !drainListener) {
+                  stream.pause();
+                  drainListener = function () {
+                    drainListener = null;
+                    if (res.isFinished()) stream.destroy();
+                    else stream.resume();
+                  };
+                  response.once("drain", drainListener);
+                }
+              });
+              stream.on("end", function () {
+                cleanupStream();
+                if (!res.isFinished()) res.end();
+              });
+              stream.on("error", function () {
+                cleanupStream();
+                if (!res.isFinished()) {
+                  res.status(500);
+                  res.end();
+                }
+              });
+              stream.on("close", cleanupStream);
+            });
           });
         });
         return res;
@@ -1083,9 +1202,19 @@ function veyServer(ctx) {
       res.download = function (file, name, options) {
         var settings = options || {};
         var filename = name === undefined ? pathModule.basename(String(file)) : String(name);
-        var safeName = filename.replace(/[\r\n"\\]/g, "_");
+        var safeName = filename.replace(/[\x00-\x1f\x7f"\\]/g, "_");
+        var asciiName = safeName.replace(/[^\x20-\x7e]/g, "_");
+        var disposition = "attachment; filename=\"" + asciiName + "\"";
+        if (asciiName !== safeName) {
+          try {
+            var encodedName = encodeURIComponent(safeName).replace(/[!'()*]/g, function (character) {
+              return "%" + character.charCodeAt(0).toString(16).toUpperCase();
+            });
+            disposition += "; filename*=UTF-8''" + encodedName;
+          } catch (ignored) { }
+        }
         settings = Object.assign({}, settings, { headers: Object.assign({}, settings.headers || {}) });
-        settings.headers["Content-Disposition"] = "attachment; filename=\"" + safeName + "\"";
+        settings.headers["Content-Disposition"] = disposition;
         return res.sendFile(file, settings);
       };
 

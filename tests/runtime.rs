@@ -450,6 +450,173 @@ external.abort();
 }
 
 #[test]
+fn http_timeout_is_not_retried_after_its_deadline() {
+    let text = run_runtime(
+        "http-timeout-no-retry",
+        r#"
+let calls = 0;
+globalThis.fetch = (url, options) => {
+  calls++;
+  return new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("request timed out")));
+  });
+};
+runtime.http.fetch("/slow", { timeout: 10, retries: 3, retryDelay: 0 }).catch(err => {
+  console.log(JSON.stringify({ calls, message: err.message }));
+});
+"#,
+    );
+    assert!(
+        text.contains(r#"{"calls":1,"message":"request timed out"}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn http_external_abort_does_not_retry_a_pending_request() {
+    let text = run_runtime(
+        "http-abort-no-retry",
+        r#"
+const external = runtime.http.AbortController();
+let calls = 0;
+globalThis.fetch = (url, options) => {
+  calls++;
+  return new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("caller cancelled")));
+  });
+};
+const pending = runtime.http.fetch("/cancel", {
+  signal: external.signal,
+  retries: 3,
+  retryDelay: 0
+});
+external.abort();
+pending.then(
+  () => console.log("unexpected success"),
+  err => console.log(JSON.stringify({ calls, message: err.message }))
+);
+"#,
+    );
+    assert!(
+        text.contains(r#"{"calls":1,"message":"caller cancelled"}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn http_preaborted_signal_skips_fetch_attempts() {
+    let text = run_runtime(
+        "http-pre-aborted",
+        r#"
+const external = runtime.http.AbortController();
+external.abort(new Error("already cancelled"));
+let calls = 0;
+globalThis.fetch = () => {
+  calls++;
+  return Promise.reject(new Error("should not be called"));
+};
+runtime.http.fetch("/cancel", {
+  signal: external.signal,
+  retries: 2,
+  retryDelay: 0
+}).catch(err => console.log(JSON.stringify({ calls, message: err.message })));
+"#,
+    );
+    assert!(
+        text.contains(r#"{"calls":0,"message":"already cancelled"}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn http_abort_during_server_error_backoff_stops_retries() {
+    let text = run_runtime(
+        "http-abort-server-backoff",
+        r#"
+const external = runtime.http.AbortController();
+let calls = 0;
+const busy = {
+  status: 503,
+  statusText: "Busy",
+  url: "/busy",
+  headers: { get: () => "text/plain" },
+  text: () => Promise.resolve("busy")
+};
+globalThis.fetch = () => { calls++; return Promise.resolve(busy); };
+const pending = runtime.http.fetch("/busy", {
+  signal: external.signal,
+  retries: 2,
+  retryDelay: 100
+});
+setTimeout(() => external.abort(new Error("caller cancelled")), 5);
+pending.then(
+  () => console.log("unexpected success"),
+  err => console.log(JSON.stringify({ calls, message: err.message }))
+);
+"#,
+    );
+    assert!(
+        text.contains(r#"{"calls":1,"message":"caller cancelled"}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn http_abort_during_network_error_backoff_stops_retries() {
+    let text = run_runtime(
+        "http-abort-network-backoff",
+        r#"
+const external = runtime.http.AbortController();
+let calls = 0;
+globalThis.fetch = () => { calls++; return Promise.reject(new Error("temporary network error")); };
+const pending = runtime.http.fetch("/offline", {
+  signal: external.signal,
+  retries: 2,
+  retryDelay: 100
+});
+setTimeout(() => external.abort(new Error("caller cancelled")), 5);
+pending.then(
+  () => console.log("unexpected success"),
+  err => console.log(JSON.stringify({ calls, message: err.message }))
+);
+"#,
+    );
+    assert!(
+        text.contains(r#"{"calls":1,"message":"caller cancelled"}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn http_removes_external_abort_listener_when_request_settles() {
+    let text = run_runtime(
+        "http-abort-listener-cleanup",
+        r#"
+const external = {
+  aborted: false,
+  addEventListener(event, listener) { this.listener = listener; },
+  removeEventListener(event, listener) { this.removed = this.listener === listener; }
+};
+let calls = 0;
+globalThis.fetch = () => {
+  calls++;
+  return Promise.resolve({
+    status: 200,
+    statusText: "OK",
+    url: "/ok",
+    headers: { get: () => "text/plain" },
+    text: () => Promise.resolve("ok")
+  });
+};
+runtime.http.fetch("/ok", { signal: external, retries: 1 }).then(() => {
+  console.log(JSON.stringify({ calls, removed: external.removed }));
+});
+"#,
+    );
+    assert!(text.contains(r#"{"calls":1,"removed":true}"#), "{text}");
+}
+
+#[test]
 fn a_store_can_update_a_nested_path_without_losing_siblings() {
     let text = run_runtime(
         "store-nested",
@@ -1058,6 +1225,367 @@ app.start(() => {
     assert!(text.contains(r#"{"status":200,"body":"file body","disposition":null}"#), "{text}");
     assert!(text.contains(r#"{"status":200,"body":"file body","disposition":"attachment; filename=\"report.txt\""}"#), "{text}");
     assert!(text.contains(r#"{"status":404,"body":"Not found","disposition":null}"#), "{text}");
+}
+
+#[test]
+fn send_file_head_preserves_length_and_closes_descriptor() {
+    let text = run_runtime(
+        "sendfile-head-close",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-sendfile-head-" + process.pid);
+nodeFs.writeFileSync(file, "head");
+const originalClose = nodeFs.close;
+let closed = false;
+nodeFs.close = function(fd, callback) {
+  return originalClose.call(nodeFs, fd, err => {
+    if (!err) closed = true;
+    if (callback) callback(err);
+  });
+};
+const app = runtime.server(0);
+app.get("/file", (req, res) => res.sendFile(file));
+app.start(() => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: app.port(),
+    path: "/file",
+    method: "HEAD"
+  }, res => {
+    let bodyLength = 0;
+    res.on("data", chunk => { bodyLength += chunk.length; });
+    res.on("end", async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      nodeFs.close = originalClose;
+      console.log(JSON.stringify({
+        status: res.statusCode,
+        length: res.headers["content-length"],
+        bodyLength,
+        closed
+      }));
+      nodeFs.unlinkSync(file);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+  request.end();
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":200,"length":"4","bodyLength":0,"closed":true}"#)
+    );
+}
+
+#[test]
+fn send_file_streams_the_file_it_opened_before_a_path_swap() {
+    let text = run_runtime(
+        "sendfile-open-race",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const parent = nodeFs.mkdtempSync(nodePath.join(require("node:os").tmpdir(), "vey-sendfile-race-"));
+const file = nodePath.join(parent, "asset.txt");
+const secret = nodePath.join(parent, "secret.txt");
+nodeFs.writeFileSync(file, "public");
+nodeFs.writeFileSync(secret, "secret");
+const originalCreateReadStream = nodeFs.createReadStream;
+let swapped = false;
+const app = runtime.server(0);
+app.get("/file", (req, res) => res.sendFile(file));
+app.start(() => {
+  nodeFs.createReadStream = function(filename, options) {
+    if (!swapped && nodePath.resolve(String(filename)) === nodePath.resolve(file)) {
+      nodeFs.unlinkSync(file);
+      nodeFs.symlinkSync(secret, file);
+      swapped = true;
+    }
+    return originalCreateReadStream.call(nodeFs, filename, options);
+  };
+  http.get("http://127.0.0.1:" + app.port() + "/file", res => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      nodeFs.createReadStream = originalCreateReadStream;
+      console.log(JSON.stringify({
+        status: res.statusCode,
+        body,
+        length: res.headers["content-length"],
+        swapped
+      }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":200,"body":"public","length":"6","swapped":true}"#)
+    );
+}
+
+#[test]
+fn streamed_files_keep_session_cookies_and_sanitize_download_names() {
+    let text = run_runtime(
+        "sendfile-session-download-name",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-sendfile-session-" + process.pid);
+nodeFs.writeFileSync(file, "file body");
+const app = runtime.server(0);
+app.get("/session-file", (req, res) => {
+  runtime.session.start();
+  runtime.session.set("user", "Ada");
+  return res.sendFile(file);
+});
+app.get("/download", (req, res) => res.download(file, "bad\t\u0000name.txt"));
+app.get("/unicode-download", (req, res) => res.download(file, "café.txt"));
+app.start(() => {
+  const get = path => new Promise(resolve => {
+    http.get("http://127.0.0.1:" + app.port() + path, res => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => resolve({
+        status: res.statusCode,
+        body,
+        cookies: res.headers["set-cookie"] || [],
+        disposition: res.headers["content-disposition"] || null
+      }));
+    });
+  });
+  Promise.all([get("/session-file"), get("/download"), get("/unicode-download")]).then(async answers => {
+    console.log(JSON.stringify({
+      session: answers[0],
+      download: answers[1],
+      unicode: answers[2]
+    }));
+    nodeFs.unlinkSync(file);
+    await app.stop();
+    process.exit(0);
+  });
+});
+"#,
+    );
+    assert!(
+        text.contains(r#""status":200,"body":"file body","cookies":["vey.sid="#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#""disposition":"attachment; filename=\"bad__name.txt\""#),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            r#""disposition":"attachment; filename=\"caf_.txt\"; filename*=UTF-8''caf%C3%A9.txt""#
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn send_file_closes_a_late_open_after_request_timeout() {
+    let text = run_runtime(
+        "sendfile-late-open",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-sendfile-late-" + process.pid);
+nodeFs.writeFileSync(file, "file body");
+const originalOpen = nodeFs.open;
+const originalClose = nodeFs.close;
+const originalCreateReadStream = nodeFs.createReadStream;
+let activeResponse;
+let closed = false;
+let streamed = false;
+let resolveClosed;
+const closedPromise = new Promise(resolve => { resolveClosed = resolve; });
+nodeFs.open = function(filename, flags, callback) {
+  if (nodePath.resolve(String(filename)) === nodePath.resolve(file)) {
+    return originalOpen.call(nodeFs, filename, flags, (err, fd) => {
+      if (!err && activeResponse && !activeResponse.isFinished()) {
+        activeResponse.status(408).send("timed out");
+      }
+      setTimeout(() => callback(err, fd), 25);
+    });
+  }
+  return originalOpen.call(nodeFs, filename, flags, callback);
+};
+nodeFs.close = function(fd, callback) {
+  return originalClose.call(nodeFs, fd, err => {
+    if (!err) {
+      closed = true;
+      resolveClosed();
+    }
+    if (callback) callback(err);
+  });
+};
+nodeFs.createReadStream = function() {
+  streamed = true;
+  return originalCreateReadStream.apply(nodeFs, arguments);
+};
+const app = runtime.server(0);
+app.get("/file", (req, res) => {
+  activeResponse = res;
+  return res.sendFile(file);
+});
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/file", res => {
+    res.resume();
+    res.on("end", async () => {
+      await Promise.race([
+        closedPromise,
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
+      nodeFs.open = originalOpen;
+      nodeFs.close = originalClose;
+      nodeFs.createReadStream = originalCreateReadStream;
+      console.log(JSON.stringify({ status: res.statusCode, streamed, closed }));
+      nodeFs.unlinkSync(file);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":408,"streamed":false,"closed":true}"#)
+    );
+}
+
+#[test]
+fn send_file_source_stops_when_the_client_disconnects() {
+    let text = run_runtime(
+        "sendfile-client-disconnect",
+        r#"
+const net = require("node:net");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-sendfile-large-" + process.pid);
+const size = 64 * 1024 * 1024;
+nodeFs.writeFileSync(file, Buffer.alloc(size, 97));
+const originalCreateReadStream = nodeFs.createReadStream;
+let bytesRead = 0;
+let streamClosed = false;
+let completed = false;
+let socket;
+let timer;
+const app = runtime.server(0, { shutdownTimeout: 500 });
+app.get("/file", (req, res) => res.sendFile(file));
+app.start(() => {
+  nodeFs.createReadStream = function(filename, options) {
+    const stream = originalCreateReadStream.call(nodeFs, filename,
+      Object.assign({}, options, { highWaterMark: 8192 }));
+    stream.on("data", chunk => { bytesRead += chunk.length; });
+    stream.on("close", () => {
+      streamClosed = true;
+      finish();
+    });
+    return stream;
+  };
+  socket = net.connect(app.port(), "127.0.0.1");
+  socket.on("connect", () => {
+    socket.write("GET /file HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+  });
+  socket.on("data", () => socket.destroy());
+  socket.on("error", () => { });
+  timer = setTimeout(finish, 3000);
+  function finish() {
+    if (completed) return;
+    completed = true;
+    clearTimeout(timer);
+    nodeFs.createReadStream = originalCreateReadStream;
+    const stoppedEarly = bytesRead < size;
+    console.log(JSON.stringify({ streamClosed, stoppedEarly }));
+    socket.destroy();
+    app.stop().then(() => {
+      nodeFs.unlinkSync(file);
+      process.exit(0);
+    });
+  }
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"streamClosed":true,"stoppedEarly":true}"#)
+    );
+}
+
+#[test]
+fn send_file_obeys_response_backpressure() {
+    let text = run_runtime(
+        "sendfile-backpressure",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const nodePath = require("node:path");
+const file = nodePath.join(require("node:os").tmpdir(), "vey-sendfile-backpressure-" + process.pid);
+const size = 128 * 1024;
+nodeFs.writeFileSync(file, Buffer.alloc(size, 120));
+const originalCreateReadStream = nodeFs.createReadStream;
+const originalWrite = http.ServerResponse.prototype.write;
+let blocked = false;
+let blockedChunks = 0;
+let forced = false;
+const app = runtime.server(0);
+app.get("/file", (req, res) => res.sendFile(file));
+app.start(() => {
+  nodeFs.createReadStream = function(filename, options) {
+    const stream = originalCreateReadStream.call(nodeFs, filename,
+      Object.assign({}, options, { highWaterMark: 8192 }));
+    stream.on("data", () => { if (blocked) blockedChunks++; });
+    return stream;
+  };
+  http.ServerResponse.prototype.write = function(chunk) {
+    const result = originalWrite.apply(this, arguments);
+    if (!forced && Buffer.isBuffer(chunk)) {
+      forced = true;
+      blocked = true;
+      const response = this;
+      Object.defineProperty(response, "writableNeedDrain", {
+        configurable: true,
+        writable: true,
+        value: true
+      });
+      setTimeout(() => {
+        blocked = false;
+        response.writableNeedDrain = false;
+        response.emit("drain");
+      }, 25);
+      return false;
+    }
+    return result;
+  };
+  http.get("http://127.0.0.1:" + app.port() + "/file", res => {
+    let body = Buffer.alloc(0);
+    res.on("data", chunk => { body = Buffer.concat([body, chunk]); });
+    res.on("end", async () => {
+      nodeFs.createReadStream = originalCreateReadStream;
+      http.ServerResponse.prototype.write = originalWrite;
+      console.log(JSON.stringify({ status: res.statusCode, length: body.length, blockedChunks, forced }));
+      nodeFs.unlinkSync(file);
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":200,"length":131072,"blockedChunks":0,"forced":true}"#)
+    );
 }
 
 #[test]
