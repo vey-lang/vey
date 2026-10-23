@@ -26,7 +26,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 ## 3. LSP doğruluğu ve protokol uyumu
 
 - [x] Rename/definition/references işlemlerini metinsel ad yerine çözümlenmiş binding kimliğiyle yap; nested shadowing, sibling scopes, assignment read/write, import alias ve exact-token edit testleri ekle.
-- [ ] `exit`, bozuk/eksik frame ve bilinmeyen JSON-RPC yöntemi davranışlarını protokole uygun biçimde sonlandır/yanıtla; subprocess entegrasyon testleri ekle.
+- [x] `exit`/`shutdown` yaşam döngüsünü, bozuk/eksik frame parse-error davranışını ve unknown request/notification ayrımını JSON-RPC'ye uygunlaştır; Content-Length sınırı ve subprocess testleri ekle.
 - [x] LSP `position.character` ve `Range` değerlerini UTF-16 birimlerine dönüştür; token içi cursor ve astral Unicode rename/range testleri ekle.
 - [x] `file://` URI yollarını UTF-8 byte dizileriyle decode et, diagnostic URI'larını encode et; malformed escape, UTF-8, local/remote authority ve percent-encoded Unicode-path testleri ekle.
 - [ ] Completion'ı cursor ve kapsam-duyarlı hâle getir; bunu mevcut rename/position düzeltmelerinden ayrı özellik işi olarak takip et.
@@ -41,7 +41,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **341 geçti, 0 kaldı**; runtime 98, server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
+- [x] Tam `cargo test --all-targets` çalıştır: **348 geçti, 0 kaldı**; runtime 98, server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

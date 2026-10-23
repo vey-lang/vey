@@ -36,40 +36,102 @@ pub(crate) fn cmd_lsp(args: &[String]) -> i32 {
         files: HashMap::new(),
     };
 
+    let mut input = stdin.lock();
+    let mut shutdown_received = false;
+    let mut exit_code = 0;
     loop {
-        let Some(message) = read_message(&mut stdin.lock()) else {
-            break;
+        let message = match read_message(&mut input) {
+            Ok(Some(message)) => message,
+            Ok(None) => break,
+            Err(ReadMessageError::Malformed) => {
+                let error = error_answer(Value::Null, -32700, "Parse error");
+                let _ = write_message(&mut stdout, &error);
+                exit_code = 1;
+                break;
+            }
+            Err(ReadMessageError::Io(error)) => {
+                eprintln!("failed to read an LSP message: {error}");
+                exit_code = 1;
+                break;
+            }
         };
+        if message.text("method") == Some("exit") {
+            exit_code = if shutdown_received { 0 } else { 1 };
+            break;
+        }
+        if message.text("method") == Some("shutdown") && message.get("id").is_some() {
+            shutdown_received = true;
+        }
         let Some(answer) = server.handle(&message) else {
             continue;
         };
         if write_message(&mut stdout, &answer).is_err() {
+            exit_code = 1;
             break;
         }
     }
-    0
+    exit_code
 }
 
 /// Read a message of the protocol.
-fn read_message(input: &mut impl BufRead) -> Option<Value> {
-    let mut length = 0usize;
+fn read_message(input: &mut impl BufRead) -> Result<Option<Value>, ReadMessageError> {
+    let mut length = None;
+    let mut saw_header = false;
     loop {
         let mut line = String::new();
-        if input.read_line(&mut line).ok()? == 0 {
-            return None;
+        let count = input.read_line(&mut line).map_err(ReadMessageError::Io)?;
+        if count == 0 {
+            return if saw_header {
+                Err(ReadMessageError::Malformed)
+            } else {
+                Ok(None)
+            };
         }
-        let line = line.trim_end();
+        saw_header = true;
+        let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
             break;
         }
-        if let Some(rest) = line.strip_prefix("Content-Length:") {
-            length = rest.trim().parse().ok()?;
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(ReadMessageError::Malformed);
+        };
+        if name.eq_ignore_ascii_case("Content-Length") {
+            if length.is_some() {
+                return Err(ReadMessageError::Malformed);
+            }
+            length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| ReadMessageError::Malformed)?,
+            );
         }
     }
+    let length = length.ok_or(ReadMessageError::Malformed)?;
+    if length > MAX_MESSAGE_BYTES {
+        return Err(ReadMessageError::Malformed);
+    }
     let mut body = vec![0u8; length];
-    input.read_exact(&mut body).ok()?;
-    let text = String::from_utf8(body).ok()?;
-    json::read(&text).map(|(value, _)| value)
+    input.read_exact(&mut body).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            ReadMessageError::Malformed
+        } else {
+            ReadMessageError::Io(error)
+        }
+    })?;
+    let text = String::from_utf8(body).map_err(|_| ReadMessageError::Malformed)?;
+    let (value, rest) = json::read(&text).ok_or(ReadMessageError::Malformed)?;
+    if !rest.trim().is_empty() {
+        return Err(ReadMessageError::Malformed);
+    }
+    Ok(Some(value))
+}
+
+const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
+enum ReadMessageError {
+    Io(io::Error),
+    Malformed,
 }
 
 /// Write a message of the protocol.
@@ -87,13 +149,26 @@ struct Server {
 impl Server {
     /// The answer of a message, when there is one.
     fn handle(&mut self, message: &Value) -> Option<Value> {
-        let method = message.text("method")?;
         let id = message.get("id").cloned();
+        let Some(method) = message.text("method") else {
+            return Some(error_answer(
+                id.unwrap_or(Value::Null),
+                -32600,
+                "Invalid Request",
+            ));
+        };
+        if message.text("jsonrpc") != Some("2.0") {
+            return Some(error_answer(
+                id.unwrap_or(Value::Null),
+                -32600,
+                "Invalid Request",
+            ));
+        }
 
         match method {
-            "initialize" => Some(answer(id, initialize())),
+            "initialize" => id.map(|id| answer(id, initialize())),
             "initialized" => None,
-            "shutdown" => Some(answer(id, Value::Null)),
+            "shutdown" => id.map(|id| answer(id, Value::Null)),
             "exit" => None,
             "textDocument/didOpen" => {
                 if let Some(document) = message.get("params").and_then(|p| p.get("textDocument")) {
@@ -132,14 +207,17 @@ impl Server {
                 None
             }
             "textDocument/hover" => {
+                let id = id?;
                 let (uri, line, col) = self.place(message)?;
                 Some(answer(id, self.hover(&uri, line, col)))
             }
             "textDocument/completion" => {
+                let id = id?;
                 let (uri, _line, _col) = self.place(message)?;
                 Some(answer(id, self.completion(&uri)))
             }
             "textDocument/documentSymbol" => {
+                let id = id?;
                 let uri = message
                     .get("params")
                     .and_then(|p| p.get("textDocument"))
@@ -147,14 +225,17 @@ impl Server {
                 Some(answer(id, self.document_symbols(&uri)))
             }
             "textDocument/definition" => {
+                let id = id?;
                 let (uri, line, col) = self.place(message)?;
                 Some(answer(id, self.definition(&uri, line, col)))
             }
             "textDocument/references" => {
+                let id = id?;
                 let (uri, line, col) = self.place(message)?;
                 Some(answer(id, self.references(&uri, line, col)))
             }
             "textDocument/rename" => {
+                let id = id?;
                 let (uri, line, col) = self.place(message)?;
                 let new_name = match message.get("params").and_then(|p| p.get("newName")) {
                     Some(Value::Text(text)) => text.clone(),
@@ -172,7 +253,7 @@ impl Server {
                 }
                 None
             }
-            _ => Some(answer(id, Value::Null)),
+            _ => id.map(|id| error_answer(id, -32601, &format!("Method not found: {method}"))),
         }
     }
 
@@ -445,11 +526,25 @@ impl Server {
 }
 
 /// The answer of a message.
-fn answer(id: Option<Value>, result: Value) -> Value {
+fn answer(id: Value, result: Value) -> Value {
     json::object(vec![
         ("jsonrpc", json::text("2.0")),
-        ("id", id.unwrap_or(Value::Null)),
+        ("id", id),
         ("result", result),
+    ])
+}
+
+fn error_answer(id: Value, code: i64, message: &str) -> Value {
+    json::object(vec![
+        ("jsonrpc", json::text("2.0")),
+        ("id", id),
+        (
+            "error",
+            json::object(vec![
+                ("code", json::number(code as f64)),
+                ("message", json::text(message)),
+            ]),
+        ),
     ])
 }
 
@@ -1330,5 +1425,61 @@ mod uri_tests {
         ] {
             assert_eq!(path_of(uri), None, "{uri}");
         }
+    }
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::{json, read_message, ReadMessageError, Server, Value, MAX_MESSAGE_BYTES};
+    use std::collections::HashMap;
+    use std::io::Cursor;
+
+    #[test]
+    fn clean_eof_is_distinct_from_a_valid_message() {
+        let mut eof = Cursor::new(Vec::<u8>::new());
+        assert!(matches!(read_message(&mut eof), Ok(None)));
+
+        let mut message = Cursor::new(&b"content-length: 2\r\n\r\n{}"[..]);
+        assert!(matches!(
+            read_message(&mut message),
+            Ok(Some(Value::Object(_)))
+        ));
+    }
+
+    #[test]
+    fn invalid_duplicate_and_oversized_frame_headers_are_rejected() {
+        for frame in [
+            "Content-Length: nope\r\n\r\n",
+            "Content-Length: 2\r\ncontent-length: 2\r\n\r\n{}",
+            "X-Test: one\r\n\r\n",
+        ] {
+            let mut input = Cursor::new(frame.as_bytes());
+            assert!(matches!(
+                read_message(&mut input),
+                Err(ReadMessageError::Malformed)
+            ));
+        }
+
+        let frame = format!("Content-Length: {}\r\n\r\n", MAX_MESSAGE_BYTES + 1);
+        let mut input = Cursor::new(frame.as_bytes());
+        assert!(matches!(
+            read_message(&mut input),
+            Err(ReadMessageError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn requests_without_a_method_get_invalid_request() {
+        let (message, rest) = json::read(r#"{"jsonrpc":"2.0","id":7}"#).unwrap();
+        assert!(rest.is_empty());
+        let mut server = Server {
+            files: HashMap::new(),
+        };
+        let response = server.handle(&message).unwrap();
+        assert_eq!(response.get("id"), Some(&Value::Number(7.0)));
+        assert_eq!(
+            response.get("error").and_then(|error| error.number("code")),
+            Some(-32600.0)
+        );
     }
 }

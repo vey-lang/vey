@@ -846,6 +846,164 @@ fn lsp_message(id: i64, method: &str, params: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
 }
 
+fn lsp_notification(method: &str, params: &str) -> String {
+    let body = format!(
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"{}\",\"params\":{}}}",
+        method, params
+    );
+    format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
+}
+
+fn wait_for_lsp_exit(child: &mut std::process::Child, expected_success: bool) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait().unwrap() {
+            Some(status) => {
+                assert_eq!(status.success(), expected_success, "LSP status: {status}");
+                return;
+            }
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the LSP did not exit while its input stream remained open");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_language_server_terminates_on_exit_notification() {
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(lsp_message(1, "initialize", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_message(2, "shutdown", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_notification("exit", "{}").as_bytes())
+            .unwrap();
+        stdin.flush().unwrap();
+    }
+    // Keep stdin open: exit, not EOF, must terminate the process.
+    wait_for_lsp_exit(&mut child, true);
+
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(lsp_notification("exit", "{}").as_bytes())
+        .unwrap();
+    child.stdin.as_mut().unwrap().flush().unwrap();
+    wait_for_lsp_exit(&mut child, false);
+}
+
+#[test]
+fn the_language_server_returns_parse_error_for_invalid_json() {
+    let body = "{]";
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(format!("Content-Length: {}\r\n\r\n{}", body.len(), body).as_bytes())
+        .unwrap();
+    drop(child.stdin.take());
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        text.contains("\"error\":{\"code\":-32700,\"message\":\"Parse error\"}"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_language_server_returns_parse_error_for_an_incomplete_frame() {
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"Content-Length: 8\r\n\r\n{}")
+        .unwrap();
+    drop(child.stdin.take());
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        text.contains("\"error\":{\"code\":-32700,\"message\":\"Parse error\"}"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_language_server_reports_unknown_requests_and_ignores_unknown_notifications() {
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(lsp_message(1, "initialize", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_message(2, "vey/notAMethod", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_notification("vey/notAMethod", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_message(3, "shutdown", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_notification("exit", "{}").as_bytes())
+            .unwrap();
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert_eq!(
+        text.matches("Method not found: vey/notAMethod").count(),
+        1,
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "\"id\":2,\"error\":{\"code\":-32601,\"message\":\"Method not found: vey/notAMethod\"}"
+        ),
+        "{text}"
+    );
+}
+
 #[test]
 fn the_language_server_answers_the_places_of_the_names() {
     let dir = temp_dir("lsp");
