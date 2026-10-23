@@ -1,0 +1,193 @@
+# Vey Derin Denetim — Oturum Raporu
+
+**Tarih:** 23 Ekim 2026  
+**Depo:** `vey-lang/vey`  
+**İncelenen HEAD:** `7ba80adf8bd0c7a1308b77e0eea24202445511f0` (`main`, `origin/main`)  
+**Başlangıç çalışma ağacı:** Temiz (`main...origin/main`).  
+**İlk oturum sonu çalışma ağacı:** README düzeltmesi ve bu rapor; takip değişiklikleri aşağıdadır. Commit veya push yapılmadı.
+
+## Kısa sonuç
+
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness taramasındaki dört doğrulanmış hata, tooling bulguları ve imported exported member için cross-file LSP definition/references/rename düzeltildi. Son `cargo test --all-targets` **390 geçti, 0 başarısız**. Daha geniş LSP workspace index'i (markup/type/dynamic member kullanımları dahil) bu düzeltmenin kapsamı değil; performans ölçülmedi.
+
+## A. Doğrulanmış bulgular
+
+| Öncelik | Alt sistem | Kanıt / minimal gözlem | Neden | Durum |
+|---|---|---|---|---|
+| P2 | README / geliştirici dokümantasyonu | `cargo test --test readme` başlangıçta `every_file_of_the_project_is_in_the_layout` testinde `src/cli/program.rs` eksikliği nedeniyle başarısız oldu. Aynı envanter taraması `src/cli/project.rs` adının da README'de bulunmadığını gösterdi. | Proje yerleşimi tablosu iki var olan modülü güncel tutmamış. | Düzeltildi: ikisi de README'ye eklendi. `cargo test --test readme` 4/4 geçti. |
+| P1 araştırma gerekli | Runtime / hata yanıtları ve dosya sunumu | İlk all-targets çalışmasında altı runtime testi beklenenden farklı hata yanıtı/route davranışı nedeniyle başarısız oldu; seri tekrar da aynı sonucu verdi. | Takipte README HTTP sözleşmesi ve route önceliğiyle karşılaştırma, testlerin eski beklentilerini ortaya çıkardı; düz metin hata testi için `Accept` başlığı ve doğru route/statik davranış beklentileri güncellendi. | **Kapatıldı:** düzeltme sonrası tüm runtime ve tüm hedef testleri geçti; statik dosya güvenlik kontrolleri zayıflatılmadı. |
+| P3 | Compiler cache / bakım | Test derlemesi `src/compiler/cache.rs` içinde kullanılmayan `compiler_stamp()` için `dead_code` uyarısı verdi; depoda başka çağrısı yoktu. | Cache anahtarından compiler stamp'i çıkarılmıştı, fakat mtime tabanlı fonksiyon kalmıştı. | **Kapatıldı:** ölü fonksiyon kaldırıldı ve yerine compiler/build girdilerine dayalı kararlı fingerprint cache key'e eklendi; hit/miss doğrulandı. |
+
+## B. Yapılan değişiklikler
+
+- `README.md`: proje yerleşimi tablosuna `src/cli/program.rs` ve `src/cli/project.rs` eklendi. Dil davranışı veya kullanıcıya açık API değişmedi.
+- `AUDIT_SESSION_2026-10-23.md`: bu denetim oturumunun bulguları ve doğrulama durumu kaydedildi.
+
+## C. İlk test kanıtları (tarihsel başlangıç durumu)
+
+Komutlar Rust araç zincirini PATH'e ekleyerek çalıştırıldı (`/usr/local/rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin`).
+
+- Başlangıç `cargo test --all-targets`: README envanter testi başarısız oldu (`src/cli/program.rs` eksik); o noktaya kadar main unit 8, CLI 48, dev 9, DOM 15 ve lang 64 test geçti.
+- Değişiklik sonrası `cargo test --test readme`: **4 geçti, 0 başarısız**.
+- Değişiklik sonrası `cargo test --all-targets`: **tamamlanmadı / başarısız**. `tests/runtime.rs`: **94 geçti, 6 başarısız**. Hatalar arasında 413/400 yanıt gövdesi beklentileri, `sendFile`/404, statik dosya/symlink ve dosya-önceliği vakaları var. Daha önceki hedeflerde main unit 8, CLI 48, dev 9, DOM 15, lang 64; README 4 ve regressions 43 geçti.
+- `cargo test --test runtime -- --test-threads=1`: aynı altı başarısızlık seri koşuda da görüldü.
+- `cargo test --test server`: **10 geçti, 0 başarısız**.
+- `git diff --check`: geçti.
+
+Bu maddeler ilk denetim aşamasındaki başarısız baseline'ı kaydeder; son takip doğrulaması 390/390 başarılıdır ve raporun son bölümünde yer alır.
+
+## D. Veyboard ve tasarım gözlemleri
+
+Veyboard README ve `src/site.vey` gözden geçirildi. README üç açık sınırlamayı doğrudan belgeliyor: markup'ta `html`/`head`/`body` etiketlerinin bulunmaması, component gövdesindeki değerlerin prop'lar bağlanmadan önce üretilmesi ve `for` sözcüğünün keyword olması nedeniyle form alanlarının label içine sarılması. `site.vey` bu tercihlerin somut kullanımını gösteriyor. Mevcut kanıt bunları **belgelenmiş dil tasarımı/ergonomi sınırlamaları** olarak sınıflandırmaya yeterli; bu oturumda derleyici bug'ı oldukları kanıtlanmadı ve Veyboard yeniden yazılmadı. Sunucu tarafı formlar ve tek süreçli kullanım uygulama tercihleri olarak kalıyor.
+
+## E. İlk oturum sonunda kalan işler (takipte güncellendi)
+
+İlk oturum sonunda runtime test sözleşmesi, cache fingerprint ve daha geniş doğruluk/tooling taraması açık bırakılmıştı. Sonraki bölümlerde runtime test beklentileri belgelenmiş HTTP sözleşmesine göre düzeltildi, cache riski kaynak/build fingerprint'iyle kapatıldı; type-soundness, tooling ve doğrudan imported-member LSP taraması tamamlandı. LSP değişikliği doğrudan `m.area` gibi statik imported-value erişimlerini kapsar; markup bileşen etiketleri, type-only qualified names, dinamik/computed properties ve açık olmayan belgeler için kapsamlı workspace index'i bu oturumda yapılmadı. Önceki `AUDIT_START.md` gözlemleri tek başına bu oturumda doğrulanmış sayılmaz.
+
+## F. Performans
+
+Bu oturumda dosya değişikliği algılama, derleme, süreç yeniden başlatma veya sunucu hazır olma fazları ölçülmedi. Dolayısıyla 600 ms iddiası için yeni bir ölçüm veya önce/sonra karşılaştırması raporlanmıyor. HEAD'deki `7ba80ad` cache değişikliğinin restart etkisine ilişkin nedensel performans sonucu burada ölçülmedi.
+
+## G. Git özeti
+
+- Dal: `main` (`origin/main` ile aynı HEAD: `7ba80adf8bd0c7a1308b77e0eea24202445511f0`)
+- Değiştirilen: `README.md`; `src/cli/{dev,lsp,run,scaffold}.rs`; `src/compiler/cache.rs`; `src/runtime/core.js`; `src/types/{checker,exprs,helpers,resolve}.rs`; `tests/{cli,dev,runtime,types}.rs`.
+- Yeni: `AUDIT_SESSION_2026-10-23.md`, `build.rs`.
+- `git diff --check`: geçti.
+- Commit veya push yapılmadı.
+
+
+## Takip denetimi — 23 Ekim 2026, 19:40 (+03:00)
+
+### Önceki altı runtime başarısızlığının kök nedeni ve çözümü
+
+Altı test ayrı ayrı önceki beklentileriyle yeniden çalıştırıldı; her biri yeniden üretildi. `src/runtime/server.js` ile README'deki 1394–1416 satırları karşılaştırıldığında, runtime'ın statik dosya/path güvenliği veya durum kodları değil, beklenti sözleşmelerinin güncelliğini yitirdiği doğrulandı:
+
+| Test | Kanıtlanan neden | Düzeltme |
+|---|---|---|
+| `a_chunked_body_that_is_too_large_gets_a_413_response` | `http.request` varsayılan `Accept: */*` gönderiyordu. Runtime `wantsHtml()` ile bunu HTML istemi sayıyor; 413 ve handler'ın çalışmadığı bilgisi doğruydu. README hata temsilini Accept başlığına bağlar. | İsteğe açık `Accept: application/json` eklendi; belgelenen düz metin 413 başlığı/mesajı ve `handled:false` doğrulanıyor. Body limiti veya bağlantı güvenliği değiştirilmedi. |
+| `malformed_json_body_is_rejected_before_the_route_runs` | Aynı varsayılan `Accept: */*`, 400 durumunu Vey hata sayfası biçiminde döndürüyordu; route çalışmıyordu. | Açık Accept ile düz metin 400 ve `handled:false` doğrulanıyor. |
+| `response_can_send_files_and_downloads_asynchronously` | Eksik `sendFile` 404'ü için test `Not found` varsayıyordu; runtime, `Accept` başlığına göre hata başlığı ve açıklaması döndürüyordu. | İstemci düz metin yanıtı açıkça seçiyor ve belgelenmiş 404 metnini denetliyor. Dosya indirme ve 200 gövdeleri de aynı testte korunuyor. |
+| `static_file_open_rechecks_the_resolved_target` | Symlink değişiminde runtime 403 döndürüp dosyayı reddediyordu; test sadece eski `Forbidden` gövdesini bekliyordu. | Düz metin temsilini seçip 403 metnini ve `swapped:true` bilgisini kontrol ediyor. Güvenlik denetimi aynen kaldı. |
+| `static_range_open_rejects_a_swapped_outside_symlink` | Aynı eski `Forbidden` gövde varsayımı; fiili status 403 ve erişim reddi doğruydu. | Düz metin 403 mesajını ve `swapped:true` kontrol ediyor; range/symlink güvenlik kodu değişmedi. |
+| Önceki `the_files_of_a_folder_are_served_before_the_routes` | Test adı ve beklentisi README'nin açık sözleşmesinin tersiydi. `app.static()` eşleşmeyen route'lar için fallback'tir; mevcut route dosyayla aynı yolu alır. `server.js` içindeki `notFound()` static fallback'inin route eşleşmesinden sonra çağrılmasıyla da uyumlu. | Test `a_route_wins_against_a_file_of_the_same_name` olarak adlandırıldı ve route gövdesini doğruluyor. |
+
+Dolayısıyla bu altı vaka **runtime hatası değil, test beklentisi/fixture kusuru** olarak sınıflandırıldı. Güvenlik davranışını gevşeten veya testleri yalnızca yeşil yapmak için eşikleri değiştiren bir düzeltme yapılmadı.
+
+### Yeni doğrulanmış runtime hatası ve düzeltmesi
+
+Veyboard'ın ilk `vey test` çalıştırması, `tests/store.vey`, `tests/tasks.vey` ve `tests/pages.vey` sırasında Node `MaxListenersExceededWarning` üretti. Kök neden `src/runtime/core.js` içindeki `test()` fonksiyonunun her çağrıda aynı `printSummary` callback'ini `process.on("exit", ...)` ile yeniden kaydetmesiydi. On iki test içeren minimal runtime repro'su düzeltme öncesi exit listener sayısının **12** olduğunu gösterdi.
+
+`test_summary_installs_only_one_exit_listener` regresyon testi eklendi; `test()` artık `summaryListenerInstalled` bayrağıyla listener'ı tek kez kuruyor. Hedefli test geçti; aynı Veyboard suite'i ikinci kez koştuğunda `MaxListenersExceededWarning` görülmedi. Bu, işlev değişikliği ve regresyon testiyle kapatılmış **P2 runtime/bakım hatasıdır**.
+
+### Compiler cache ve `compiler_stamp()` kararı
+
+Kaynak ve Git geçmişi doğrulandı: `compiler_stamp()` için aktif çağrı yok; HEAD'deki `key()` yalnızca paket sürümünü, kaynak yolları/içeriğini ve stil yolları/içeriğini hash'liyor. Önceki cache kodu ise executable mtime'ını anahtara ekliyordu. HEAD commit açıklaması bu mtime'ın geliştirme sırasında cache'i her derlemede geçersiz kıldığını ve kaldırmanın yaklaşık 600 ms'den 130 ms'ye düşürdüğünü iddia ediyor; bu oturumda bu performans rakamları bağımsız ölçülmedi.
+
+Fonksiyonun çağrılmıyor olması doğrulandı, fakat bu oturumda silinmedi: aynı semver `CARGO_PKG_VERSION` ile oluşturulmuş farklı compiler binary'leri proje kaynakları değişmemişse aynı cache anahtarını üretebilir. Böylece compiler/codegen değişikliğiyle eski JavaScript bundle'ı yeniden kullanma riski, mtime stamp'inin kaldırılmasıyla görünür hâle geliyor. Kaynağın yorumunda fonksiyonun özellikle “referans için” tutulduğu da yazıyor. Ölü kod uyarısını kaldırmak için fonksiyonu silmek bu açık cache doğruluğu riskini gizleyebileceğinden güvenli sayılmadı. Sonraki adım, restart'lar arasında kararlı fakat compiler kaynakları değişince farklılaşan build fingerprint tasarlamak ve cache hit/miss regresyonları eklemektir; salt fonksiyon silme yapılmamalı.
+
+### Geniş denetimde bu oturumda yapılan ek tarama
+
+Salt okunur type/LSP incelemesi, `tests/types.rs` içindeki 80 testi ve `tests/cli.rs` LSP kapsamını (6 test) gördü; denetlenmiş alanlarda önceki raporlardaki çalışmaları yinelemeyen yeni ve minimal reproducer'la doğrulanmış bir correctness bug bulmadı. Bu sınırlı tarama, tüm tip sistemi veya LSP'nin eksiksiz denetlendiği anlamına gelmez. Veyboard bu oturumda gerçek tüketici olarak ayrıca `check` ve `test` komutlarıyla çalıştırıldı.
+
+### Takip test kanıtı
+
+- Altı düzeltme testi, `cargo test --test runtime <ad> -- --exact` ile **tek tek 1/1 geçti**.
+- Altı beklenti düzeltmesinden sonra `cargo test --test runtime --quiet`: **100 geçti, 0 başarısız**.
+- Listener regresyonunu ekleyip düzelttikten sonra `cargo test --test runtime test_summary_installs_only_one_exit_listener -- --exact`: **1 geçti, 0 başarısız**.
+- Son `cargo test --all-targets`: **382 geçti, 0 başarısız**. Alt hedefler: main unit 8, CLI 48, dev 9, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 80.
+- `cargo build --quiet`: geçti; kullanılmayan `compiler_stamp()` için `dead_code` uyarısı devam ediyor.
+- Veyboard dizininde `../../target/debug/vey check`: **19 page checked**.
+- Veyboard dizininde `../../target/debug/vey test`: **83 test geçti, 0 başarısız; 8 dosya geçti**. İlk düzeltme öncesi koşudaki Node listener uyarısı son koşuda yoktu.
+- Salt okunur audit ajanı: yeni minimal type/LSP bug doğrulanmadı; type 80/80, LSP kapsamı 6/6 gözlemi.
+
+### Güncellenen git durumu ve sıradaki üç iş
+
+Bu takipte `tests/runtime.rs` ve `src/runtime/core.js` değişti; bu rapor da güncellendi. Önceki README envanter düzeltmesi (`README.md`) korunuyor. Tüm değişiklikler yereldir; commit/push yapılmadı.
+
+Öncelikli sonraki işler:
+
+1. **P1 — Compiler cache fingerprint:** compiler kaynak kodu değişikliğinin aynı semver altındaki eski cache'i kullanmasını engelleyen kararlı build fingerprint ve test tasarla; geliştirme restart'larında cache hit'ini koru.
+2. **P1 — Type soundness'ı genişlet:** dependent generic return inference, recursive/constrained aliases, async hata/yayılımı ve modüller arası sınırları yeni minimal pozitif/negatif testlerle incele.
+3. **P2 — Tooling ve dil sözleşmesi:** project template'lerini ve `dev/build/run` entegrasyonunu, ayrıca LSP cross-file rename/source range davranışlarını hedefli testlerle denetle; Veyboard sınırlamalarını tasarım/ergonomi/stdlib/application kategorilerine ayrı tut.
+
+Bu takipte dosya izleme/derleme/yeniden başlatma/ready fazları ölçülmedi. Performans iddiası doğrulanmış sonuç olarak sunulmuyor.
+
+
+## Compiler cache devamı — 23 Ekim 2026, 19:44 (+03:00)
+
+Önceki bölümde açık bırakılan cache doğruluğu riski bu devam çalışmasında giderildi. Yeni `build.rs`, `src/` altındaki compiler/runtime girdilerini ve yollarını deterministik sırada; `Cargo.toml`, varsa `Cargo.lock`, build script'ini, target/profile/feature ve Rust flag ayarlarını ve `rustc --version` çıktısını hash'liyor. Kaynak girdilerine `cargo:rerun-if-changed`, kullanılan derleme ortamı girdilerine `cargo:rerun-if-env-changed` kaydı ekleniyor. Böylece aynı compiler girdileriyle yeniden derlemeler kararlı fingerprint üretirken compiler implementation değişiklikleri yeni fingerprint üretir.
+
+`src/compiler/cache.rs` anahtarına fingerprint dahil edildi; yalnızca mtime'a dayalı kullanılmayan `compiler_stamp()` ise işlevsel alternatifi eklenince kaldırıldı. Böylece önceki bölümdeki “tek başına silmek cache riskini gizler” uyarısı artık geçerli değil: risk yalnızca ölü fonksiyonu silerek değil, kaynak/build fingerprint'i anahtara bağlayarak kapatıldı. Yeni birim testi aynı proje girdilerinde aynı fingerprint'in aynı anahtarı, değişik fingerprint'in farklı anahtarı verdiğini doğruluyor.
+
+### Cache doğrulama kanıtı
+
+- `cargo test compiler_fingerprint_invalidates_cache_without_changing_project_inputs --lib`: **1 geçti**.
+- Fingerprint'in compiler kaynak içeriği değişince değiştiğini geçici `src/runtime/core.js` yorumuyla ölçtüm: `cbedb663bef9e3c2` → `b165af50e6036dd0`; yorum kaldırılıp kaynak içeriği eski hâline getirildikten ve Cargo yeniden derledikten sonra ilk değer (`cbedb663bef9e3c2`) geri geldi. Geçici yorum bırakılmadı.
+- Ayrı, geçici Vey projesinde aynı kaynakla ikinci `vey build` cache dosyasının timestamp'ini korudu; kaynak içeriği değiştirilince cache dosyası yeniden yazıldı ve derlenen Node çıktısı yeni metni verdi. Bu, aynı compiler çalışması altında hit/miss akışını doğrular.
+- Son `cargo test --all-targets`: **383 geçti, 0 başarısız**; hedef dağılımı: lib 1, main 8, CLI 48, dev 9, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 80.
+- Cache kodu değişikliğinden sonra `dead_code` uyarısı kalmadı. `git diff --check` temiz.
+
+Bu doğrulama correctness ve cache hit/miss davranışı içindir; saniye cinsinden performans/soğuk-sıcak build ölçümü yapılmadı. Bu oturumda commit veya push yapılmadı.
+
+
+## Type-soundness devamı — 23 Ekim 2026, 20:01 (+03:00)
+
+Öncelikli type-system taramasında dört ayrı, minimal örnekle doğrulanan problem bulundu ve regresyon testleriyle düzeltildi:
+
+| Bulgu | Düzeltme | Regresyon kanıtı |
+|---|---|---|
+| **Imported recursive alias yanlış kabulü (P2, type-safety):** `t.Tree` içindeki recursion başka modülden geldiğinde checker ilgili alias şekline ulaşamıyor, recursive kenarın altındaki hatalı `value: "wrong"` alanını kabul ediyordu. | `ModuleTypeEnv` yerel alias şekillerini sadece internal checking metadatası olarak taşır; import sırasında recursion referansları module-qualified yapılır ve `Opening` bu shape'lerle açılır. Private alias adları `env.types` üzerinden public yazılabilir tipe dönüşmez. | `an_imported_recursive_alias_checks_fields_after_recursive_edges`: geçerli iki seviyeli Tree kabul, daha derindeki string değerli number alanı ret. |
+| **Generic interface import false negative (P2):** `export interface Box<T>` başka modülde `t.Box<number>` olarak kullanılamıyordu; genel generic interface yerel kullanımda geçerliydi. | Export edilen generic interface'in type parameter'ları, çözümlenmiş body'si ve constraints'i import ortamındaki generic type metadata'sına eklenir; qualified resolver substitution ve constraint denetimini uygular. | `a_generic_interface_can_be_used_from_another_module`: number örneği kabul; alan tip uyuşmazlığı ve `T: number` ihlali ayrı ayrı ret. |
+| **Generic callback inference false negative (P2):** `choose(1, fn(x) { return x + 1 })` ilk argüman `T = number` bilgisini unannotated callback'e aktarmıyor, `x` hâlâ `T` iken `+` reddediliyordu. | Argümanlar sırayla infer edilir; önceki argümanların eşleştirdiği parametreler sonraki argümanların contextual type'ına uygulanır. `substitute_bound` kullanılınca henüz çözümlenmemiş type variables `any`'ye dönüştürülmeden korunur. | `an_earlier_argument_contextualizes_a_later_generic_callback` geçti; ayrıca mevcut `a_type_parameter_may_have_a_constraint` testi de geçti (önceki denemede yanlışlıkla `substitute` kullanımı bound'ları bozmuştu). |
+| **`finally` içindeki kesin return false negative (P2):** typed function, `finally` bloğundaki koşulsuz `return` nedeniyle her durumda değer döndürmesine rağmen “her path return etmeli” diye reddediliyordu. | `block_always_exits` ve `stmt_always_exits`, `finally` bloğunun kesin çıkışını dikkate alır; mevcut JS codegen davranışı değişmedi. | `a_return_in_finally_satisfies_the_function_return_type` geçti. |
+
+### Bu devamın doğrulaması
+
+- Her dört sorun için test eklemeden önce minimal kaynak CLI ile çalıştırıldı; sonra ilgili regresyon testi düzeltme öncesi başarısız, düzeltme sonrası başarılı oldu.
+- `cargo test --all-targets`: **387 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 48, dev 9, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 84.
+- Önceki tüm hedefler ve yeni type testleri aynı son çalışma ağacında yeniden çalıştırıldı. `git diff --check` temiz.
+- Commit veya push yapılmadı. Cache/build fingerprint için performans ölçümü yapılmadı; bu raporda yer alan test kanıtı doğruluk ve davranış kapsamındadır.
+
+
+## Tooling ve LSP devamı — 23 Ekim 2026, 20:24 (+03:00)
+
+### Doğrulanıp düzeltilen iki davranış
+
+- **`vey dev` proje ayarını yeniden yüklemiyordu (P2, sayfa başlığı):** sayfa sunucusu `vey.toml` ayarını başlangıçta bir kez okuyordu; watcher kaynakları ve public dosyaları izlese de config dosyasını izlemiyor ve reload'da yakaladığı eski title'ı kullanıyordu. `dev_snapshot` şimdi `Config::find` ile aynı arama zincirindeki sekiz `vey.toml` adayını (henüz yok olan dosyalar dahil) izliyor; değişiklikte title config'ten tekrar okunuyor. Komut satırındaki `--title` override'ı önceliğini koruyor. `dev_reloads_the_title_when_project_config_changes` testi eski başlıktan yeni başlığa canlı güncellemeyi doğruluyor.
+- **Geçersiz `vey new --template` boş hedef dizini bırakıyordu (P3, CLI yan etkisi):** scaffold kodu template adını doğrulamadan önce `create_dir_all` çalıştırıyordu. Template doğrulaması dizin yaratımından önceye alındı. `an_unknown_new_project_template_does_not_create_the_target` testi hata mesajını ve hedefin hiç oluşmadığını kontrol ediyor.
+
+### Önceden açık LSP bulgusu — imported member cross-file references/rename (düzeltildi)
+
+İlk bulgu **P2** olarak doğrulanmıştı: imported modülün exported üye adındaki references/rename, diğer açık dosyadaki kullanımları bulmuyordu. Her iki dosya da `didOpen` ile LSP'ye gönderilmişti.
+
+Minimal kaynaklar:
+
+```vey
+// math.vey
+export fn area() { return 1 }
+```
+
+```vey
+// main.vey
+use "./math.vey" as m
+print(m.area())
+```
+
+Düzeltme öncesi `textDocument/references`, `math.vey` içindeki `area` konumunda (line 0, character 13; `includeDeclaration: true`) yalnızca tanımı döndürüyor; `main.vey` içindeki `m.area` kullanımı eksikti. `textDocument/rename` (`newName: "measure"`) da yalnızca `math.vey` için edit üretiyordu.
+
+**Düzeltme:** `Names` artık imported aliases, lexical receiver binding identity, exported top-level value names ve direct static module-member use'ları topluyor. LSP sorgusu import yolunu canonical file URI'ye çözüyor ve sembolü dosya URI'si, ad ve tanım konumuyla tanımlıyor; böylece aynı isimli başka modül veya alias'ı gölgeleyen yerel parametre yanlışlıkla eşleşmiyor. `definition` imported kullanımda hedef tanımı döndürüyor; `references` tanım ile açık dosyalardaki kullanımları listeliyor; `rename` her ilgili URI için WorkspaceEdit üretiyor.
+
+Yeni `the_language_server_resolves_exported_members_across_open_files` regresyonu `math.vey`/`main.vey` yanında aynı `area` adına sahip bağımsız ikinci modülü ve shadowed `m` parametresini decoy olarak açıyor. Definition, references ve rename hem tanım hem kullanım imlecinden sorgulanıyor. Test yalnızca hedef tanım ve gerçek imported kullanımın döndüğünü; diğer modülün ve shadowed property'sinin değiştirilmediğini; astral Unicode öncesindeki UTF-16 range'lerinin doğru kaldığını doğruluyor. Mevcut `the_language_server_answers_the_places_of_the_names` testi de gölgelenmiş yerel değişken bağlarının bozulmadığını koruyor.
+
+**Kapsam notu:** Çözüm açık belgelerdeki doğrudan statik expression üyelerine (`m.area`) yöneliktir. Qualified markup component tags, type-only qualified names, computed/dynamic member erişimleri ve açık olmayan belgeler için genel workspace symbol index'i bu değişiklikte uygulanmadı.
+
+### Güncel doğrulama
+
+- `cargo test --test cli an_unknown_new_project_template_does_not_create_the_target -- --exact`: **1 geçti**.
+- `cargo test --test dev dev_reloads_the_title_when_project_config_changes -- --exact`: **1 geçti**.
+- `cargo test --test cli the_language_server_resolves_exported_members_across_open_files -- --exact`: **1 geçti**; ayrıca var olan single-file LSP shadowing test **1 geçti**.
+- Son `cargo test --all-targets`: **390 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 84.
+- `git diff --check`: temiz. Commit veya push yapılmadı.
+
+Bu audit performans ölçümü içermez. Canlı config yenileme kapsamı sayfa title'ıdır; dinleyen soketin host/port ayarını çalışan süreçte yeniden bind etme davranışı bu değişiklikle kapsama alınmadı.

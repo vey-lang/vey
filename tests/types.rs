@@ -263,6 +263,23 @@ fn f(x: number) -> number {
 }
 
 #[test]
+fn a_return_in_finally_satisfies_the_function_return_type() {
+    check_ok(
+        "finally-return",
+        r#"
+fn f() -> number {
+  try {
+    print("body")
+  } finally {
+    return 7
+  }
+}
+let answer: number = f()
+"#,
+    );
+}
+
+#[test]
 fn a_generic_alias_can_be_used_from_another_module() {
     let dir = common::temp_dir("generic-module");
     std::fs::write(dir.join("types.vey"), "export type Box<T> = { value: T }\n").unwrap();
@@ -278,6 +295,80 @@ print(b.value)
     let output = common::run_file(&dir.join("app.vey"));
     assert!(output.status.success(), "{}", common::stderr(&output));
     assert!(common::stdout(&output).contains('2'));
+}
+
+#[test]
+fn an_earlier_argument_contextualizes_a_later_generic_callback() {
+    check_ok(
+        "generic-callback-inference",
+        r#"
+fn choose<T, U>(x: T, f: (T) -> U) -> U { return f(x) }
+let n: number = choose(1, fn(x) { return x + 1 })
+"#,
+    );
+}
+
+#[test]
+fn a_generic_interface_can_be_used_from_another_module() {
+    let dir = common::temp_dir("generic-interface-module");
+    std::fs::write(
+        dir.join("types.vey"),
+        "export interface Box<T: number> { value: T }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./types.vey\" as t\nlet b: t.Box<number> = { value: 2 }\n",
+    )
+    .unwrap();
+    let valid = common::check_file(&dir.join("app.vey"));
+    assert!(valid.status.success(), "{}", common::stderr(&valid));
+
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./types.vey\" as t\nlet b: t.Box<number> = { value: \"wrong\" }\n",
+    )
+    .unwrap();
+    let invalid = common::check_file(&dir.join("app.vey"));
+    assert!(!invalid.status.success(), "mismatched interface field was accepted");
+
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./types.vey\" as t\nlet b: t.Box<string> = { value: \"wrong\" }\n",
+    )
+    .unwrap();
+    let invalid_argument = common::check_file(&dir.join("app.vey"));
+    assert!(!invalid_argument.status.success(), "the interface constraint was ignored");
+    assert!(common::stderr(&invalid_argument).contains("expects number"));
+}
+
+#[test]
+fn an_imported_recursive_alias_checks_fields_after_recursive_edges() {
+    let dir = common::temp_dir("recursive-imported-alias");
+    std::fs::write(
+        dir.join("types.vey"),
+        "export type Tree = { value: number, children: [Tree] }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("valid.vey"),
+        "use \"./types.vey\" as t\nlet good: t.Tree = { value: 1, children: [{ value: 2, children: [] }] }\n",
+    )
+    .unwrap();
+    let valid = common::check_file(&dir.join("valid.vey"));
+    assert!(valid.status.success(), "{}", common::stderr(&valid));
+
+    std::fs::write(
+        dir.join("app.vey"),
+        r#"
+use "./types.vey" as t
+let bad: t.Tree = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [{ value: "wrong", children: [] }] }] }] }
+"#,
+    )
+    .unwrap();
+    let invalid = common::check_file(&dir.join("app.vey"));
+    assert!(!invalid.status.success(), "invalid nested value was accepted");
+    assert!(common::stderr(&invalid).contains("expected t.Tree"));
 }
 
 #[test]

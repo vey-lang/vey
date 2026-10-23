@@ -122,7 +122,7 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
                 .clone()
                 .or_else(|| config.title.clone())
                 .unwrap_or_else(|| default_title(&entry));
-            serve(&entry, &title, &host, port, true)
+            serve(&entry, &title, &host, port, true, parsed.title.clone())
         }
     }
 }
@@ -295,7 +295,14 @@ fn collect_sources(directory: &Path, files: &mut Vec<PathBuf>) {
 /// With `live` the files are watched, the page reloads when they change and a
 /// page that cannot be built shows the error. Without it the site is served
 /// the way a host would serve it.
-pub(crate) fn serve(entry: &Path, title: &str, host: &str, port: u16, live: bool) -> i32 {
+pub(crate) fn serve(
+    entry: &Path,
+    title: &str,
+    host: &str,
+    port: u16,
+    live: bool,
+    title_override: Option<String>,
+) -> i32 {
     let root = project_root(entry);
     let state = Arc::new(Mutex::new(DevState {
         live,
@@ -340,7 +347,7 @@ pub(crate) fn serve(entry: &Path, title: &str, host: &str, port: u16, live: bool
     if live {
         let watcher_state = Arc::clone(&state);
         let watcher_entry = entry.to_path_buf();
-        let watcher_title = title.to_string();
+        let watcher_title_override = title_override;
         let watcher_root = root.canonicalize().unwrap_or_else(|_| root.clone());
         thread::spawn(move || {
             let mut previous = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
@@ -353,6 +360,11 @@ pub(crate) fn serve(entry: &Path, title: &str, host: &str, port: u16, live: bool
                 thread::sleep(Duration::from_millis(50));
                 let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
                 let started = Instant::now();
+                let watcher_title = watcher_title_override
+                    .clone()
+                    .or_else(|| Config::find(&watcher_root).title)
+                    .unwrap_or_else(|| default_title(&watcher_entry));
+                lock(&watcher_state).title = watcher_title.clone();
                 match refresh_dev(&watcher_entry, &watcher_title, &watcher_state) {
                     Ok(_) => println!("rebuilt the site in {} ms", started.elapsed().as_millis()),
                     Err(err) => eprintln!("{}", err),
@@ -776,6 +788,16 @@ pub(crate) fn dev_snapshot(
     for path in &watch {
         if !paths.contains(path) {
             paths.push(path.clone());
+        }
+    }
+    // Watch the same settings candidates that Config::find searches, even
+    // when they do not exist yet, so creating vey.toml also triggers a reload.
+    let mut config_root = root.to_path_buf();
+    for _ in 0..8 {
+        paths.push(config_root.join(crate::cli::config::FILE));
+        match config_root.parent() {
+            Some(parent) if parent != config_root => config_root = parent.to_path_buf(),
+            _ => break,
         }
     }
     // The public folder is served as it is.

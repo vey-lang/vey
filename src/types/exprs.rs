@@ -714,6 +714,7 @@ impl TypeChecker<'_> {
             _ => Vec::new(),
         };
         let mut types = Vec::new();
+        let mut inferred = HashMap::new();
         let mut has_spread = false;
         for (index, arg) in args.iter().enumerate() {
             let Some(arg) = arg else {
@@ -727,8 +728,16 @@ impl TypeChecker<'_> {
                     types.push(self.infer_expr(inner)?);
                 }
                 other => {
-                    let want = expected.get(index).cloned();
-                    types.push(self.infer_expr_as(other, want.as_ref())?);
+                    let want = expected
+                        .get(index)
+                        .map(|ty| substitute_bound(ty, &inferred));
+                    let actual = self.infer_expr_as(other, want.as_ref())?;
+                    if let Some(param) = expected.get(index) {
+                        // Earlier arguments can settle type parameters before
+                        // a later callback is given its contextual type.
+                        unify_types(&actual, param, &mut inferred);
+                    }
+                    types.push(actual);
                 }
             }
         }

@@ -532,3 +532,31 @@ fn the_program_of_a_server_is_ended_with_the_command() {
         "the program still answers after the command is stopped"
     );
 }
+
+
+#[test]
+fn dev_reloads_the_title_when_project_config_changes() {
+    let dir = temp_dir("config-title-reload");
+    fs::write(
+        dir.join("main.vey"),
+        "component App() { main { h1 { \"Hello\" } } }\nbind(\"#app\", App())\n",
+    )
+    .unwrap();
+    fs::write(dir.join("vey.toml"), "title = \"Old title\"\n").unwrap();
+
+    let port = free_port();
+    let child = dev_command(&dir)
+        .arg("--port")
+        .arg(port.to_string())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+
+    let (status, _) = wait_for(port, "/", "<title>Old title</title>");
+    assert!(status.contains("200"), "status: {status}");
+
+    fs::write(dir.join("vey.toml"), "title = \"New title\"\n").unwrap();
+    let (status, body) = wait_for(port, "/", "<title>New title</title>");
+    assert!(status.contains("200"), "status: {status}");
+    assert!(body.contains("Hello"), "{body}");
+}

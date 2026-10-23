@@ -46,6 +46,14 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         }
     }
 
+    let template = match template_from(parsed.template.as_deref()) {
+        Ok(template) => template,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
+
     if let Err(err) = fs::create_dir_all(root) {
         eprintln!("cannot create {}: {}", name, err);
         return 1;
@@ -56,14 +64,6 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| name.clone());
-
-    let template = match template_from(parsed.template.as_deref()) {
-        Ok(template) => template,
-        Err(err) => {
-            eprintln!("{}", err);
-            return 1;
-        }
-    };
 
     let files = match template {
         Template::Page => page_files(&project),

@@ -49,11 +49,27 @@ pub fn hash(parts: &[&str]) -> u64 {
 
 /// Whether a bundle may be built from the cache.
 ///
-/// The key is the number of the sources and styles, so that a change in
-/// any source or style file makes the cache of no use.
+/// The key includes the compiler build, sources and styles. It is stable for
+/// identical compiler sources, unlike the executable's modification time.
 pub fn key(bundle_sources: &[SourceFile], styles: &[StyleFile], version: &str) -> u64 {
-    let mut parts: Vec<String> = Vec::with_capacity(bundle_sources.len() * 2 + styles.len() * 2 + 2);
+    key_with_fingerprint(
+        bundle_sources,
+        styles,
+        version,
+        env!("VEY_COMPILER_FINGERPRINT"),
+    )
+}
+
+fn key_with_fingerprint(
+    bundle_sources: &[SourceFile],
+    styles: &[StyleFile],
+    version: &str,
+    fingerprint: &str,
+) -> u64 {
+    let mut parts: Vec<String> =
+        Vec::with_capacity(bundle_sources.len() * 2 + styles.len() * 2 + 3);
     parts.push(version.to_string());
+    parts.push(fingerprint.to_string());
     for source in bundle_sources {
         parts.push(source.path.clone());
         parts.push(source.content.clone());
@@ -75,7 +91,11 @@ pub fn store(folder: &Path, bundle: &Bundle) {
         sources: bundle.sources.clone(),
         mappings: bundle.mappings.clone(),
         styles: bundle.styles.clone(),
-        modules: bundle.modules.iter().map(|module| module.path.clone()).collect(),
+        modules: bundle
+            .modules
+            .iter()
+            .map(|module| module.path.clone())
+            .collect(),
         warnings: bundle.warnings.clone(),
     };
     let k = key(&cached.sources, &cached.styles, env!("CARGO_PKG_VERSION"));
@@ -278,26 +298,27 @@ fn read_text(input: &mut &[u8]) -> Option<String> {
     Some(text)
 }
 
-/// The time the compiler was made.
-///
-/// The cache of a project is of no use when the compiler is another one, so
-/// the time of the program is part of the key.
-///
-/// Note: This function is kept for reference but the compiler stamp has been
-/// removed from the cache key (see `key()` above) because it changes on every
-/// binary rebuild, which would invalidate the cache during development.
-fn compiler_stamp() -> String {
-    let Ok(path) = std::env::current_exe() else {
-        return String::new();
-    };
-    let Ok(metadata) = std::fs::metadata(&path) else {
-        return String::new();
-    };
-    let Ok(modified) = metadata.modified() else {
-        return String::new();
-    };
-    let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) else {
-        return String::new();
-    };
-    format!("{}", duration.as_nanos())
+#[cfg(test)]
+mod tests {
+    use super::{key_with_fingerprint, SourceFile, StyleFile};
+    use std::path::PathBuf;
+
+    #[test]
+    fn compiler_fingerprint_invalidates_cache_without_changing_project_inputs() {
+        let sources = vec![SourceFile {
+            path: "main.vey".to_string(),
+            content: "print(1)".to_string(),
+        }];
+        let styles = vec![StyleFile {
+            path: PathBuf::from("site.css"),
+            content: "body { color: black }".to_string(),
+        }];
+
+        let first = key_with_fingerprint(&sources, &styles, "0.7.0", "compiler-a");
+        let same_build = key_with_fingerprint(&sources, &styles, "0.7.0", "compiler-a");
+        let changed_build = key_with_fingerprint(&sources, &styles, "0.7.0", "compiler-b");
+
+        assert_eq!(first, same_build);
+        assert_ne!(first, changed_build);
+    }
 }

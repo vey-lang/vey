@@ -19,6 +19,7 @@ pub(crate) fn block_always_exits(block: &Block) -> bool {
                 .is_some_and(|branch| stmt_always_exits(branch));
             then_exits && else_exits
         }
+        Some(Stmt::Try(decl)) => decl.finally.as_ref().is_some_and(block_always_exits),
         _ => false,
     }
 }
@@ -35,6 +36,7 @@ pub(crate) fn stmt_always_exits(stmt: &Stmt) -> bool {
                 .is_some_and(|branch| stmt_always_exits(branch));
             then_exits && else_exits
         }
+        Stmt::Try(decl) => decl.finally.as_ref().is_some_and(block_always_exits),
         Stmt::Block(block, _) => block_always_exits(block),
         _ => false,
     }
@@ -458,11 +460,51 @@ pub(crate) fn markup_has_await(nodes: &[MarkupNode]) -> bool {
 /// Two modules may have types of the same name, so the name of the module is
 /// part of the name of the type.
 pub(crate) fn qualified_type(module: &str, ty: Type) -> Type {
+    fn qualify_recursions(module: &str, ty: &mut Type) {
+        match ty {
+            Type::Recursion(name) if !name.contains('.') => {
+                *name = format!("{}.{}", module, name);
+            }
+            Type::Array(inner) | Type::Promise(inner) => qualify_recursions(module, inner),
+            Type::Tuple(items) | Type::Union(items) => {
+                for item in items {
+                    qualify_recursions(module, item);
+                }
+            }
+            Type::Dict(key, value) | Type::Result(key, value) => {
+                qualify_recursions(module, key);
+                qualify_recursions(module, value);
+            }
+            Type::Object(fields) | Type::Named(_, fields) | Type::Interface(_, fields) => {
+                for field in fields {
+                    qualify_recursions(module, &mut field.ty);
+                }
+            }
+            Type::Function(function) => {
+                for param in &mut function.params {
+                    qualify_recursions(module, param);
+                }
+                qualify_recursions(module, &mut function.ret);
+                for (_, constraint) in &mut function.constraints {
+                    qualify_recursions(module, constraint);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut ty = ty;
+    qualify_recursions(module, &mut ty);
     match ty {
-        Type::EnumUnion(name) => Type::EnumUnion(format!("{}.{}", module, name)),
-        Type::Named(name, fields) => Type::Named(format!("{}.{}", module, name), fields),
+        Type::EnumUnion(name) if !name.contains('.') => {
+            Type::EnumUnion(format!("{}.{}", module, name))
+        }
+        Type::Named(name, fields) if !name.contains('.') => {
+            Type::Named(format!("{}.{}", module, name), fields)
+        }
         Type::Interface(name, fields) => {
-            Type::Interface(format!("{}.{}", module, name), fields)
+            let name = if name.contains('.') { name } else { format!("{}.{}", module, name) };
+            Type::Interface(name, fields)
         }
         other => other,
     }

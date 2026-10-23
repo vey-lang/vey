@@ -1818,6 +1818,8 @@ src/cli/             the commands
   add.rs             adding a package of npm to a project
   args.rs            command line parsing
   config.rs          the settings of a project
+  program.rs         project program discovery and configuration
+  project.rs         project kind and entry-point handling
   run.rs             run, test and check
   build.rs           the build of the site
   site.rs            static sites

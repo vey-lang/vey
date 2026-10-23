@@ -5,7 +5,7 @@
 //! the type of the expression under the cursor and the names that may be
 //! written there.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
@@ -401,6 +401,118 @@ impl Server {
         Some(Names::of(&program, text))
     }
 
+    fn imported_module_uri(
+        &self,
+        uri: &str,
+        names: &Names,
+        alias: &str,
+        receiver_symbol: Option<usize>,
+    ) -> Option<String> {
+        let (_, import_path, _) =
+            names
+                .module_imports
+                .iter()
+                .find(|(module_alias, _, symbol)| {
+                    module_alias == alias && Some(*symbol) == receiver_symbol
+                })?;
+        if import_path.starts_with("npm:") {
+            return None;
+        }
+        let source = path_of(uri)?;
+        let parent = source.parent()?;
+        let mut target = parent.join(import_path);
+        if !target.exists() {
+            let with_extension = parent.join(format!("{}.vey", import_path));
+            if with_extension.exists() {
+                target = with_extension;
+            }
+        }
+        let target = target.canonicalize().ok()?;
+        self.files.keys().find_map(|candidate_uri| {
+            path_of(candidate_uri)
+                .and_then(|path| path.canonicalize().ok())
+                .filter(|path| path == &target)
+                .map(|_| candidate_uri.clone())
+        })
+    }
+
+    fn symbol_target_at(
+        &self,
+        uri: &str,
+        line: usize,
+        col: usize,
+    ) -> Option<(String, String, vey::lexer::Pos)> {
+        let names = self.names(uri)?;
+        if let Some(symbol) = names.symbol_at(line, col) {
+            if let Some(definition) = names.symbols.get(symbol)?.declaration {
+                let (name, pos, _) = names.defs.get(definition)?;
+                return Some((uri.to_string(), name.clone(), *pos));
+            }
+        }
+        let member = names.module_member_uses.iter().find(|member| {
+            member.pos.line == line
+                && col >= member.pos.col
+                && col < member.pos.col + member.name.chars().count()
+        })?;
+        let target_uri = self.imported_module_uri(uri, &names, &member.alias, member.receiver_symbol)?;
+        let target_names = self.names(&target_uri)?;
+        if !target_names.exports.contains(&member.name) {
+            return None;
+        }
+        let (definition, (name, pos, _)) = target_names
+            .defs
+            .iter()
+            .enumerate()
+            .find(|(_, (name, _, _))| name == &member.name)?;
+        target_names.def_symbols.get(definition).copied().flatten()?;
+        Some((target_uri, name.clone(), *pos))
+    }
+
+    fn symbol_occurrences(
+        &self,
+        target_uri: &str,
+        target_name: &str,
+        target_pos: vey::lexer::Pos,
+    ) -> Option<Vec<(String, String, vey::lexer::Pos)>> {
+        let target_names = self.names(target_uri)?;
+        let definition = target_names
+            .defs
+            .iter()
+            .position(|(name, pos, _)| name == target_name && *pos == target_pos)?;
+        let symbol = target_names.def_symbols.get(definition).copied().flatten()?;
+        let mut occurrences = vec![(
+            target_uri.to_string(),
+            target_name.to_string(),
+            target_names.defs[definition].1,
+        )];
+        for (index, (name, pos)) in target_names.uses.iter().enumerate() {
+            if target_names.use_symbols[index] == Some(symbol) {
+                occurrences.push((target_uri.to_string(), name.clone(), *pos));
+            }
+        }
+        for candidate_uri in self.files.keys() {
+            let Some(candidate_names) = self.names(candidate_uri) else {
+                continue;
+            };
+            for member in &candidate_names.module_member_uses {
+                if member.name == target_name
+                    && self
+                        .imported_module_uri(
+                            candidate_uri,
+                            &candidate_names,
+                            &member.alias,
+                            member.receiver_symbol,
+                        )
+                        .as_deref()
+                        == Some(target_uri)
+                {
+                    occurrences.push((candidate_uri.clone(), member.name.clone(), member.pos));
+                }
+            }
+        }
+        Some(occurrences)
+    }
+
     /// The names of a file, in the shape the protocol wants.
     fn document_symbols(&self, uri: &str) -> Value {
         let Some(names) = self.names(uri) else {
@@ -420,68 +532,73 @@ impl Server {
 
     /// Where a name is declared.
     fn definition(&self, uri: &str, line: usize, col: usize) -> Value {
-        let Some(names) = self.names(uri) else {
+        let Some((target_uri, target_name, target_pos)) = self.symbol_target_at(uri, line, col)
+        else {
             return Value::Null;
         };
-        let Some(symbol) = names.symbol_at(line, col) else {
+        let Some(names) = self.names(&target_uri) else {
             return Value::Null;
         };
-        let Some(definition) = names.symbols[symbol].declaration else {
+        let Some((name, pos, _)) = names
+            .defs
+            .iter()
+            .find(|(name, pos, _)| name == &target_name && *pos == target_pos)
+        else {
             return Value::Null;
         };
-        let (name, pos, _) = &names.defs[definition];
-        location(uri, &names.source, pos, name)
+        location(&target_uri, &names.source, pos, name)
     }
 
     /// Where a name is used.
     fn references(&self, uri: &str, line: usize, col: usize) -> Value {
-        let Some(names) = self.names(uri) else {
+        let Some((target_uri, target_name, target_pos)) = self.symbol_target_at(uri, line, col)
+        else {
             return Value::List(Vec::new());
         };
-        let Some(symbol) = names.symbol_at(line, col) else {
+        let Some(occurrences) = self.symbol_occurrences(&target_uri, &target_name, target_pos) else {
             return Value::List(Vec::new());
         };
-        let mut out = Vec::new();
-        if let Some(definition) = names.symbols[symbol].declaration {
-            let (name, pos, _) = &names.defs[definition];
-            out.push(location(uri, &names.source, pos, name));
-        }
-        for (index, (name, pos)) in names.uses.iter().enumerate() {
-            if names.use_symbols[index] == Some(symbol) {
-                out.push(location(uri, &names.source, pos, name));
-            }
-        }
-        Value::List(out)
+        Value::List(
+            occurrences
+                .iter()
+                .filter_map(|(file_uri, name, pos)| {
+                    self.files
+                        .get(file_uri)
+                        .map(|source| location(file_uri, source, pos, name))
+                })
+                .collect(),
+        )
     }
 
     /// The places where a name is written, so that it may be changed.
     fn rename(&self, uri: &str, line: usize, col: usize, new_name: &str) -> Value {
-        let Some(names) = self.names(uri) else {
+        let Some((target_uri, target_name, target_pos)) = self.symbol_target_at(uri, line, col)
+        else {
             return Value::Null;
         };
-        let Some(symbol) = names.symbol_at(line, col) else {
+        let Some(occurrences) = self.symbol_occurrences(&target_uri, &target_name, target_pos) else {
             return Value::Null;
         };
-        let Some(definition) = names.symbols[symbol].declaration else {
-            return Value::Null;
-        };
-        let mut changes = Vec::new();
-        let mut places = vec![(names.defs[definition].0.clone(), names.defs[definition].1)];
-        for (index, (name, pos)) in names.uses.iter().enumerate() {
-            if names.use_symbols[index] == Some(symbol) {
-                places.push((name.clone(), *pos));
+        let mut changes: Vec<(String, Vec<Value>)> = Vec::new();
+        for (file_uri, name, pos) in occurrences {
+            let Some(source) = self.files.get(&file_uri) else {
+                continue;
+            };
+            let edit = json::object(vec![
+                ("range", name_range(source, &pos, &name)),
+                ("newText", json::text(new_name)),
+            ]);
+            if let Some((_, edits)) = changes.iter_mut().find(|(uri, _)| uri == &file_uri) {
+                edits.push(edit);
+            } else {
+                changes.push((file_uri, vec![edit]));
             }
         }
-        for (name, pos) in places {
-            changes.push(json::object(vec![
-                ("range", name_range(&names.source, &pos, &name)),
-                ("newText", json::text(new_name)),
-            ]));
-        }
-        json::object(vec![(
-            "changes",
-            json::object(vec![(uri, Value::List(changes))]),
-        )])
+        let document_changes: Vec<(&str, Value)> = changes
+            .iter()
+            .map(|(uri, edits)| (uri.as_str(), Value::List(edits.clone())))
+            .collect();
+        json::object(vec![("changes", json::object(document_changes))])
     }
 
     /// The type of the expression under the cursor.
@@ -621,6 +738,12 @@ fn initialize() -> Value {
 /// editor may say where a name is declared and where it is used.
 struct Names {
     source: String,
+    /// File imports, by their local module alias.
+    module_imports: Vec<(String, String, usize)>,
+    /// Direct static member accesses on imported module aliases.
+    module_member_uses: Vec<ModuleMemberUse>,
+    /// Top-level names visible to another module.
+    exports: HashSet<String>,
     /// The names that are declared.
     defs: Vec<(String, vey::lexer::Pos, &'static str)>,
     /// The binding identity for each declaration (including non-value names).
@@ -657,10 +780,51 @@ struct NameSymbol {
     declaration: Option<usize>,
 }
 
+struct ModuleMemberUse {
+    alias: String,
+    receiver_symbol: Option<usize>,
+    name: String,
+    pos: vey::lexer::Pos,
+}
+
+fn member_name_pos(source: &str, operator: vey::lexer::Pos, name: &str) -> vey::lexer::Pos {
+    let Some(line) = source.lines().nth(operator.line.saturating_sub(1)) else {
+        return operator;
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = operator.col.saturating_sub(1);
+    while matches!(chars.get(index), Some('?') | Some('.')) {
+        index += 1;
+    }
+    loop {
+        while chars.get(index).is_some_and(|ch| ch.is_whitespace()) {
+            index += 1;
+        }
+        if chars.get(index) == Some(&'/') && chars.get(index + 1) == Some(&'*') {
+            index += 2;
+            while index + 1 < chars.len() && !(chars[index] == '*' && chars[index + 1] == '/') {
+                index += 1;
+            }
+            index = (index + 2).min(chars.len());
+            continue;
+        }
+        break;
+    }
+    let expected: Vec<char> = name.chars().collect();
+    if chars.get(index..index + expected.len()) == Some(expected.as_slice()) {
+        vey::lexer::Pos::new(operator.line, index + 1)
+    } else {
+        operator
+    }
+}
+
 impl Names {
     fn new(source: &str) -> Names {
         Names {
             source: source.to_string(),
+            module_imports: Vec::new(),
+            module_member_uses: Vec::new(),
+            exports: HashSet::new(),
             defs: Vec::new(),
             def_symbols: Vec::new(),
             uses: Vec::new(),
@@ -911,9 +1075,17 @@ impl Names {
                 if let Some(init) = &decl.init {
                     self.expr(init);
                 }
+                if decl.exported {
+                    for (name, _) in decl.pattern.bindings() {
+                        self.exports.insert(name.to_string());
+                    }
+                }
                 self.pattern(&decl.pattern, "variable");
             }
             Stmt::Fn(decl) => {
+                if decl.exported {
+                    self.exports.insert(decl.name.clone());
+                }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "function");
                 self.push_scope(Some((decl.body.start, decl.body.end)));
@@ -927,6 +1099,9 @@ impl Names {
                 self.pop_scope();
             }
             Stmt::Component(decl) => {
+                if decl.exported {
+                    self.exports.insert(decl.name.clone());
+                }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "component");
                 self.push_scope(Some((decl.body_start, decl.body_end)));
@@ -943,6 +1118,9 @@ impl Names {
                 self.pop_scope();
             }
             Stmt::Enum(decl) => {
+                if decl.exported {
+                    self.exports.insert(decl.name.clone());
+                }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "enum");
                 for variant in &decl.variants {
@@ -950,10 +1128,16 @@ impl Names {
                 }
             }
             Stmt::Type(decl) => {
+                if decl.exported {
+                    self.exports.insert(decl.name.clone());
+                }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "type");
             }
             Stmt::Interface(decl) => {
+                if decl.exported {
+                    self.exports.insert(decl.name.clone());
+                }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "interface");
             }
@@ -1053,6 +1237,10 @@ impl Names {
                     self.define(&decl.alias, pos, "module");
                 } else {
                     self.define_hidden(&decl.alias, "module");
+                }
+                if let Some(symbol) = self.resolve(&decl.alias) {
+                    self.module_imports
+                        .push((decl.alias.clone(), decl.path.clone(), symbol));
                 }
             }
             Stmt::Use(_) => {}
@@ -1215,7 +1403,17 @@ impl Names {
                     self.expr(arg);
                 }
             }
-            Expr::Member(object, prop, _, _) => {
+            Expr::Member(object, prop, _, pos) => {
+                if let (Expr::Ident(alias, _), vey::ast::MemberProp::Name(name)) =
+                    (object.as_ref(), prop)
+                {
+                    self.module_member_uses.push(ModuleMemberUse {
+                        alias: alias.clone(),
+                        receiver_symbol: self.resolve(alias),
+                        name: name.clone(),
+                        pos: member_name_pos(&self.source, *pos, name),
+                    });
+                }
                 self.expr(object);
                 if let vey::ast::MemberProp::Computed(index) = prop {
                     self.expr(index);

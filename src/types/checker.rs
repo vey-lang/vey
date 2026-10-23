@@ -9,7 +9,7 @@ use crate::types::core::{
     rest_element_type, Alias, EnumFieldInfo, EnumInfo, EnumVariantInfo, FunctionType, ImplInfo,
     InterfaceInfo, ResolvedCalls, Type,
 };
-use crate::types::helpers::{block_has_await, name_alias};
+use crate::types::helpers::{block_has_await, name_alias, qualified_type};
 use crate::types::rules::{assignable_with, substitute_bound, Opening};
 use crate::VeyError;
 
@@ -21,6 +21,7 @@ use crate::VeyError;
 #[derive(Clone)]
 pub struct GenericAlias {
     pub params: Vec<String>,
+    pub constraints: Vec<Option<Type>>,
     pub body: Type,
 }
 
@@ -28,6 +29,9 @@ pub struct GenericAlias {
 pub struct ModuleTypeEnv {
     pub types: HashMap<String, Type>,
     pub generic_aliases: HashMap<String, GenericAlias>,
+    /// Shapes used to open recursive aliases in importing modules; these do
+    /// not make private aliases available as written type names.
+    pub alias_shapes: HashMap<String, Type>,
     /// The types of the exported values, so that a call to a function of
     /// another module is checked as well.
     pub values: HashMap<String, Type>,
@@ -67,10 +71,19 @@ fn build_checker<'a>(
     let aliases = collect_aliases(program, file, &enums)?;
     let interfaces = collect_interfaces(program, file, &enums, &aliases)?;
     let impls = collect_impls(program, file, &aliases)?;
+    let mut alias_types = HashMap::new();
+    for (module, env) in imports {
+        for (name, shape) in &env.alias_shapes {
+            alias_types.insert(
+                format!("{}.{}", module, name),
+                qualified_type(module, shape.clone()),
+            );
+        }
+    }
     Ok(TypeChecker {
         file,
         aliases,
-        alias_types: HashMap::new(),
+        alias_types,
         enums,
         interfaces,
         impls,
@@ -92,6 +105,30 @@ fn build_checker<'a>(
     })
 }
 
+fn exported_type_params(
+    checker: &TypeChecker<'_>,
+    params: &[TypeParam],
+) -> Result<(Vec<String>, Vec<Option<Type>>), VeyError> {
+    let vars: HashMap<String, Type> = params
+        .iter()
+        .map(|param| (param.name.clone(), Type::Var(param.name.clone())))
+        .collect();
+    let constraints = params
+        .iter()
+        .map(|param| {
+            param
+                .constraint
+                .as_ref()
+                .map(|expr| checker.resolve_type_with(expr, &mut Vec::new(), &vars))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        params.iter().map(|param| param.name.clone()).collect(),
+        constraints,
+    ))
+}
+
 pub fn check(
     program: &Program,
     file: &str,
@@ -106,6 +143,13 @@ pub fn check(
     env.enums = checker.enums.clone();
     // The interfaces of the module are known to the modules that use them.
     env.interfaces = checker.interfaces.keys().cloned().collect();
+    // Recursive shapes support imported assignability checks without making
+    // private aliases addressable through the module namespace.
+    for name in checker.aliases.keys() {
+        if let Some(shape) = checker.alias_types.get(name) {
+            env.alias_shapes.insert(name.clone(), shape.clone());
+        }
+    }
     // The names the module keeps to itself.
     env.private = program.private.iter().cloned().collect();
     // The calls whose arguments are given by name.
@@ -127,14 +171,12 @@ pub fn check(
                         .get(&decl.name)
                         .cloned()
                         .unwrap_or(Type::Any);
+                    let (params, constraints) = exported_type_params(&checker, &alias.params)?;
                     env.generic_aliases.insert(
                         decl.name.clone(),
                         GenericAlias {
-                            params: decl
-                                .type_params
-                                .iter()
-                                .map(|param| param.name.clone())
-                                .collect(),
+                            params,
+                            constraints,
                             body,
                         },
                     );
@@ -145,8 +187,32 @@ pub fn check(
                     .insert(decl.name.clone(), Type::EnumUnion(decl.name.clone()));
             }
             Stmt::Interface(decl) if decl.exported => {
-                if let Ok(ty) = checker.interface_type(&decl.name) {
-                    env.types.insert(decl.name.clone(), ty);
+                if let Some(info) = checker.interfaces.get(&decl.name) {
+                    if info.params.is_empty() {
+                        if let Ok(ty) = checker.interface_type(&decl.name) {
+                            env.types.insert(decl.name.clone(), ty);
+                        }
+                    } else {
+                        let vars: HashMap<String, Type> = info
+                            .params
+                            .iter()
+                            .map(|param| (param.name.clone(), Type::Var(param.name.clone())))
+                            .collect();
+                        let body = checker.interface_type_with(
+                            &decl.name,
+                            &vars,
+                            &mut Vec::new(),
+                        )?;
+                        let (params, constraints) = exported_type_params(&checker, &info.params)?;
+                        env.generic_aliases.insert(
+                            decl.name.clone(),
+                            GenericAlias {
+                                params,
+                                constraints,
+                                body,
+                            },
+                        );
+                    }
                 }
             }
             _ => {}

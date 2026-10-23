@@ -44,9 +44,9 @@ fn run_runtime(label: &str, script: &str) -> String {
         .expect("failed to start node");
     assert!(
         output.status.success(),
-      "runtime script failed:\n{}\nstdout:\n{}",
-      String::from_utf8_lossy(&output.stderr),
-      String::from_utf8_lossy(&output.stdout)
+        "runtime script failed:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
     );
     String::from_utf8_lossy(&output.stdout).to_string()
 }
@@ -96,6 +96,20 @@ console.log(el.children.length, el.children[0].nodeType);
     // Raw markup becomes a fragment, never a text node with "[object Object]".
     assert!(text.contains("1 11"), "{text}");
     assert!(!text.contains("[object Object]"), "{text}");
+}
+
+#[test]
+fn test_summary_installs_only_one_exit_listener() {
+    let text = run_runtime(
+        "test-summary-listener",
+        r#"
+const proc = require("node:process");
+const before = proc.listenerCount("exit");
+for (let i = 0; i < 12; i++) runtime.test("test " + i, () => {});
+console.log(proc.listenerCount("exit") - before);
+"#,
+    );
+    assert!(text.lines().any(|line| line == "1"), "{text}");
 }
 
 #[test]
@@ -187,7 +201,10 @@ fn the_tags_of_the_markup_are_coloured() {
 console.log(runtime.highlight("section.card {\n  h2 { title }\n}"));
 "#,
     );
-    assert!(text.contains("<span class=\"tag\">section</span>"), "{text}");
+    assert!(
+        text.contains("<span class=\"tag\">section</span>"),
+        "{text}"
+    );
     assert!(text.contains("<span class=\"cls\">card</span>"), "{text}");
     assert!(text.contains("<span class=\"tag\">h2</span>"), "{text}");
 }
@@ -260,7 +277,10 @@ console.log(JSON.stringify(runtime.regex("\\d+").split("a1b22c")));
     assert!(text.contains("true false"), "{text}");
     assert!(text.contains("[\"12-34\",\"12\",\"34\"]"), "{text}");
     assert!(text.contains("null"), "{text}");
-    assert!(text.contains("[[\"1-2\",\"1\",\"2\"],[\"3-4\",\"3\",\"4\"]]"), "{text}");
+    assert!(
+        text.contains("[[\"1-2\",\"1\",\"2\"],[\"3-4\",\"3\",\"4\"]]"),
+        "{text}"
+    );
     assert!(text.contains("34-12"), "{text}");
     assert!(text.contains("x x"), "{text}");
     assert!(text.contains("[\"a\",\"b\",\"c\"]"), "{text}");
@@ -311,7 +331,12 @@ console.log(runtime.date.format(instant, "YYYY-MM-DD HH:mm", { timeZone: "Americ
 console.log(runtime.date.daysBetween("2024-03-10T23:00:00-05:00", "2024-03-11T01:00:00-04:00"));
 "#,
     );
-    assert!(text.contains(r#"{"year":2024,"month":3,"day":10,"hour":1,"minute":30,"second":0,"weekday":0}"#), "{text}");
+    assert!(
+        text.contains(
+            r#"{"year":2024,"month":3,"day":10,"hour":1,"minute":30,"second":0,"weekday":0}"#
+        ),
+        "{text}"
+    );
     assert!(text.contains("2024-03-10 01:30"), "{text}");
     assert!(text.contains("1"), "{text}");
 }
@@ -425,8 +450,14 @@ Promise.all([
     assert!(text.contains(r#""method":"PATCH""#), "{text}");
     assert!(text.contains(r#""method":"DELETE""#), "{text}");
     assert!(text.contains(r#""method":"HEAD""#), "{text}");
-    assert!(text.contains(r#""body":"{\"value\":1}","type":"application/json""#), "{text}");
-    assert!(text.contains(r#""body":"{\"value\":2}","type":"application/json""#), "{text}");
+    assert!(
+        text.contains(r#""body":"{\"value\":1}","type":"application/json""#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#""body":"{\"value\":2}","type":"application/json""#),
+        "{text}"
+    );
 }
 
 #[test]
@@ -626,7 +657,10 @@ state.set("user.name", "Grace");
 console.log(JSON.stringify(state.peek()));
 "#,
     );
-    assert!(text.contains(r#"{"user":{"name":"Grace","age":36},"theme":"dark"}"#), "{text}");
+    assert!(
+        text.contains(r#"{"user":{"name":"Grace","age":36},"theme":"dark"}"#),
+        "{text}"
+    );
 }
 
 #[test]
@@ -696,7 +730,7 @@ console.log(dom.root.childNodes[0] === list);
 console.log(list.childNodes[0] === list.childNodes[1]);
 console.log(dom.root.textContent);
 console.log(item.getAttribute("key"));
-"##
+"##,
     );
     // The list is the same node, and the item with the key "b" comes first.
     assert!(text.contains("true"), "{text}");
@@ -938,7 +972,7 @@ dom.root.appendChild(server);
 browser.mount("#app", browser.__h("p", { class: "hello" }, ["hi"]));
 console.log(dom.root.childNodes.length);
 console.log(dom.root.childNodes[0] === server);
-"##
+"##,
     );
     assert!(text.contains("1"), "{text}");
     assert!(text.contains("true"), "{text}");
@@ -966,7 +1000,7 @@ console.log(mounted, destroyed);
 const input = browser.ref();
 browser.mount("#app", browser.__h("input", { ref: input }, []));
 console.log(input.value.tagName);
-"##
+"##,
     );
     assert!(text.contains("11"), "{text}");
     assert!(text.contains("1 1"), "{text}");
@@ -988,7 +1022,7 @@ browser.navigate("/users/7");
 console.log(JSON.stringify(seen));
 console.log(dom.root.textContent);
 console.log(browser.routeParams().id, browser.currentRoute().path);
-"##
+"##,
     );
     assert!(text.contains("[\"7\"]"), "{text}");
     assert!(text.contains("user 7"), "{text}");
@@ -1156,7 +1190,10 @@ app.start(() => {
 });
 "#,
     );
-    assert!(text.contains(r#"[[200,"yes",null],[200,null,"yes"]]"#), "{text}");
+    assert!(
+        text.contains(r#"[[200,"yes",null],[200,null,"yes"]]"#),
+        "{text}"
+    );
 }
 
 #[test]
@@ -1207,7 +1244,7 @@ app.get("/download", (req, res) => res.download(file, "report.txt"));
 app.get("/missing", (req, res) => res.sendFile(file + ".missing"));
 app.start(() => {
   const get = path => new Promise(resolve => {
-    http.get("http://127.0.0.1:" + app.port() + path, res => {
+    http.get({ hostname: "127.0.0.1", port: app.port(), path, headers: { Accept: "application/json" } }, res => {
       let body = "";
       res.on("data", chunk => body += chunk);
       res.on("end", () => resolve({ status: res.statusCode, body, disposition: res.headers["content-disposition"] || null }));
@@ -1222,9 +1259,12 @@ app.start(() => {
 });
 "#,
     );
-    assert!(text.contains(r#"{"status":200,"body":"file body","disposition":null}"#), "{text}");
+    assert!(
+        text.contains(r#"{"status":200,"body":"file body","disposition":null}"#),
+        "{text}"
+    );
     assert!(text.contains(r#"{"status":200,"body":"file body","disposition":"attachment; filename=\"report.txt\""}"#), "{text}");
-    assert!(text.contains(r#"{"status":404,"body":"Not found","disposition":null}"#), "{text}");
+    assert!(text.contains(r#"{"status":404,"body":"404 Nothing here.\nThe link may be broken, or the page may have moved.","disposition":null}"#), "{text}");
 }
 
 #[test]
@@ -1613,7 +1653,10 @@ app.start(() => {
 });
 "#,
     );
-    assert!(text.contains(r#"{"samePath":true,"sameMethod":true,"sameObject":true}"#), "{text}");
+    assert!(
+        text.contains(r#"{"samePath":true,"sameMethod":true,"sameObject":true}"#),
+        "{text}"
+    );
 }
 
 #[test]
@@ -1680,7 +1723,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":204,"origin":"https://app.example","credentials":"true","methods":"GET, OPTIONS","headers":"X-Token","maxAge":"300","vary":"Origin"}"#)
+        Some(
+            r#"{"status":204,"origin":"https://app.example","credentials":"true","methods":"GET, OPTIONS","headers":"X-Token","maxAge":"300","vary":"Origin"}"#
+        )
     );
 }
 
@@ -1722,7 +1767,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":200,"encoding":"gzip","vary":"Accept-Encoding","length":null,"decoded":"compress this response body"}"#)
+        Some(
+            r#"{"status":200,"encoding":"gzip","vary":"Accept-Encoding","length":null,"decoded":"compress this response body"}"#
+        )
     );
 }
 
@@ -1886,7 +1933,7 @@ app.start(() => {
     port: app.port(),
     path: "/",
     method: "POST",
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json", "Accept": "application/json" }
   }, (res) => {
     let body = "";
     res.on("data", (chunk) => { body += chunk; });
@@ -1902,7 +1949,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":400,"body":"Invalid JSON request body.","handled":false}"#)
+        Some(
+            r#"{"status":400,"body":"400 That request could not be read.\nThe body of the request is not valid JSON.","handled":false}"#
+        )
     );
 }
 
@@ -2081,7 +2130,10 @@ console.log(
 );
 "#,
     );
-    assert!(text.contains("../lib/index.js /tmp/project/file.txt true file .txt /"), "{text}");
+    assert!(
+        text.contains("../lib/index.js /tmp/project/file.txt true file .txt /"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -2160,6 +2212,7 @@ app.start(() => {
     method: "POST",
     headers: {
       "Content-Type": "text/plain",
+      "Accept": "application/json",
       "Transfer-Encoding": "chunked"
     }
   }, (res) => {
@@ -2181,7 +2234,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":413,"body":"The request is too large.","handled":false}"#)
+        Some(
+            r#"{"status":413,"body":"413 That was too large.\nThe body of the request is bigger than this server takes.","handled":false}"#
+        )
     );
 }
 
@@ -2270,8 +2325,8 @@ app.start(() => {
 "#,
     );
     assert_eq!(
-      text.lines().last(),
-      Some(r#"{"status":202,"route":"handled","body":"{\"route\":\"explicit\"}"}"#)
+        text.lines().last(),
+        Some(r#"{"status":202,"route":"handled","body":"{\"route\":\"explicit\"}"}"#)
     );
 }
 
@@ -2416,7 +2471,7 @@ nodeFs.realpathSync = function(filename, options) {
 const app = runtime.server(0);
 app.static(root);
 app.start(() => {
-  http.get("http://127.0.0.1:" + app.port() + "/asset.txt", res => {
+  http.get("http://127.0.0.1:" + app.port() + "/asset.txt", { headers: { Accept: "application/json" } }, res => {
     let body = "";
     res.on("data", chunk => body += chunk);
     res.on("end", async () => {
@@ -2431,7 +2486,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":403,"body":"Forbidden","swapped":true}"#)
+        Some(
+            r#"{"status":403,"body":"403 That file is not served.\nThis path is outside the folder of the files.","swapped":true}"#
+        )
     );
 }
 
@@ -2531,7 +2588,7 @@ app.start(() => {
     return originalOpenSync.call(nodeFs, filename, flags, mode);
   };
   http.get("http://127.0.0.1:" + app.port() + "/asset.txt", {
-    headers: { Range: "bytes=0-5" }
+    headers: { Range: "bytes=0-5", Accept: "application/json" }
   }, res => {
     let body = "";
     res.on("data", chunk => body += chunk);
@@ -2547,7 +2604,9 @@ app.start(() => {
     );
     assert_eq!(
         text.lines().last(),
-        Some(r#"{"status":403,"body":"Forbidden","swapped":true}"#)
+        Some(
+            r#"{"status":403,"body":"403 That file is not served.\nThis path is outside the folder of the files.","swapped":true}"#
+        )
     );
 }
 
@@ -3406,7 +3465,6 @@ const path = require("node:path");
     assert!(text.contains("the file of the stream"), "{text}");
 }
 
-
 #[test]
 fn the_lists_of_the_runtime_are_the_lists_of_the_compiler() {
     // The highlighter of the runtime has its own list of the words and of
@@ -3483,7 +3541,6 @@ fn list_of(source: &str, start: &str, end: &str) -> Vec<String> {
     out.sort();
     out
 }
-
 
 #[test]
 fn the_server_has_the_pieces_that_keep_a_browser_from_doing_what_it_should_not() {
@@ -3616,7 +3673,7 @@ app.start(() => {
 }
 
 #[test]
-fn the_files_of_a_folder_are_served_before_the_routes() {
+fn a_route_wins_against_a_file_of_the_same_name() {
     let text = run_runtime(
         "static-first",
         r#"
@@ -3642,7 +3699,10 @@ app.start(() => {
 });
 "#,
     );
-    assert!(text.contains("the file"), "{text}");
+    assert!(
+        text.lines().last().is_some_and(|line| line == "the route"),
+        "{text}"
+    );
 }
 
 #[test]

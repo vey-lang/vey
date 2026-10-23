@@ -157,7 +157,27 @@ impl TypeChecker<'_> {
                     for (param, ty) in alias.params.iter().zip(resolved_args) {
                         subst.insert(param.clone(), ty);
                     }
-                    return Ok(substitute(&alias.body, &subst));
+                    for (index, param) in alias.params.iter().enumerate() {
+                        let Some(constraint) = alias.constraints.get(index).and_then(Option::as_ref)
+                        else {
+                            continue;
+                        };
+                        let expected = substitute(constraint, &subst);
+                        let actual = subst.get(param).expect("every generic parameter was resolved");
+                        if !self.fits(actual, &expected) {
+                            return Err(self.error(
+                                *pos,
+                                format!(
+                                    "type '{}.{}' expects {}, found {}",
+                                    module,
+                                    alias_name,
+                                    expected.display(),
+                                    actual.display()
+                                ),
+                            ));
+                        }
+                    }
+                    return Ok(qualified_type(module, substitute(&alias.body, &subst)));
                 }
                 // An interface that takes type arguments.
                 if let Some(info) = self.interfaces.get(name) {

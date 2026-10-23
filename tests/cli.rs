@@ -269,6 +269,27 @@ fn a_new_project_can_be_built() {
 }
 
 #[test]
+fn an_unknown_new_project_template_does_not_create_the_target() {
+    let dir = temp_dir("new-project-invalid-template");
+    let project = dir.join("app");
+    let output = vey()
+        .arg("new")
+        .arg(&project)
+        .arg("--template")
+        .arg("unknown")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("there is no template named 'unknown'"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!project.exists(), "invalid input created the target directory");
+}
+
+#[test]
 fn every_page_of_a_project_becomes_a_page_of_the_site() {
     let dir = temp_dir("many-pages");
     let project = dir.join("project");
@@ -1940,4 +1961,149 @@ fn the_templates_of_a_new_project_build_what_they_run() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn the_language_server_resolves_exported_members_across_open_files() {
+    let dir = temp_dir("lsp-cross-file");
+    let math = dir.join("math.vey");
+    let main = dir.join("main.vey");
+    let other = dir.join("other.vey");
+    let other_main = dir.join("other-main.vey");
+    let math_source = "export fn area() { return 1 }\n";
+    let main_source =
+        "use \"./math.vey\" as m\nprint(\"😀\", m.area())\nfn decoy(m) { print(m.area()) }\n";
+    let other_source = "export fn area() { return 2 }\n";
+    let other_main_source = "use \"./other.vey\" as m\nprint(m.area())\n";
+    write(&math, math_source);
+    write(&main, main_source);
+    write(&other, other_source);
+    write(&other_main, other_main_source);
+    let math_uri = format!("file://{}", math.display());
+    let main_uri = format!("file://{}", main.display());
+    let other_uri = format!("file://{}", other.display());
+    let other_main_uri = format!("file://{}", other_main.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("lsp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        for (uri, source) in [
+            (&math_uri, math_source),
+            (&main_uri, main_source),
+            (&other_uri, other_source),
+            (&other_main_uri, other_main_source),
+        ] {
+            let open = format!(
+                "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+                uri,
+                serde_escape(source)
+            );
+            stdin
+                .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+                .unwrap();
+        }
+        for (id, method, uri, line, character, extra) in [
+            (1, "textDocument/definition", &main_uri, 1, 14, ""),
+            (
+                2,
+                "textDocument/references",
+                &math_uri,
+                0,
+                13,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                3,
+                "textDocument/rename",
+                &math_uri,
+                0,
+                13,
+                ",\"newName\":\"measure\"",
+            ),
+            (
+                4,
+                "textDocument/references",
+                &main_uri,
+                1,
+                14,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                5,
+                "textDocument/rename",
+                &main_uri,
+                1,
+                14,
+                ",\"newName\":\"measure\"",
+            ),
+        ] {
+            let params = format!(
+                "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}{}}}",
+                uri, line, character, extra
+            );
+            stdin
+                .write_all(lsp_message(id, method, &params).as_bytes())
+                .unwrap();
+        }
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    let check = Command::new("node")
+        .arg("-e")
+        .arg(
+            r#"
+const assert = require("node:assert/strict");
+const bytes = Buffer.from(process.argv[1], "utf8");
+const messages = [];
+let offset = 0;
+while (offset < bytes.length) {
+    const separator = bytes.indexOf("\r\n\r\n", offset);
+    assert.notEqual(separator, -1);
+    const headers = bytes.toString("ascii", offset, separator);
+    const length = Number(headers.match(/Content-Length:\s*(\d+)/i)[1]);
+    const start = separator + 4;
+    messages.push(JSON.parse(bytes.subarray(start, start + length).toString("utf8")));
+    offset = start + length;
+}
+const result = id => {
+    const response = messages.find(message => message.id === id);
+    assert.ok(response && !response.error, JSON.stringify(response));
+    return response.result;
+};
+const mathUri = process.argv[2];
+const mainUri = process.argv[3];
+const definition = result(1);
+assert.equal(definition.uri, mathUri);
+assert.deepEqual([definition.range.start.line, definition.range.start.character], [0, 10]);
+for (const id of [2, 4]) {
+    const references = result(id);
+    assert.equal(references.length, 2, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(references.find(item => item.uri === mainUri).range.start, { line: 1, character: 14 });
+}
+for (const id of [3, 5]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[0, 10, 14, "measure"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"]]);
+}
+"#,
+        )
+        .arg(&text)
+        .arg(&math_uri)
+        .arg(&main_uri)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}\nLSP output:\n{text}",
+        String::from_utf8_lossy(&check.stderr)
+    );
 }

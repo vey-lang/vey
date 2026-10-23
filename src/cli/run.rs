@@ -77,7 +77,7 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
                 .unwrap_or_else(|| default_title(&entry));
             // The site is served the way a host would serve it: without the
             // watcher and without the reload.
-            serve(&entry, &title, &host, port, false)
+            serve(&entry, &title, &host, port, false, None)
         }
     }
 }

@@ -184,6 +184,7 @@ function veyCore(ctx) {
   var passedTests = 0;
   var failedTests = 0;
   var summaryPrinted = false;
+  var summaryListenerInstalled = false;
 
   // The number of the tests is said when the program is done, so that
   // the one that runs them may tell it.
@@ -224,9 +225,10 @@ function veyCore(ctx) {
       return;
     }
     // The number of the tests is said when the program is done.
-    if (isNode && !summaryPrinted) {
+    if (isNode && !summaryPrinted && !summaryListenerInstalled) {
       try {
         nodeModule("node:process").on("exit", printSummary);
+        summaryListenerInstalled = true;
       } catch (err) {
         // The host has no way of saying it, so the number is said at the
         // end of the last test.
