@@ -326,9 +326,28 @@ function veyServer(ctx) {
       );
     }
 
+    function sameStaticFile(left, right) {
+      return left.dev === right.dev && left.ino === right.ino;
+    }
+
+    function staticDescriptorPath(fd) {
+      var candidates = ["/proc/self/fd/" + fd, "/dev/fd/" + fd];
+      for (var i = 0; i < candidates.length; i++) {
+        try { return fs.realpathSync(candidates[i]); } catch (ignored) { }
+      }
+      return null;
+    }
+
     // The file of a folder is served, with the marks of the cache.
     function serveStatic(request, res, pathname, status) {
       var relative = safeDecode(pathname).replace(/^\/+/, "");
+      var opened = null;
+      function closeOpened() {
+        if (opened === null) return;
+        var fd = opened;
+        opened = null;
+        try { fs.closeSync(fd); } catch (ignored) { }
+      }
       try {
         var root = fs.realpathSync(staticDir);
         var file = pathModule.resolve(root, relative);
@@ -359,7 +378,56 @@ function veyServer(ctx) {
             return true;
           }
         }
-        var info = fs.statSync(file);
+        var checkedInfo = fs.statSync(file);
+        if (!checkedInfo.isFile()) {
+          res.status(404);
+          res.send("Not found");
+          return true;
+        }
+        var flags = "r";
+        if (
+          fs.constants && typeof fs.constants.O_RDONLY === "number" &&
+          typeof fs.constants.O_NOFOLLOW === "number"
+        ) {
+          flags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+        }
+        opened = fs.openSync(file, flags);
+        var info = fs.fstatSync(opened);
+        if (!info.isFile()) {
+          closeOpened();
+          res.status(404);
+          res.send("Not found");
+          return true;
+        }
+        var openedPath = staticDescriptorPath(opened);
+        if (openedPath !== null) {
+          if (!isWithinStaticRoot(root, openedPath)) {
+            closeOpened();
+            res.status(403);
+            res.send("Forbidden");
+            return true;
+          }
+        } else {
+          // Platforms without descriptor-path facilities use an identity
+          // check against a fresh canonical path as a conservative fallback.
+          openedPath = fs.realpathSync(file);
+          var pathInfo = fs.statSync(openedPath);
+          if (
+            !isWithinStaticRoot(root, openedPath) ||
+            !sameStaticFile(info, pathInfo)
+          ) {
+            closeOpened();
+            res.status(403);
+            res.send("Forbidden");
+            return true;
+          }
+        }
+        if (!sameStaticFile(checkedInfo, info)) {
+          closeOpened();
+          res.status(403);
+          res.send("Forbidden");
+          return true;
+        }
         var ext = pathModule.extname(file).toLowerCase();
         var etag = '"' + info.size.toString(16) + "-" + info.mtimeMs.toString(16) + '"';
         res.set("Content-Type", MIME[ext] || "application/octet-stream");
@@ -370,12 +438,14 @@ function veyServer(ctx) {
         // The file is not sent again when the visitor has it already.
         var match = request.headers["if-none-match"];
         if (match && match === etag) {
+          closeOpened();
           res.status(304);
           res.end();
           return true;
         }
         var since = request.headers["if-modified-since"];
         if (since && new Date(since).getTime() >= Math.floor(info.mtime.getTime() / 1000) * 1000) {
+          closeOpened();
           res.status(304);
           res.end();
           return true;
@@ -386,6 +456,7 @@ function veyServer(ctx) {
         if (range) {
           var wanted = parseRange(range, info.size);
           if (wanted === false) {
+            closeOpened();
             res.status(416);
             res.set("Content-Range", "bytes */" + info.size);
             res.end();
@@ -399,22 +470,47 @@ function veyServer(ctx) {
             );
             res.set("Content-Length", String(wanted.end - wanted.start + 1));
             if (request.method === "HEAD") {
+              closeOpened();
               res.end();
               return true;
             }
-            res.send(readPart(file, wanted.start, wanted.end));
+            var part = readPart(opened, wanted.start, wanted.end);
+            closeOpened();
+            res.send(part);
             return true;
           }
         }
         res.status(status === undefined ? 200 : status);
         if (request.method === "HEAD") {
+          closeOpened();
           res.set("Content-Length", String(info.size));
           res.end();
           return true;
         }
-        res.sendFile(file);
+        res.set("Content-Length", String(info.size));
+        var stream = fs.createReadStream(file, { fd: opened, autoClose: true });
+        opened = null;
+        stream.on("data", function (chunk) { res.write(chunk); });
+        stream.on("end", function () { res.end(); });
+        stream.on("error", function () {
+          if (!res.isFinished()) {
+            res.status(500);
+            res.end();
+          }
+        });
         return true;
       } catch (err) {
+        closeOpened();
+        if (err && err.code === "ELOOP") {
+          res.status(403);
+          res.send("Forbidden");
+          return true;
+        }
+        if (err && (err.code === "EACCES" || err.code === "EPERM")) {
+          res.status(500);
+          res.send("Cannot read file");
+          return true;
+        }
         return false;
       }
     }
@@ -445,16 +541,11 @@ function veyServer(ctx) {
       return { start: start, end: end };
     }
 
-    // A part of a file.
-    function readPart(file, start, end) {
+    // A part of an already-opened file.
+    function readPart(opened, start, end) {
       var length = end - start + 1;
       var buffer = Buffer.alloc(length);
-      var opened = fs.openSync(file, "r");
-      try {
-        fs.readSync(opened, buffer, 0, length, start);
-      } finally {
-        fs.closeSync(opened);
-      }
+      fs.readSync(opened, buffer, 0, length, start);
       return buffer;
     }
 

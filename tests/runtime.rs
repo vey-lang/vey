@@ -1856,6 +1856,168 @@ app.start(() => {
 }
 
 #[test]
+fn static_file_open_rechecks_the_resolved_target() {
+    let text = run_runtime(
+        "static-symlink-open-race",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const parent = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-open-race-"));
+const root = path.join(parent, "public");
+const asset = path.join(root, "asset.txt");
+const secret = path.join(parent, "secret.txt");
+nodeFs.mkdirSync(root);
+nodeFs.writeFileSync(asset, "public data");
+nodeFs.writeFileSync(secret, "private data");
+const originalRealpathSync = nodeFs.realpathSync;
+let swapped = false;
+nodeFs.realpathSync = function(filename, options) {
+  const resolved = originalRealpathSync.call(nodeFs, filename, options);
+  if (!swapped && path.resolve(String(filename)) === path.resolve(asset)) {
+    nodeFs.unlinkSync(asset);
+    nodeFs.symlinkSync(secret, asset);
+    swapped = true;
+  }
+  return resolved;
+};
+const app = runtime.server(0);
+app.static(root);
+app.start(() => {
+  http.get("http://127.0.0.1:" + app.port() + "/asset.txt", res => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      nodeFs.realpathSync = originalRealpathSync;
+      console.log(JSON.stringify({ status: res.statusCode, body, swapped }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":403,"body":"Forbidden","swapped":true}"#)
+    );
+}
+
+#[test]
+fn static_file_streaming_uses_the_file_checked_for_containment() {
+    let text = run_runtime(
+        "static-symlink-race",
+        r#"
+const net = require("node:net");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const parent = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-race-"));
+const root = path.join(parent, "public");
+const asset = path.join(root, "asset.txt");
+const secret = path.join(parent, "secret.txt");
+nodeFs.mkdirSync(root);
+nodeFs.writeFileSync(asset, "public data");
+nodeFs.writeFileSync(secret, "private data");
+const originalCreateReadStream = nodeFs.createReadStream;
+const app = runtime.server(0);
+app.static(root);
+app.start(() => {
+  const socket = net.connect(app.port(), "127.0.0.1");
+  let data = Buffer.alloc(0);
+  let swapped = false;
+  let finished = false;
+  let timer;
+  function finish() {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    nodeFs.createReadStream = originalCreateReadStream;
+    const raw = data.toString("latin1");
+    const split = raw.indexOf("\r\n\r\n");
+    const head = split < 0 ? raw : raw.slice(0, split);
+    const body = split < 0 ? "" : raw.slice(split + 4);
+    const status = (head.match(/^HTTP\/1\.1\s+(\d+)/) || [])[1] || null;
+    console.log(JSON.stringify({ status, body, swapped }));
+    socket.destroy();
+    app.stop().then(() => process.exit(0));
+  }
+  nodeFs.createReadStream = function(filename, options) {
+    if (!swapped) {
+      nodeFs.unlinkSync(asset);
+      nodeFs.symlinkSync(secret, asset);
+      swapped = true;
+    }
+    return originalCreateReadStream.call(nodeFs, filename, options);
+  };
+  socket.on("connect", () => {
+    socket.write("GET /asset.txt HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+  });
+  socket.on("data", chunk => { data = Buffer.concat([data, chunk]); });
+  socket.on("error", finish);
+  socket.on("end", finish);
+  timer = setTimeout(finish, 1000);
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":"200","body":"public data","swapped":true}"#)
+    );
+}
+
+#[test]
+fn static_range_open_rejects_a_swapped_outside_symlink() {
+    let text = run_runtime(
+        "static-range-open-race",
+        r#"
+const http = require("node:http");
+const nodeFs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const parent = nodeFs.mkdtempSync(path.join(os.tmpdir(), "vey-static-range-race-"));
+const root = path.join(parent, "public");
+const asset = path.join(root, "asset.txt");
+const secret = path.join(parent, "secret.txt");
+nodeFs.mkdirSync(root);
+nodeFs.writeFileSync(asset, "public data");
+nodeFs.writeFileSync(secret, "private data");
+const originalOpenSync = nodeFs.openSync;
+let swapped = false;
+const app = runtime.server(0);
+app.static(root);
+app.start(() => {
+  nodeFs.openSync = function(filename, flags, mode) {
+    if (!swapped && path.resolve(String(filename)) === path.resolve(asset)) {
+      nodeFs.unlinkSync(asset);
+      nodeFs.symlinkSync(secret, asset);
+      swapped = true;
+    }
+    return originalOpenSync.call(nodeFs, filename, flags, mode);
+  };
+  http.get("http://127.0.0.1:" + app.port() + "/asset.txt", {
+    headers: { Range: "bytes=0-5" }
+  }, res => {
+    let body = "";
+    res.on("data", chunk => body += chunk);
+    res.on("end", async () => {
+      nodeFs.openSync = originalOpenSync;
+      console.log(JSON.stringify({ status: res.statusCode, body, swapped }));
+      await app.stop();
+      process.exit(0);
+    });
+  });
+});
+"#,
+    );
+    assert_eq!(
+        text.lines().last(),
+        Some(r#"{"status":403,"body":"Forbidden","swapped":true}"#)
+    );
+}
+
+#[test]
 fn head_and_range_requests_for_static_files_preserve_headers_and_bytes() {
     let text = run_runtime(
         "static-head-range",

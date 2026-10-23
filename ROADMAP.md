@@ -18,7 +18,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] `mount.update()` statik ↔ fonksiyon geçişlerinde effect'i durdurup yeniden kur; fonksiyon→fonksiyon bağımlılık yenilemesini, cleanup'ı ve DOM davranışını mock DOM ile Chromium'da test et.
 - [x] Optional route parametrelerini önce tüketip kalan desen başarısız olursa geri dönerek atla; constraint/literal/required-parametre/wildcard senaryolarını browser ve server testleriyle kapsa; belirsiz wildcard eşleşmelerinde consume-first davranışını koru.
 - [x] Oversized `Content-Length` ve chunked body aşımında 413 yanıtı gönderildikten sonra bağlantıyı kapat; incomplete chunked socket kapanışını ve declared-length keep-alive isteğinde `Connection: close` davranışını test et.
-- [ ] Statik dosya symlink/containment denetimini path yarışına dayanıklı açılış/stream stratejisiyle güçlendir.
+- [x] Statik dosya containment denetimini descriptor tabanlı açılış/stream ile güçlendir; `fstat` ve açılmış descriptor hedefini doğrula, tam GET ve byte-range okumalarında aynı descriptor'ı kullan. Path swap, stream öncesi symlink swap ve range-open yarışlarını regresyon testleriyle kapsa.
 - [ ] HTTP caller abort'u retries'den ayır; SSE backpressure için sınırlı tampon veya kapatma politikası ekle.
 
 ## 3. LSP doğruluğu ve protokol uyumu
@@ -39,7 +39,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [ ] Server hedefindeki `a_malformed_path_does_not_take_the_server_down` testi tek iş parçacığında da exit 143 ile test sürecini sonlandırıyor; process-group cleanup kök nedenini bul ve ardından tam `cargo test --all-targets` çalıştır.
+- [x] Tam `cargo test --all-targets` çalıştır: **327 geçti, 0 kaldı**; server hedefindeki dört test, `a_malformed_path_does_not_take_the_server_down` dahil, başarılı. Önceki tekil `SIGTERM/143` bu çalıştırmada tekrarlanmadı; kök neden ancak yeniden üretilebilirse ayrıca incelenecek.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.
