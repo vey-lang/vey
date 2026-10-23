@@ -1097,6 +1097,26 @@ app.start(async () => {
 }
 
 #[test]
+fn node_storage_provides_a_ttl_key_value_store() {
+    let text = run_runtime(
+        "node-storage",
+        r#"
+runtime.storage.clear();
+runtime.storage.configure({ ttl: 25 });
+runtime.storage.set("answer", 42);
+runtime.storage.set("other", "yes");
+console.log(runtime.storage.get("answer"), JSON.stringify(runtime.storage.keys()));
+runtime.storage.remove("other");
+setTimeout(() => {
+  console.log(runtime.storage.get("answer"), JSON.stringify(runtime.storage.keys()));
+}, 35);
+"#,
+    );
+    assert!(text.contains("42 [\"answer\",\"other\"]"), "{text}");
+    assert!(text.contains("null []"), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",

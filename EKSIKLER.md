@@ -1087,8 +1087,8 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 ### D12 · Oturum deposu yalnızca bellekte, takılabilir arayüz yok 🟡 **TTL/idle/max cleanup eklendi**
 `src/runtime/session.js` artık `session.configure({ ttl, idleTimeout, maxSessions })` destekliyor; erişimde idle zamanı yenileniyor, süresi dolan kayıtlar temizleniyor ve 60 saniyelik unref edilmiş cleanup job'ı çalışıyor. Takılabilir harici store, `flash`/`touch` ve dağıtık oturum desteği hâlâ eksik. Test: `tests/runtime.rs::sessions_expire_and_are_limited_by_configuration`.
 
-### D13 · Sunucu tarafı KV/cache deposu yok
-`src/runtime/storage.js` — `storage`/`sessionStorage` **tarayıcıya özel**; Node'da hata fırlatıyor. Backend uygulamaları `Map`/`fs` ile kendi deposunu yazmak zorunda.
+### D13 · Sunucu tarafı KV/cache deposu 🟡 **Node memory store eklendi**
+`runtime.storage` ve `runtime.sessionStorage` artık Node'da bellek tabanlı `get/set/remove/clear/keys` API'si sağlıyor. `storage.configure({ ttl })` ile değer bazlı TTL ve otomatik erişim temizliği kullanılabiliyor. Harici Redis/SQLite adapter'ı ve dağıtık persistence hâlâ eksik. Test: `tests/runtime.rs::node_storage_provides_a_ttl_key_value_store`.
 
 ### D14 · Şema doğrulama / içerik doğrulama yok
 Body, query, params için şema yok. `req.body` `any`.

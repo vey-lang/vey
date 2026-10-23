@@ -571,6 +571,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("remove", builtin_function(vec![string()], Type::Void)),
             ("clear", builtin_function(vec![], Type::Void)),
             ("keys", builtin_function(vec![], list(string()))),
+            ("configure", builtin_function(vec![any()], any())),
         ])),
         "history" => Some(builtin_object(vec![
             (
