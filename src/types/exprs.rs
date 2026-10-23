@@ -545,6 +545,25 @@ impl TypeChecker<'_> {
                 // hand on, so accepting one here would silently turn `?`
                 // into a no-op at runtime.
                 let ty = self.infer_expr(inner)?;
+                // The failure that is handed on has to fit the failure that
+                // the function around it hands back, so that a `?` does not
+                // change the type of the error.
+                if let Type::Result(_, err) = &ty {
+                    if let Some(Some(Type::Result(_, func_err))) =
+                        self.expected_returns.last()
+                    {
+                        if !self.fits(err, func_err) {
+                            return Err(self.error(
+                                *pos,
+                                format!(
+                                    "the error {} does not fit the function's {}",
+                                    err.display(),
+                                    func_err.display()
+                                ),
+                            ));
+                        }
+                    }
+                }
                 match &ty {
                     Type::Result(ok, _) => Ok((**ok).clone()),
                     Type::Any => Ok(Type::Any),
