@@ -46,6 +46,45 @@ fn collect_object_shape_candidates(
     }
 }
 
+fn literal_string(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::String(parts, _) if parts.len() == 1 && parts[0].expr.is_none() => {
+            Some(parts[0].text.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn resolve_function_constraint(
+    function: &FunctionType,
+    constraint: &Type,
+    substitutions: &HashMap<String, Type>,
+) -> Option<Type> {
+    let mut bounds: HashMap<String, Type> = function.constraints.iter().cloned().collect();
+    bounds.extend(substitutions.clone());
+
+    let mut resolved = constraint.clone();
+    for _ in 0..=bounds.len() {
+        let expanded = substitute_bound(&resolved, &bounds);
+        if expanded == resolved {
+            break;
+        }
+        resolved = expanded;
+    }
+
+    let mut remaining = Vec::new();
+    collect_type_vars(&resolved, &mut remaining);
+    if function
+        .type_params
+        .iter()
+        .any(|name| !substitutions.contains_key(name) && remaining.contains(name))
+    {
+        None
+    } else {
+        Some(resolved)
+    }
+}
+
 impl TypeChecker<'_> {
     pub(crate) fn infer_expr(&mut self, expr: &Expr) -> Result<Type, VeyError> {
         match expr {
@@ -1094,6 +1133,11 @@ impl TypeChecker<'_> {
                             ),
                         ));
                     }
+                    let explicit_subst: HashMap<String, Type> = names
+                        .iter()
+                        .cloned()
+                        .zip(explicit.iter().cloned())
+                        .collect();
                     for (name, ty) in names.iter().zip(explicit) {
                         // The constraint of the type parameter has to hold
                         // for the type that is given, even when the
@@ -1101,7 +1145,18 @@ impl TypeChecker<'_> {
                         if let Some((_, constraint)) =
                             function.constraints.iter().find(|(other, _)| other == name)
                         {
-                            if !self.fits(ty, constraint) {
+                            let Some(constraint) =
+                                resolve_function_constraint(function, constraint, &explicit_subst)
+                            else {
+                                return Err(self.error(
+                                    pos,
+                                    format!(
+                                        "cannot resolve the constraint for type argument '{}'",
+                                        name
+                                    ),
+                                ));
+                            };
+                            if !self.fits(ty, &constraint) {
                                 return Err(self.error(
                                     pos,
                                     format!(
@@ -1192,7 +1247,14 @@ impl TypeChecker<'_> {
                     let Some(actual) = subst.get(name) else {
                         continue;
                     };
-                    let constraint = substitute_bound(constraint, &subst);
+                    let Some(constraint) =
+                        resolve_function_constraint(function, constraint, &subst)
+                    else {
+                        return Err(self.error(
+                            pos,
+                            format!("cannot resolve the constraint for type argument '{}'", name),
+                        ));
+                    };
                     if !self.fits(actual, &constraint) {
                         return Err(self.error(
                             pos,
@@ -1511,35 +1573,132 @@ impl TypeChecker<'_> {
             MemberProp::Name(name) => self.lookup_member(&object_ty, name, pos)?,
             MemberProp::Computed(index) => {
                 let index_ty = self.infer_expr(index)?;
-                match &object_ty {
-                    Type::Array(inner) if assignable(&index_ty, &Type::Number) => (**inner).clone(),
-                    Type::String if assignable(&index_ty, &Type::Number) => Type::String,
-                    Type::Tuple(items) if assignable(&index_ty, &Type::Number) => {
-                        match literal_number(index) {
-                            Some(index) => items.get(index).cloned().unwrap_or(Type::Any),
-                            None => Type::Any,
-                        }
-                    }
-                    Type::Array(_) | Type::String => {
-                        return Err(self.type_error(pos, &index_ty, &Type::Number));
-                    }
-                    // Every key of a dictionary has the same type of value,
-                    // and the key has to be of the type that the dictionary
-                    // says.
-                    Type::Dict(key, value) => {
-                        if !matches!(index_ty, Type::Any) && !assignable(&index_ty, key) {
-                            return Err(self.type_error(pos, &index_ty, key));
-                        }
-                        (**value).clone()
-                    }
-                    _ => Type::Any,
-                }
+                self.lookup_computed_member(
+                    &object_ty,
+                    index,
+                    &index_ty,
+                    pos,
+                    optional,
+                    &mut HashSet::new(),
+                    false,
+                )?
             }
         };
         if optional {
             Ok(union(vec![ty, Type::Null]))
         } else {
             Ok(ty)
+        }
+    }
+
+    fn lookup_computed_member(
+        &self,
+        ty: &Type,
+        index: &Expr,
+        index_ty: &Type,
+        pos: Pos,
+        optional: bool,
+        resolving_bounds: &mut HashSet<String>,
+        constrained: bool,
+    ) -> Result<Type, VeyError> {
+        match ty {
+            Type::Var(type_param) => {
+                let Some(bound) = self.lookup_type_param_constraint(type_param) else {
+                    return Err(self.error(
+                        pos,
+                        format!("type {} has no indexable constraint", ty.display()),
+                    ));
+                };
+                if !resolving_bounds.insert(type_param.clone()) {
+                    return Err(self.error(
+                        pos,
+                        format!("cyclic bound for type {} cannot be indexed", type_param),
+                    ));
+                }
+                let result = self.lookup_computed_member(
+                    &bound,
+                    index,
+                    index_ty,
+                    pos,
+                    optional,
+                    resolving_bounds,
+                    true,
+                );
+                resolving_bounds.remove(type_param);
+                result
+            }
+            Type::Array(inner) => {
+                if self.fits(index_ty, &Type::Number) {
+                    Ok((**inner).clone())
+                } else {
+                    Err(self.type_error(pos, index_ty, &Type::Number))
+                }
+            }
+            Type::String => {
+                if self.fits(index_ty, &Type::Number) {
+                    Ok(Type::String)
+                } else {
+                    Err(self.type_error(pos, index_ty, &Type::Number))
+                }
+            }
+            Type::Tuple(items) => {
+                if !self.fits(index_ty, &Type::Number) {
+                    return Err(self.type_error(pos, index_ty, &Type::Number));
+                }
+                Ok(match literal_number(index) {
+                    Some(index) => items.get(index).cloned().unwrap_or(Type::Any),
+                    None => Type::Any,
+                })
+            }
+            // Every key of a dictionary has the same type of value, and the
+            // key has to be of the type that the dictionary says.
+            Type::Dict(key, value) => {
+                if !matches!(index_ty, Type::Any) && !self.fits(index_ty, key) {
+                    return Err(self.type_error(pos, index_ty, key));
+                }
+                Ok((**value).clone())
+            }
+            Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => {
+                if let Some(name) = literal_string(index) {
+                    self.lookup_member(ty, name, pos)
+                } else if constrained {
+                    Err(self.error(
+                        pos,
+                        format!("type {} cannot be indexed with a dynamic key", ty.display()),
+                    ))
+                } else {
+                    Ok(Type::Any)
+                }
+            }
+            Type::Union(items) => {
+                let mut out = Vec::new();
+                for item in items {
+                    if optional && matches!(item, Type::Null | Type::Void) {
+                        continue;
+                    }
+                    out.push(self.lookup_computed_member(
+                        item,
+                        index,
+                        index_ty,
+                        pos,
+                        optional,
+                        resolving_bounds,
+                        constrained,
+                    )?);
+                }
+                if out.is_empty() {
+                    Ok(Type::Never)
+                } else {
+                    Ok(union(out))
+                }
+            }
+            Type::Any => Ok(Type::Any),
+            Type::Unknown if !constrained => Ok(Type::Any),
+            Type::Never => Ok(Type::Never),
+            _ if constrained => {
+                Err(self.error(pos, format!("type {} cannot be indexed", ty.display())))
+            }
+            _ => Ok(Type::Any),
         }
     }
 

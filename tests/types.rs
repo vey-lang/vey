@@ -475,7 +475,11 @@ fn a_bounded_generic_member_uses_the_bound_type() {
     );
     check_ok(
         "bounded-member-chain",
-        "fn get<U: { x: number }, T: U>(v: T) -> number { return v.x }\n",
+        "fn get<U: { x: number }, T: U>(v: T) -> number { return v.x }\nlet n: number = get({ x: 1 })\n",
+    );
+    check_ok(
+        "bounded-member-chain-explicit",
+        "interface HasX { x: number }\nfn get<U: HasX, T: U>(v: T) -> number { return v.x }\nlet n: number = get<HasX, HasX>({ x: 1 })\n",
     );
 
     let error = check_err(
@@ -483,6 +487,24 @@ fn a_bounded_generic_member_uses_the_bound_type() {
         "fn get<T: { x: number }>(v: T) -> string { return v.x }\nlet s: string = get({ x: 1 })\n",
     );
     assert!(error.contains("expected string, found number"), "{error}");
+
+    let chain_error = check_err(
+        "bounded-member-chain-wrong-argument",
+        "fn get<U: { x: number }, T: U>(v: T) -> number { return v.x }\nlet n: number = get({ x: \"bad\" })\n",
+    );
+    assert!(
+        chain_error.contains("type argument 'T' expects"),
+        "{chain_error}"
+    );
+
+    let wrong_context = check_err(
+        "bounded-member-chain-incompatible-return-context",
+        "fn get<U: { x: number }, T: U>(v: T) -> U { return v }\nlet n: number = get({ x: 1 })\n",
+    );
+    assert!(
+        wrong_context.contains("expected number, found { x: number }"),
+        "{wrong_context}"
+    );
 }
 
 #[test]
@@ -504,6 +526,89 @@ fn an_unbounded_or_missing_generic_member_is_rejected() {
         "fn get<T: U, U: T>(v: T) -> number { return v.x }\n",
     );
     assert!(recursive.contains("has no field 'x'"), "{recursive}");
+}
+
+#[test]
+fn a_bounded_generic_array_index_keeps_its_element_type() {
+    check_ok(
+        "bounded-array-index",
+        "fn get<T: [number]>(v: T) -> number { return v[0] }\nlet n: number = get([1])\n",
+    );
+    check_ok(
+        "bounded-nested-array-index",
+        "fn get<T: { items: [number] }>(v: T) -> number { return v.items[0] }\n",
+    );
+    check_ok(
+        "bounded-union-array-index",
+        "fn get<T: [number] | [string]>(v: T) -> number | string { return v[0] }\n",
+    );
+
+    let wrong_array = check_err(
+        "bounded-array-index-wrong-return",
+        "fn get<T: [number]>(v: T) -> string { return v[0] }\n",
+    );
+    assert!(
+        wrong_array.contains("expected string, found number"),
+        "{wrong_array}"
+    );
+
+    let wrong_union = check_err(
+        "bounded-union-array-index-wrong-return",
+        "fn get<T: [number] | [string]>(v: T) -> bool { return v[0] }\n",
+    );
+    assert!(wrong_union.contains("expected bool"), "{wrong_union}");
+
+    let recursive = check_err(
+        "recursive-index-bound",
+        "fn get<T: U, U: T>(v: T) -> number { return v[0] }\n",
+    );
+    assert!(recursive.contains("cannot be indexed"), "{recursive}");
+}
+
+#[test]
+fn a_bounded_generic_dictionary_index_checks_key_and_value_types() {
+    check_ok(
+        "bounded-dictionary-index",
+        "fn get<T: {[string]: number}>(v: T) -> number { return v[\"key\"] }\n",
+    );
+
+    let wrong_value = check_err(
+        "bounded-dictionary-index-wrong-return",
+        "fn get<T: {[string]: number}>(v: T) -> string { return v[\"key\"] }\n",
+    );
+    assert!(
+        wrong_value.contains("expected string, found number"),
+        "{wrong_value}"
+    );
+
+    let wrong_key = check_err(
+        "bounded-dictionary-index-wrong-key",
+        "fn get<T: {[string]: number}>(v: T) -> number { return v[1] }\n",
+    );
+    assert!(
+        wrong_key.contains("expected string, found number"),
+        "{wrong_key}"
+    );
+
+    let unbounded = check_err(
+        "unbounded-generic-index",
+        "fn get<T>(v: T) -> number { return v[0] }\n",
+    );
+    assert!(unbounded.contains("no indexable constraint"), "{unbounded}");
+}
+
+#[test]
+fn a_generic_alias_accepts_a_type_parameter_with_a_matching_bound() {
+    check_ok(
+        "bounded-generic-alias-argument",
+        "type Box<T: number> = [T]\nfn first<U: number>(v: Box<U>) -> U { return v[0] }\nlet n: number = first([1])\n",
+    );
+
+    let error = check_err(
+        "bounded-generic-alias-incompatible-argument",
+        "type Box<T: number> = [T]\nfn first<U: string>(v: Box<U>) -> U { return v[0] }\n",
+    );
+    assert!(error.contains("type 'Box' expects number"), "{error}");
 }
 
 #[test]

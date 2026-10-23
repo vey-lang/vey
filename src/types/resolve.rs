@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::suggest::did_you_mean;
 use crate::types::core::{rest_element_type, union, FunctionType, ObjectField, Type};
-use crate::types::rules::{assignable, substitute};
+use crate::types::rules::substitute;
 use crate::VeyError;
 
 use super::builtins::{signal_type, store_type};
@@ -230,7 +230,7 @@ impl TypeChecker<'_> {
                         continue;
                     };
                     let constraint = self.resolve_type_with(constraint, stack, &alias_vars)?;
-                    if !assignable(ty, &constraint) {
+                    if !self.fits(ty, &constraint) {
                         return Err(self.error(
                             *pos,
                             format!(

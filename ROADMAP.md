@@ -12,7 +12,9 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] Promise olmayan `await` operandının gerçek tipini koru.
 - [x] Mutable array/tuple, dictionary key/value ve yazılabilir object/named/interface alanlarını invariant yap; fresh literal bağlamlamasını ve alias regresyonlarını test et.
 - [x] Kısıtlı generic üye erişimini bound-aware yap; object/interface, nested/chained bound'ları ve missing/unbounded/recursive durumlarını test et.
-- [ ] Kısıtlı generic'lerin kalan işlemlerini denetle; özellikle nested/container kombinasyonları ve `T: U` çağrı-argümanı çıkarımını test et.
+- [x] Kısıtlı generic array/dictionary/union indekslemesini bound-aware yap; nested alan indeksleri, dictionary key/value ve unbounded/cyclic bound'ları test et.
+- [x] `T: U` call constraint'lerini callee'nin transitive bound'ları ve explicit/inferred type argümanlarıyla doğrula; uyumsuz argümanları reddet.
+- [x] Generic alias argümanlarında etkin caller bound'larını kullan; uyumlu `U`'yu kabul edip uyumsuz bound'u reddet.
 
 ## 2. Runtime ve routing doğruluğu
 
@@ -43,7 +45,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **361 geçti, 0 kaldı**; CLI 44, types 76, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
+- [x] Tam `cargo test --all-targets` çalıştır: **364 geçti, 0 kaldı**; CLI 44, types 79, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build ve deploy iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.
