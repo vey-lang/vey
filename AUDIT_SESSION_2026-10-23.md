@@ -273,3 +273,13 @@ Ayrıca `unknown.field` ve desteklenmeyen ordinary member türleri genel fallbac
 - Önce genişletilmiş `an_imported_recursive_alias_checks_fields_after_recursive_edges` testinde geçerli nested generic değer düzeltme öncesi reddedildi; uzmanlaştırılmış recursion shape sonrasında test geçti ve yanlış türde nested `value` reddedildi.
 - `local_recursive_generic_aliases_check_nested_values`: **1 geçti**; yerel generic recursive collection için geçerli nested değer kabul, string `value` reddedildi.
 - Son `cargo test --all-targets`: **403 geçti, 0 başarısız**; `git diff --check` temiz.
+
+
+### Recursive generic şekillerin modül üzerinden yeniden export edilmesi
+
+İki modüllü probe'da `types.vey` recursive `Tree<T>` ve `Flip<A,B>` alias'larını, `wrapper.vey` ise bunları `Wrapped<T>` / `Flipped<A,B>` içinde yeniden export ediyordu. Geçerli değer kabul edilirken, `Tree<number>` içindeki `value: "wrong"` ve parametreleri yer değiştiren `Flip<B,A>` içindeki yanlış değerler de kabul edildi. Bu, modül sınırından geçen recursive placeholder şekillerinin ve parametre metadata'sının transitif taşınmadığını; ayrıca generic alias içindeki `T -> T` özdeş-substitution'ın cycle guard tarafından `any`'e indirgendiğini gösterdi.
+
+`ModuleTypeEnv` artık internal recursive alias şekillerinin generic parametre adlarını da taşır; imported şekiller ve metadata yeniden export zincirinde korunur, ancak bu internal shape kayıtları yazılabilir type adları hâline getirilmez. `qualified_type` recursion kimliğini her yeni module boundary'de namespace'ler. `substitute_with`, aynı adlı type variable'a özdeş eşlemeyi `any` yerine değişmeden korur. Yeni regresyon, iki modüllü re-export zincirinde geçerli nested `Tree<number>` ve argüman sırası tersine dönen `Flip<number,string>` değerlerini kabul ederken, her iki recursive dalda yanlış nested type'ı reddeder.
+
+- Düzeltme öncesi `recursive_generic_shapes_survive_reexport_layers` probe'u hatalı nested değerleri kabul etti; düzeltme sonrası hedefli regression **1/1 geçti**.
+- Son `cargo test --all-targets`: **404 geçti, 0 başarısız**; `git diff --check` temiz.

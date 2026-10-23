@@ -833,6 +833,7 @@ pub(crate) fn substitute_with(
                 return Type::Any;
             }
             match subst.get(name) {
+                Some(Type::Var(bound)) if bound == name => ty.clone(),
                 Some(bound) => {
                     seen.push(name.clone());
                     let result = substitute_with(bound, subst, seen);

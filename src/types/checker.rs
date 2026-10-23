@@ -32,6 +32,8 @@ pub struct ModuleTypeEnv {
     /// Shapes used to open recursive aliases in importing modules; these do
     /// not make private aliases available as written type names.
     pub alias_shapes: HashMap<String, Type>,
+    /// Generic parameters for the internal recursive shapes above.
+    pub alias_type_params: HashMap<String, Vec<String>>,
     /// The types of the exported values, so that a call to a function of
     /// another module is checked as well.
     pub values: HashMap<String, Type>,
@@ -80,8 +82,8 @@ fn build_checker<'a>(
                 qualified_name.clone(),
                 qualified_type(module, shape.clone()),
             );
-            if let Some(alias) = env.generic_aliases.get(name) {
-                alias_type_params.insert(qualified_name, alias.params.clone());
+            if let Some(params) = env.alias_type_params.get(name) {
+                alias_type_params.insert(qualified_name, params.clone());
             }
         }
     }
@@ -182,9 +184,10 @@ pub fn check(
     env.interfaces = checker.interfaces.keys().cloned().collect();
     // Recursive shapes support imported assignability checks without making
     // private aliases addressable through the module namespace.
-    for name in checker.aliases.keys() {
-        if let Some(shape) = checker.alias_types.get(name) {
-            env.alias_shapes.insert(name.clone(), shape.clone());
+    for (name, shape) in &checker.alias_types {
+        env.alias_shapes.insert(name.clone(), shape.clone());
+        if let Some(params) = checker.alias_type_params.get(name) {
+            env.alias_type_params.insert(name.clone(), params.clone());
         }
     }
     // The names the module keeps to itself.

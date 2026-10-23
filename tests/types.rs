@@ -414,6 +414,40 @@ fn local_recursive_generic_aliases_check_nested_values() {
 }
 
 #[test]
+fn recursive_generic_shapes_survive_reexport_layers() {
+    let dir = common::temp_dir("recursive-generic-reexport");
+    std::fs::write(
+        dir.join("types.vey"),
+        "export type Tree<T> = { value: T, children: [Tree<T>] }\nexport type Flip<A, B> = { first: A, second: B, children: [Flip<B, A>] }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("wrapper.vey"),
+        "use \"./types.vey\" as t\nexport type Wrapped<T> = { tree: t.Tree<T> }\nexport type Flipped<A, B> = { value: t.Flip<A, B> }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("valid.vey"),
+        "use \"./wrapper.vey\" as w\nlet tree: w.Wrapped<number> = { tree: { value: 1, children: [{ value: 2, children: [] }] } }\nlet flip: w.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: \"next\", second: 2, children: [] }] } }\n",
+    )
+    .unwrap();
+    let valid = common::check_file(&dir.join("valid.vey"));
+    assert!(valid.status.success(), "{}", common::stderr(&valid));
+
+    std::fs::write(
+        dir.join("invalid.vey"),
+        "use \"./wrapper.vey\" as w\nlet tree: w.Wrapped<number> = { tree: { value: 1, children: [{ value: \"wrong\", children: [] }] } }\nlet flip: w.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: 2, second: \"wrong\", children: [] }] } }\n",
+    )
+    .unwrap();
+    let invalid = common::check_file(&dir.join("invalid.vey"));
+    assert!(
+        !invalid.status.success(),
+        "invalid transitive recursive shapes were accepted:\n{}",
+        common::stderr(&invalid)
+    );
+}
+
+#[test]
 fn an_unknown_name_in_an_alias_is_reported() {
     let error = check_err("alias-unknown", "type Alias = { v: Nope }\n");
     assert!(error.contains("unknown type 'Nope'"), "{error}");
