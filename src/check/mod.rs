@@ -538,6 +538,11 @@ impl Checker<'_> {
                 self.declare(name, BindingKind::Param, param.pos)?;
             }
         }
+        // A slot is read by the markup that fills it, so its parameter
+        // is used even when the body of the component does not name it.
+        for node in &decl.children {
+            Self::collect_slot_names(node, &mut |name| { let _ = self.read(name); });
+        }
         // The values of the component are known by its markup.
         for stmt in &decl.body {
             self.check_stmt(stmt)?;
@@ -545,6 +550,49 @@ impl Checker<'_> {
         self.check_markup_nodes(&decl.children)?;
         self.pop_scope();
         Ok(())
+    }
+
+    /// The names of the slots that the markup holds.
+    fn collect_slot_names(node: &MarkupNode, read: &mut dyn FnMut(&str)) {
+        match node {
+            MarkupNode::Element(element) => {
+                if element.tag == "slot" {
+                    if let Some((_, value)) = element.attrs.iter().find(|(name, _)| name == "name") {
+                        if let Expr::String(parts, _) = value {
+                            if let Some(part) = parts.first() {
+                                if part.expr.is_none() {
+                                    read(&part.text);
+                                }
+                            }
+                        }
+                    }
+                }
+                for child in &element.children {
+                    Self::collect_slot_names(child, read);
+                }
+            }
+            MarkupNode::If(branch) => {
+                for child in &branch.then_nodes {
+                    Self::collect_slot_names(child, read);
+                }
+                for child in &branch.else_nodes {
+                    Self::collect_slot_names(child, read);
+                }
+            }
+            MarkupNode::For(loop_node) => {
+                for child in &loop_node.body {
+                    Self::collect_slot_names(child, read);
+                }
+            }
+            MarkupNode::Match(m) => {
+                for arm in &m.arms {
+                    for child in &arm.body {
+                        Self::collect_slot_names(child, read);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn check_markup_nodes(&mut self, nodes: &[MarkupNode]) -> Result<(), VeyError> {

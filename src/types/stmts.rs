@@ -1312,7 +1312,7 @@ fn prop_bindings(pattern: &BindingPattern) -> Vec<(String, bool)> {
 /// A slot is written `slot name="body" { ... }`, so that the content
 /// that is given by the caller takes the place of the content of the
 /// slot.
-fn slot_names(nodes: &[MarkupNode]) -> Vec<String> {
+pub(crate) fn slot_names(nodes: &[MarkupNode]) -> Vec<String> {
     let mut out = Vec::new();
     for node in nodes {
         match node {
