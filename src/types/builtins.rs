@@ -466,6 +466,8 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("isAbsolute", builtin_function(vec![string()], bool_ty())),
             ("parse", builtin_function(vec![string()], any())),
             ("sep", Type::String),
+            ("posix", any()),
+            ("win32", any()),
         ])),
         "Map" => Some(builtin_optional(vec![any()], 0, map_type())),
         "Set" => Some(builtin_optional(vec![any()], 0, set_type())),

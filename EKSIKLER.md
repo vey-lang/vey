@@ -1109,8 +1109,8 @@ Ayrıca `fetch(url, { signal, timeout: 100 })` → kullanıcı `signal` verdiği
 ### D18 · `env()` sadece `process.env` okuyor
 `src/runtime/node.js:11-23` — `.env` dosyası desteği, şema doğrulama, tip'li env, secret yönetimi yok.
 
-### D19 · `path` 🟡 **yardımcılar eklendi**
-`relative`, `normalize`, `isAbsolute`, `parse` ve `sep` artık mevcut; browser runtime'ında `path.sep` Node modülü yüklemeden güvenli fallback kullanıyor. Platforma özel `win32`/`posix` namespace'leri hâlâ eksik. Test: `tests/runtime.rs::path_helpers_cover_normalization_and_parsing`.
+### D19 · `path` ✅ **tamamlandı**
+`relative`, `normalize`, `isAbsolute`, `parse`, `sep` ve platforma özel `posix`/`win32` namespace'leri mevcut. Browser runtime'ında `path.sep` Node modülü yüklemeden güvenli fallback kullanıyor. Testler: `path_helpers_cover_normalization_and_parsing`, `path_exposes_posix_and_win32_namespaces`.
 
 ### D20 · Regex 🟡 **named group ve callback replacement eklendi**
 `match()` ve `matchAll()` sonuçları named groups'ı `.groups` alanında taşıyor; `replace()`/`replaceAll()` native callback replacement fonksiyonlarını kabul ediyor. Test: `tests/runtime.rs::regex_supports_named_groups_and_function_replacements`.

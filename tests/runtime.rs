@@ -1226,6 +1226,25 @@ console.log(
 }
 
 #[test]
+fn path_exposes_posix_and_win32_namespaces() {
+    let text = run_runtime(
+        "path-namespaces",
+        r#"
+console.log(
+  runtime.path.posix.join("a", "b"),
+  runtime.path.posix.sep,
+  runtime.path.win32.join("a", "b"),
+  runtime.path.win32.sep,
+  runtime.path.win32.parse("C:\\\\work\\\\file.txt").root
+);
+"#,
+    );
+    assert!(text.contains("a/b"), "{text}");
+    assert!(text.contains("a\\b"), "{text}");
+    assert!(text.contains("C:\\"), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",

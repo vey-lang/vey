@@ -493,6 +493,28 @@ function veyNode(ctx) {
   };
   path.sep = isNode ? nodeModule("node:path").sep : "/";
 
+  function pathNamespace(kind) {
+    var module_ = isNode ? nodeModule("node:path")[kind] : null;
+    function call(name, args) {
+      needNode("path." + kind + "." + name + "()");
+      return module_[name].apply(module_, args);
+    }
+    return {
+      join: function () { return call("join", Array.prototype.slice.call(arguments)); },
+      dirname: function (value) { return call("dirname", [value]); },
+      basename: function (value) { return call("basename", [value]); },
+      extname: function (value) { return call("extname", [value]); },
+      resolve: function () { return call("resolve", Array.prototype.slice.call(arguments)); },
+      relative: function (from, to) { return call("relative", [from, to]); },
+      normalize: function (value) { return call("normalize", [value]); },
+      isAbsolute: function (value) { return call("isAbsolute", [value]); },
+      parse: function (value) { return call("parse", [value]); },
+      sep: isNode ? module_.sep : "/"
+    };
+  }
+  path.posix = pathNamespace("posix");
+  path.win32 = pathNamespace("win32");
+
   ctx.fs = fs;
   ctx.path = path;
   ctx.env = env;
