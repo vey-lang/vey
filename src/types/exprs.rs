@@ -1713,8 +1713,29 @@ impl TypeChecker<'_> {
     }
 
     pub(crate) fn lookup_member(&self, ty: &Type, name: &str, pos: Pos) -> Result<Type, VeyError> {
+        self.lookup_member_inner(ty, name, pos, &mut HashSet::new())
+    }
+
+    fn lookup_member_inner(
+        &self,
+        ty: &Type,
+        name: &str,
+        pos: Pos,
+        resolving_bounds: &mut HashSet<String>,
+    ) -> Result<Type, VeyError> {
         match ty {
             Type::Any => Ok(Type::Any),
+            Type::Var(type_param) => {
+                let Some(bound) = self.lookup_type_param_constraint(type_param) else {
+                    return Err(self.no_field_error(ty, name, pos));
+                };
+                if !resolving_bounds.insert(type_param.clone()) {
+                    return Err(self.no_field_error(ty, name, pos));
+                }
+                let result = self.lookup_member_inner(&bound, name, pos, resolving_bounds);
+                resolving_bounds.remove(type_param);
+                result
+            }
             Type::EnumNamespace(enum_name) => {
                 let info = self
                     .enum_info(enum_name)
@@ -1821,7 +1842,7 @@ impl TypeChecker<'_> {
                     // A member that does not have the field is a mistake:
                     // the value may be that member, so the field would not
                     // always be there.
-                    out.push(self.lookup_member(item, name, pos)?);
+                    out.push(self.lookup_member_inner(item, name, pos, resolving_bounds)?);
                 }
                 if out.is_empty() {
                     Ok(Type::Null)

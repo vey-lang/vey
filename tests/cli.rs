@@ -91,6 +91,81 @@ fn a_build_writes_into_an_ordinary_folder() {
 }
 
 #[test]
+fn a_build_rejects_unsupported_minification_in_site_and_node_modes() {
+    let dir = temp_dir("build-minify-unsupported");
+    let project = dir.join("project");
+    let entry = project.join("main.vey");
+    write(&entry, PAGE);
+    write(&project.join("vey.toml"), "[build]\nminify = true\n");
+
+    let site_output = dir.join("site");
+    let site = vey()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(&site_output)
+        .output()
+        .unwrap();
+    assert_eq!(site.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&site.stderr).contains("[build].minify = true is not supported"),
+        "{}",
+        String::from_utf8_lossy(&site.stderr)
+    );
+    assert!(!site_output.exists());
+
+    let node_output = dir.join("server.cjs");
+    let node = vey()
+        .arg("build")
+        .arg(&entry)
+        .arg("--node")
+        .arg("-o")
+        .arg(&node_output)
+        .output()
+        .unwrap();
+    assert_eq!(node.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&node.stderr).contains("[build].minify = true is not supported"),
+        "{}",
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert!(!node_output.exists());
+
+    let target = dir.join("host");
+    let deploy = vey()
+        .arg("deploy")
+        .arg(&project)
+        .arg("--target")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_eq!(deploy.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&deploy.stderr)
+            .contains("[build].minify = true is not supported"),
+        "{}",
+        String::from_utf8_lossy(&deploy.stderr)
+    );
+    assert!(!target.exists());
+    assert!(!project.join(".dist").exists());
+
+    write(&project.join("vey.toml"), "[build]\nminify = false\n");
+    let default = vey()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(&site_output)
+        .output()
+        .unwrap();
+    assert!(
+        default.status.success(),
+        "{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    assert!(site_output.join("index.html").is_file());
+}
+
+#[test]
 fn a_link_in_the_public_folder_does_not_leak_files() {
     let dir = temp_dir("symlink");
     let project = dir.join("project");
@@ -427,6 +502,50 @@ fn migrate_updates_an_older_version_and_is_idempotent() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(fs::read_to_string(file).unwrap(), migrated);
+}
+
+#[test]
+fn migrate_dry_run_reports_changes_without_writing() {
+    let dir = temp_dir("migrate-dry-run-changes");
+    let file = dir.join("main.vey");
+    let source = "// vey: 0.6.0\nfn main() {\n  print(1)\n}\n";
+    write(&file, source);
+
+    let output = vey().arg("migrate").arg(&file).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains(&format!("// vey: {}", env!("CARGO_PKG_VERSION"))),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("1 file(s) are not of this version."),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(file).unwrap(), source);
+}
+
+#[test]
+fn migrate_dry_run_succeeds_when_nothing_needs_migration() {
+    let dir = temp_dir("migrate-dry-run-current");
+    let file = dir.join("main.vey");
+    let source = format!(
+        "// vey: {}\nfn main() {{\n  print(1)\n}}\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    write(&file, &source);
+
+    let output = vey().arg("migrate").arg(&file).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(file).unwrap(), source);
 }
 
 #[test]

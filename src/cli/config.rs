@@ -23,8 +23,8 @@ pub(crate) struct Config {
     pub(crate) out: Option<String>,
     /// The length of a line that is still easy to read.
     pub(crate) max_line: Option<usize>,
-    /// Whether the site is made smaller.
-    pub(crate) minify: Option<bool>,
+    /// Whether an unsupported minify=true setting was requested.
+    pub(crate) unsupported_minify: bool,
 }
 
 impl Config {
@@ -102,7 +102,7 @@ impl Config {
             "title" => self.title = Some(value.to_string()),
             "out" => self.out = Some(value.to_string()),
             "lint.maxLine" | "maxLine" => self.max_line = value.parse().ok(),
-            "build.minify" | "minify" => self.minify = Some(value == "true"),
+            "build.minify" | "minify" => self.unsupported_minify = value == "true",
             _ => {}
         }
     }

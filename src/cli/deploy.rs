@@ -11,7 +11,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::cli::args::parse_args;
-use crate::cli::build::OUTPUT_FOLDER;
+use crate::cli::build::{reject_unsupported_minify, OUTPUT_FOLDER};
+use crate::cli::config::Config;
 use crate::cli::entry::entry_from;
 use crate::cli::output::print_command_help;
 
@@ -43,6 +44,9 @@ pub(crate) fn cmd_deploy(args: &[String]) -> i32 {
     };
 
     let root = crate::cli::entry::project_root(&entry);
+    if reject_unsupported_minify(&Config::find(&root)) {
+        return 1;
+    }
     let output = parsed
         .output
         .map(PathBuf::from)

@@ -11,7 +11,8 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] `unknown` değerini `object` olarak kullanmadan önce açıkça daraltmayı zorunlu kıl.
 - [x] Promise olmayan `await` operandının gerçek tipini koru.
 - [x] Mutable array/tuple, dictionary key/value ve yazılabilir object/named/interface alanlarını invariant yap; fresh literal bağlamlamasını ve alias regresyonlarını test et.
-- [ ] Kısıtlı generic'lerin tüm işlemlerini, özellikle nested/container ve üye erişimlerini, bound-aware şekilde test et.
+- [x] Kısıtlı generic üye erişimini bound-aware yap; object/interface, nested/chained bound'ları ve missing/unbounded/recursive durumlarını test et.
+- [ ] Kısıtlı generic'lerin kalan işlemlerini denetle; özellikle nested/container kombinasyonları ve `T: U` çağrı-argümanı çıkarımını test et.
 
 ## 2. Runtime ve routing doğruluğu
 
@@ -34,14 +35,15 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 ## 4. CLI, build ve yayınlama davranışı
 
 - [x] `deploy --target` için sürümlü/validasyonu yapılmış sahiplik manifesti ekle; yalnızca önceki Vey deploy'undan kalan stale dosyaları sil, unmanaged host dosyalarını koru, collision/traversal/symlink ve hardlink alias senaryolarını regresyonla test et.
-- [ ] `migrate` dry-run exit status sözleşmesini belirle ve CI kullanımına göre test et.
-- [ ] `[build].minify` ayarı için gerçek build davranışı ekle veya config şemasından tamamen çıkar; şu an dokümantasyonda no-op olduğu belirtiliyor.
+- [x] `migrate` dry-run'da değişiklik varsa exit status 1 döndür; dosyanın yazılmadığını ve güncel dosyanın exit 0 verdiğini regresyonla doğrula.
+- [x] `[build].minify` no-op davranışını kaldır: `true` static, Node ve deploy build'lerinde açıkça reddedilir; gerçek minification desteklenmiyor.
+- [ ] Gerçek minification eklenirse JS/CSS/HTML kapsamını ve source map doğruluğunu tanımlayan güvenli parser/tool tabanlı bir uygulama seç.
 - [ ] Lint'in config dosyasını hedef dosyanın proje kökünden çözmesini sağla.
 - [ ] CLI option parser'ında komut-başına geçerli seçenekleri doğrula; etkisiz ve yanlış yazılmış seçeneklerin sessizce yutulmasını önle.
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **356 geçti, 0 kaldı**; CLI 41, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
+- [x] Tam `cargo test --all-targets` çalıştır: **361 geçti, 0 kaldı**; CLI 44, types 76, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build ve deploy iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

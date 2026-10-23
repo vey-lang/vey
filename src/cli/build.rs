@@ -7,7 +7,9 @@ use vey::compiler::compile_project;
 use crate::cli::args::{parse_args, ParsedArgs};
 use crate::cli::config::Config;
 use crate::cli::entry::{entry_from, project_root};
-use crate::cli::output::{node_script, print_command_help, replace_extension, report, report_warnings};
+use crate::cli::output::{
+    node_script, print_command_help, replace_extension, report, report_warnings,
+};
 use crate::cli::site::write_site;
 
 /// The folder the site is written to.
@@ -47,6 +49,9 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
     // The settings of the project may say where the site is written and
     // what its title is.
     let config = Config::find(&root);
+    if reject_unsupported_minify(&config) {
+        return 1;
+    }
     let output = parsed
         .output
         .map(PathBuf::from)
@@ -54,12 +59,7 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
         .unwrap_or_else(|| root.join(OUTPUT_FOLDER));
     let title = parsed.title.clone().or_else(|| config.title.clone());
 
-    match write_site(
-        &entry,
-        &output,
-        title.as_deref(),
-        parsed.force,
-    ) {
+    match write_site(&entry, &output, title.as_deref(), parsed.force) {
         Ok(report) => {
             println!(
                 "built {} page(s) into {}",
@@ -79,10 +79,7 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
                 eprintln!("cannot build {}: {}", page, err);
             }
             if !report.failed.is_empty() {
-                eprintln!(
-                    "{} page(s) could not be built.",
-                    report.failed.len()
-                );
+                eprintln!("{} page(s) could not be built.", report.failed.len());
                 return 1;
             }
             println!("deploy the {} folder directly.", output.display());
@@ -92,6 +89,15 @@ pub(crate) fn cmd_build(args: &[String]) -> i32 {
             eprintln!("{}", err);
             1
         }
+    }
+}
+
+pub(crate) fn reject_unsupported_minify(config: &Config) -> bool {
+    if config.unsupported_minify {
+        eprintln!("[build].minify = true is not supported yet; remove it from vey.toml");
+        true
+    } else {
+        false
     }
 }
 
@@ -141,6 +147,10 @@ pub(crate) fn build_node_script(parsed: &ParsedArgs) -> i32 {
             }
         },
     };
+
+    if reject_unsupported_minify(&Config::find(&project_root(&file))) {
+        return 1;
+    }
 
     let bundle = match compile_project(&file) {
         Ok(bundle) => bundle,

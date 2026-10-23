@@ -256,9 +256,10 @@ out = ".dist"
 maxLine = 100
 ```
 
-> **Note:** `[build].minify` is accepted by the current config parser but is not
-> applied by the build pipeline yet; it is omitted from this example until it
-> has an observable effect.
+> **Note:** minification is not implemented. If `[build].minify = true` is set,
+> `vey build` and `vey deploy` stop with an explicit diagnostic rather than
+> silently writing unminified output. This also covers Node builds. Omit the
+> setting (or set it to `false`) until a safe minifier is available.
 
 ## The tools
 

@@ -4,8 +4,8 @@
 //! comment such as `// vey: 0.7`. The command brings the files of a project
 //! to the version of this compiler, and says what it changed.
 
-use std::fs;
 use std::cmp::Ordering;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use vey::parser::Parser;
@@ -124,6 +124,7 @@ pub(crate) fn cmd_migrate(args: &[String]) -> i32 {
     if !parsed.write && changed > 0 {
         eprintln!("{} file(s) are not of this version.", changed);
         eprintln!("pass --write to write them.");
+        return 1;
     }
     0
 }

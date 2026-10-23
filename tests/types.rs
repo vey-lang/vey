@@ -460,6 +460,53 @@ fn a_constraint_may_be_a_union() {
 }
 
 #[test]
+fn a_bounded_generic_member_uses_the_bound_type() {
+    check_ok(
+        "bounded-member-object",
+        "fn get<T: { x: number }>(v: T) -> number { return v.x }\nlet n: number = get({ x: 1 })\n",
+    );
+    check_ok(
+        "bounded-member-interface",
+        "interface HasX { x: number }\nfn get<T: HasX>(v: T) -> number { return v.x }\nlet n: number = get({ x: 1 })\n",
+    );
+    check_ok(
+        "bounded-member-nested",
+        "fn get<T: { child: { n: number } }>(v: T) -> number { return v.child.n }\nlet n: number = get({ child: { n: 1 } })\n",
+    );
+    check_ok(
+        "bounded-member-chain",
+        "fn get<U: { x: number }, T: U>(v: T) -> number { return v.x }\n",
+    );
+
+    let error = check_err(
+        "bounded-member-wrong-return",
+        "fn get<T: { x: number }>(v: T) -> string { return v.x }\nlet s: string = get({ x: 1 })\n",
+    );
+    assert!(error.contains("expected string, found number"), "{error}");
+}
+
+#[test]
+fn an_unbounded_or_missing_generic_member_is_rejected() {
+    let missing = check_err(
+        "bounded-member-missing",
+        "fn get<T: { x: number }>(v: T) -> number { return v.nope }\nlet n: number = get({ x: 1 })\n",
+    );
+    assert!(missing.contains("has no field 'nope'"), "{missing}");
+
+    let unbounded = check_err(
+        "unbounded-member",
+        "fn get<T>(v: T) -> number { return v.x }\nlet n: number = get({ x: 1 })\n",
+    );
+    assert!(unbounded.contains("has no field 'x'"), "{unbounded}");
+
+    let recursive = check_err(
+        "recursive-member-bound",
+        "fn get<T: U, U: T>(v: T) -> number { return v.x }\n",
+    );
+    assert!(recursive.contains("has no field 'x'"), "{recursive}");
+}
+
+#[test]
 fn a_call_may_name_its_type_arguments() {
     check_ok(
         "explicit-type-argument",
