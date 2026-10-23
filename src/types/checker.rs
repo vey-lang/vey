@@ -89,6 +89,7 @@ fn build_checker<'a>(
         impls,
         imports: imports.clone(),
         scopes: vec![HashMap::new()],
+        shadowed: vec![HashSet::new()],
         member_narrowings: vec![HashMap::new()],
         in_markup: false,
         type_param_scopes: Vec::new(),
@@ -98,7 +99,6 @@ fn build_checker<'a>(
         param_scopes: Vec::new(),
         resolved: HashMap::new(),
         try_depth: 0,
-        shadowed: HashSet::new(),
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
         yielded: Vec::new(),
@@ -560,6 +560,8 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) impls: HashMap<String, ImplInfo>,
     pub(crate) imports: HashMap<String, ModuleTypeEnv>,
     pub(crate) scopes: Vec<HashMap<String, Type>>,
+    /// Imported aliases hidden by ordinary value bindings, scoped with values.
+    pub(crate) shadowed: Vec<HashSet<String>>,
     /// The members that a check has narrowed, such as `user.name`, kept
     /// apart from the names of the program.
     pub(crate) member_narrowings: Vec<HashMap<String, Type>>,
@@ -584,8 +586,6 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) resolved: ResolvedCalls,
     /// How many `try` blocks are around, so that a `?` may be caught.
     pub(crate) try_depth: usize,
-    /// The names of the modules that a name of the program hides.
-    pub(crate) shadowed: HashSet<String>,
     pub(crate) expected_returns: Vec<Option<Type>>,
     pub(crate) collected_returns: Vec<Vec<Type>>,
     /// The types of the values that a generator hands back one by one, so
@@ -659,12 +659,18 @@ impl TypeChecker<'_> {
 
     pub(crate) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.shadowed.push(HashSet::new());
         self.member_narrowings.push(HashMap::new());
     }
 
     pub(crate) fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.shadowed.pop();
         self.member_narrowings.pop();
+    }
+
+    pub(crate) fn is_shadowed(&self, name: &str) -> bool {
+        self.shadowed.iter().rev().any(|scope| scope.contains(name))
     }
 
     pub(crate) fn push_type_params(&mut self, params: &[TypeParam]) -> Result<(), VeyError> {
@@ -712,8 +718,9 @@ impl TypeChecker<'_> {
 
     pub(crate) fn declare(&mut self, name: &str, ty: Type) {
         if self.imports.contains_key(name) {
-            // A name of the program hides the alias of a module.
-            self.shadowed.insert(name.to_string());
+            if let Some(shadowed) = self.shadowed.last_mut() {
+                shadowed.insert(name.to_string());
+            }
         }
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), ty);

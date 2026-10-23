@@ -452,7 +452,7 @@ impl Server {
         if let Some(member) = names.module_member_uses.iter().find(|member| {
             member.pos.line == line
                 && col >= member.pos.col
-                && col < member.pos.col + member.name.chars().count()
+                && col < member.pos.col + member.range_len
         }) {
             if let Some(target_uri) =
                 self.imported_module_uri(uri, &names, &member.alias, member.receiver_symbol)
@@ -508,7 +508,7 @@ impl Server {
         target_uri: &str,
         target_name: &str,
         target_pos: vey::lexer::Pos,
-    ) -> Option<Vec<(String, String, vey::lexer::Pos)>> {
+    ) -> Option<Vec<(String, String, vey::lexer::Pos, usize)>> {
         let target_names = self.names(target_uri)?;
         let definition = target_names
             .defs
@@ -519,10 +519,16 @@ impl Server {
             target_uri.to_string(),
             target_name.to_string(),
             target_names.defs[definition].1,
+            target_name.chars().count(),
         )];
         for (index, (name, pos)) in target_names.uses.iter().enumerate() {
             if target_names.use_symbols[index] == Some(symbol) {
-                occurrences.push((target_uri.to_string(), name.clone(), *pos));
+                occurrences.push((
+                    target_uri.to_string(),
+                    name.clone(),
+                    *pos,
+                    name.chars().count(),
+                ));
             }
         }
         for candidate_uri in self.files.keys() {
@@ -542,7 +548,12 @@ impl Server {
                         .as_deref()
                         == Some(target_uri)
                 {
-                    occurrences.push((candidate_uri.clone(), member.name.clone(), member.pos));
+                    occurrences.push((
+                        candidate_uri.clone(),
+                        member.name.clone(),
+                        member.pos,
+                        member.range_len,
+                    ));
                 }
             }
         }
@@ -580,6 +591,7 @@ impl Server {
                                 candidate_uri.clone(),
                                 variant.name.clone(),
                                 variant.pos,
+                                variant.name.chars().count(),
                             ));
                         }
                     }
@@ -637,10 +649,10 @@ impl Server {
         Value::List(
             occurrences
                 .iter()
-                .filter_map(|(file_uri, name, pos)| {
+                .filter_map(|(file_uri, _name, pos, range_len)| {
                     self.files
                         .get(file_uri)
-                        .map(|source| location(file_uri, source, pos, name))
+                        .map(|source| location_with_width(file_uri, source, pos, *range_len))
                 })
                 .collect(),
         )
@@ -656,12 +668,12 @@ impl Server {
             return Value::Null;
         };
         let mut changes: Vec<(String, Vec<Value>)> = Vec::new();
-        for (file_uri, name, pos) in occurrences {
+        for (file_uri, _name, pos, range_len) in occurrences {
             let Some(source) = self.files.get(&file_uri) else {
                 continue;
             };
             let edit = json::object(vec![
-                ("range", name_range(source, &pos, &name)),
+                ("range", name_range_with_width(source, &pos, range_len)),
                 ("newText", json::text(new_name)),
             ]);
             if let Some((_, edits)) = changes.iter_mut().find(|(uri, _)| uri == &file_uri) {
@@ -869,6 +881,7 @@ struct ModuleMemberUse {
     receiver_symbol: Option<usize>,
     name: String,
     pos: vey::lexer::Pos,
+    range_len: usize,
 }
 struct EnumVariantDef {
     enum_name: String,
@@ -917,7 +930,10 @@ fn member_name_pos(source: &str, operator: vey::lexer::Pos, name: &str) -> vey::
     }
 }
 
-fn literal_member_name(source: &str, index: &vey::ast::Expr) -> Option<(String, vey::lexer::Pos)> {
+fn literal_member_name(
+    source: &str,
+    index: &vey::ast::Expr,
+) -> Option<(String, vey::lexer::Pos, usize)> {
     let vey::ast::Expr::String(parts, pos) = index else {
         return None;
     };
@@ -932,14 +948,25 @@ fn literal_member_name(source: &str, index: &vey::ast::Expr) -> Option<(String, 
     if !matches!(quote, '\'' | '"' | '`') {
         return None;
     }
-    let name_chars: Vec<char> = name.chars().collect();
     let start = quote_index + 1;
-    if chars.get(start..start + name_chars.len()) != Some(name_chars.as_slice())
-        || chars.get(start + name_chars.len()) != Some(&quote)
-    {
+    let mut end = start;
+    while let Some(ch) = chars.get(end) {
+        if *ch == '\\' {
+            end = (end + 2).min(chars.len());
+        } else if *ch == quote {
+            break;
+        } else {
+            end += 1;
+        }
+    }
+    if chars.get(end) != Some(&quote) {
         return None;
     }
-    Some((name.clone(), vey::lexer::Pos::new(pos.line, start + 1)))
+    Some((
+        name.clone(),
+        vey::lexer::Pos::new(pos.line, start + 1),
+        end - start,
+    ))
 }
 
 impl Names {
@@ -1603,6 +1630,7 @@ impl Names {
                                     element.pos.line,
                                     element.pos.col + module.chars().count() + 1,
                                 ),
+                                range_len: member.chars().count(),
                             });
                             self.use_name(module, element.pos);
                         } else {
@@ -1672,6 +1700,7 @@ impl Names {
                         receiver_symbol,
                         name: member.to_string(),
                         pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
+                        range_len: member.chars().count(),
                     });
                     self.use_name(module, *pos);
                     self.enum_variant_uses.push(EnumVariantUse {
@@ -1723,6 +1752,7 @@ impl Names {
                     receiver_symbol: self.resolve(module),
                     name: member.clone(),
                     pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
+                    range_len: member.chars().count(),
                 });
                 self.use_name(module, *pos);
             }
@@ -1733,6 +1763,7 @@ impl Names {
                         receiver_symbol: self.resolve(module),
                         name: member.to_string(),
                         pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
+                        range_len: member.chars().count(),
                     });
                     self.use_name(module, *pos);
                 } else {
@@ -1823,12 +1854,13 @@ impl Names {
                 if let (Expr::Ident(alias, _), vey::ast::MemberProp::Computed(index)) =
                     (object.as_ref(), prop)
                 {
-                    if let Some((name, pos)) = literal_member_name(&self.source, index) {
+                    if let Some((name, pos, range_len)) = literal_member_name(&self.source, index) {
                         self.module_member_uses.push(ModuleMemberUse {
                             alias: alias.clone(),
                             receiver_symbol: self.resolve(alias),
                             name,
                             pos,
+                            range_len,
                         });
                     }
                 }
@@ -1868,6 +1900,7 @@ impl Names {
                         receiver_symbol: self.resolve(alias),
                         name: name.clone(),
                         pos: member_name_pos(&self.source, *pos, name),
+                        range_len: name.chars().count(),
                     });
                 }
                 self.expr(object);
@@ -1986,13 +2019,25 @@ fn symbol_kind(kind: &str) -> f64 {
 
 /// The range of a name in the UTF-16 positions required by LSP.
 fn name_range(source: &str, pos: &vey::lexer::Pos, name: &str) -> Value {
+    name_range_with_width(source, pos, name.chars().count())
+}
+
+fn name_range_with_width(source: &str, pos: &vey::lexer::Pos, width: usize) -> Value {
     let line = source.lines().nth(pos.line.saturating_sub(1)).unwrap_or("");
-    let start = line
-        .chars()
-        .take(pos.col.saturating_sub(1))
-        .map(char::len_utf16)
+    let chars: Vec<char> = line.chars().collect();
+    let start_index = pos.col.saturating_sub(1);
+    let start = chars
+        .iter()
+        .take(start_index)
+        .map(|ch| ch.len_utf16())
         .sum::<usize>();
-    let end = start + name.encode_utf16().count();
+    let end = start
+        + chars
+            .iter()
+            .skip(start_index)
+            .take(width)
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>();
     json::object(vec![
         (
             "start",
@@ -2016,6 +2061,13 @@ fn location(uri: &str, source: &str, pos: &vey::lexer::Pos, name: &str) -> Value
     json::object(vec![
         ("uri", json::text(uri)),
         ("range", name_range(source, pos, name)),
+    ])
+}
+
+fn location_with_width(uri: &str, source: &str, pos: &vey::lexer::Pos, width: usize) -> Value {
+    json::object(vec![
+        ("uri", json::text(uri)),
+        ("range", name_range_with_width(source, pos, width)),
     ])
 }
 

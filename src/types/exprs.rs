@@ -1499,7 +1499,7 @@ impl TypeChecker<'_> {
         pos: Pos,
     ) -> Result<Type, VeyError> {
         if let (MemberProp::Computed(index), Expr::Ident(alias, _)) = (prop, object) {
-            if !self.shadowed.contains(alias) && self.imports.contains_key(alias) {
+            if !self.is_shadowed(alias) && self.imports.contains_key(alias) {
                 if let Some(name) = literal_string(index) {
                     return self.member_type(
                         object,
@@ -1528,7 +1528,7 @@ impl TypeChecker<'_> {
         // module, so that its signature is checked.
         if let (MemberProp::Name(name), Expr::Ident(alias, _)) = (prop, object) {
             // A local name of its own wins over the alias of a module.
-            if self.shadowed.contains(alias) {
+            if self.is_shadowed(alias) {
                 let object_ty = self.infer_expr(object)?;
                 let ty = self.lookup_member(&object_ty, name, pos)?;
                 return Ok(if optional {

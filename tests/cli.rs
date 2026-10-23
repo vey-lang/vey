@@ -1972,7 +1972,7 @@ fn the_language_server_resolves_cross_file_members_and_local_type_symbols() {
     let other_main = dir.join("other-main.vey");
     let math_source =
         "export fn area() { return 1 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\nlet primary = Color.Red\nenum Shape { Red, Blue }\nlet shape = Shape.Red\n";
-    let main_source = "use \"./math.vey\" as m\nprint(\"😀\", m.area(), m[\"area\"]())\nfn decoy(m) { print(m.area(), m[\"area\"]) }\nlet item: m.Box<number> = { value: 1 }\ncomponent App() {\n  m.Card title=\"Card\"\n}\nlet color: m.Color = m.Color.Red\ntype Box<T> = { value: T }\nlet Box = 2\nlet localBox: Box<number> = { value: 2 }\nprint(Box)\nlet matched = match color { m.Color.Red => 1, _ => 0 }\n";
+    let main_source = "use \"./math.vey\" as m\nprint(\"😀\", m.area(), m[\"area\"](), m[\"ar\\x65a\"]())\nfn decoy(m) { print(m.area(), m[\"area\"]) }\nlet item: m.Box<number> = { value: 1 }\ncomponent App() {\n  m.Card title=\"Card\"\n}\nlet color: m.Color = m.Color.Red\ntype Box<T> = { value: T }\nlet Box = 2\nlet localBox: Box<number> = { value: 2 }\nprint(Box)\nlet matched = match color { m.Color.Red => 1, _ => 0 }\n";
     let other_source =
         "export fn area() { return 2 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\nlet primary = Color.Red\nenum Shape { Red, Blue }\nlet shape = Shape.Red\n";
     let other_main_source = "use \"./other.vey\" as m\nlet otherItem: m.Box<number> = { value: 2 }\nprint(m.area())\ncomponent Another() {\n  m.Card title=\"Other\"\n}\nlet otherColor: m.Color = m.Color.Red\nlet otherVariant = m.Color.Red\n";
@@ -2282,6 +2282,23 @@ fn the_language_server_resolves_cross_file_members_and_local_type_symbols() {
                 25,
                 ",\"newName\":\"measure\"",
             ),
+            (43, "textDocument/definition", &main_uri, 1, 38, ""),
+            (
+                44,
+                "textDocument/references",
+                &main_uri,
+                1,
+                38,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                45,
+                "textDocument/rename",
+                &main_uri,
+                1,
+                38,
+                ",\"newName\":\"measure\"",
+            ),
         ] {
             let params = format!(
                 "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}{}}}",
@@ -2325,25 +2342,32 @@ assert.equal(definition.uri, mathUri);
 assert.deepEqual([definition.range.start.line, definition.range.start.character], [0, 10]);
 for (const id of [2, 4]) {
     const references = result(id);
-    assert.equal(references.length, 3, JSON.stringify(references));
-    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mainUri, mathUri].sort());
+    assert.equal(references.length, 4, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mainUri, mainUri, mathUri].sort());
     assert.deepEqual(references.filter(item => item.uri === mainUri).map(item => item.range.start), [
         { line: 1, character: 14 },
         { line: 1, character: 25 },
+        { line: 1, character: 38 },
     ]);
 }
 for (const id of [3, 5]) {
     const changes = result(id).changes;
     assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
     assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[0, 10, 14, "measure"]]);
-    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"], [1, 25, 29, "measure"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"], [1, 25, 29, "measure"], [1, 38, 45, "measure"]]);
 }
 const computedDefinition = result(40);
 assert.equal(computedDefinition.uri, mathUri);
 assert.deepEqual([computedDefinition.range.start.line, computedDefinition.range.start.character], [0, 10]);
-assert.equal(result(41).length, 3);
+assert.equal(result(41).length, 4);
 const computedRename = result(42).changes;
-assert.deepEqual(computedRename[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"], [1, 25, 29, "measure"]]);
+assert.deepEqual(computedRename[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"], [1, 25, 29, "measure"], [1, 38, 45, "measure"]]);
+const escapedDefinition = result(43);
+assert.equal(escapedDefinition.uri, mathUri);
+const escapedReferences = result(44);
+assert.equal(escapedReferences.length, 4);
+const escapedRename = result(45).changes;
+assert.deepEqual(escapedRename[mainUri].map(edit => [edit.range.start.character, edit.range.end.character, edit.newText]), [[14, 18, "measure"], [25, 29, "measure"], [38, 45, "measure"]]);
 const componentDefinition = result(6);
 assert.equal(componentDefinition.uri, mathUri);
 assert.deepEqual([componentDefinition.range.start.line, componentDefinition.range.start.character], [1, 17]);

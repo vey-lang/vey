@@ -1036,6 +1036,34 @@ fn a_missing_literal_computed_export_is_rejected() {
 }
 
 #[test]
+fn a_local_import_shadow_only_hides_the_module_inside_its_scope() {
+    let dir = common::temp_dir("module-shadow-scope");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(a: number) -> number { return a }\n",
+    )
+    .unwrap();
+    let app = dir.join("app.vey");
+    for access in ["lib.add(\"wrong\")", "lib[\"add\"](\"wrong\")"] {
+        std::fs::write(
+            &app,
+            format!(
+                "use \"./lib.vey\" as lib\nif true {{\n  let lib = {{ add: \"not a function\" }}\n  let local: string = lib.add\n  let computed: string = lib[\"add\"]\n}}\n{}\n",
+                access
+            ),
+        )
+        .unwrap();
+        let output = common::check_file(&app);
+        assert!(
+            !output.status.success(),
+            "{access} bypassed the module signature"
+        );
+        let error = common::stderr(&output);
+        assert!(error.contains("argument 1 expects number"), "{error}");
+    }
+}
+
+#[test]
 fn a_value_of_the_language_has_no_fields() {
     let error = check_err("field-of-a-number", "let n: number = 5\nprint(n.field)\n");
     assert!(
