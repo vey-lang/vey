@@ -487,7 +487,14 @@ function veyMount(ctx) {
     }
 
     var stop = null;
-    if (isFunction) {
+
+    function stopReactiveDrawing() {
+      if (!stop) return;
+      stop();
+      stop = null;
+    }
+
+    function startReactiveDrawing() {
       // The effect listens to the values the page reads. The changes are
       // gathered, so that ten changes of ten values write the page once.
       stop = ctx.effect(
@@ -496,6 +503,10 @@ function veyMount(ctx) {
         },
         { defer: true }
       );
+    }
+
+    if (isFunction) {
+      startReactiveDrawing();
     } else {
       draw();
     }
@@ -510,17 +521,19 @@ function veyMount(ctx) {
       element: el,
       // The page is written again, with a new tree.
       update: function (next) {
+        stopReactiveDrawing();
         node = next;
         isFunction = typeof next === "function";
-        draw();
+        if (isFunction) {
+          startReactiveDrawing();
+        } else {
+          draw();
+        }
         return this;
       },
       // The page is taken away, and the work that waits for it is done.
       destroy: function () {
-        if (stop) {
-          stop();
-          stop = null;
-        }
+        stopReactiveDrawing();
         while (el.firstChild) {
           sayGoodbye(el.firstChild);
           el.removeChild(el.firstChild);

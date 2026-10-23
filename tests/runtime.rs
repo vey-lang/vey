@@ -537,6 +537,229 @@ console.log(item.getAttribute("key"));
 }
 
 #[test]
+fn mount_update_switches_between_static_and_reactive_pages_and_releases_old_dependencies() {
+    let text = run_browser(
+        "mount-update-transitions",
+        r##"
+(async function () {
+  const first = browser.signal("one");
+  const second = browser.signal("two");
+  let secondSubscriptions = 0;
+  const subscribeSecond = second.subscribe;
+  second.subscribe = function (listener) {
+    const unsubscribe = subscribeSecond.call(second, listener);
+    secondSubscriptions += 1;
+    let active = true;
+    return function () {
+      if (!active) return;
+      active = false;
+      secondSubscriptions -= 1;
+      unsubscribe();
+    };
+  };
+  const page = browser.mount("#app", browser.__h("p", { title: "initial" }, ["static"]));
+
+  let firstRuns = 0;
+  page.update(() => {
+    firstRuns += 1;
+    return browser.__h("p", {}, ["first " + first.value]);
+  });
+  console.log("to-reactive", dom.root.textContent, firstRuns);
+
+  first.set("changed");
+  await new Promise(resolve => queueMicrotask(resolve));
+  console.log("reactive-update", dom.root.textContent, firstRuns);
+
+  page.destroy();
+  let initialRuns = 0;
+  const livePage = browser.mount("#app", () => {
+    initialRuns += 1;
+    return browser.__h("p", {}, ["first " + first.value]);
+  });
+  console.log("initial-reactive", dom.root.textContent, initialRuns);
+
+  let secondRuns = 0;
+  livePage.update(() => {
+    secondRuns += 1;
+    return browser.__h("p", {}, ["second " + second.value]);
+  });
+  first.set("stale");
+  await new Promise(resolve => queueMicrotask(resolve));
+  console.log("old-dependency", dom.root.textContent, secondRuns);
+
+  second.set("fresh");
+  await new Promise(resolve => queueMicrotask(resolve));
+  console.log("new-dependency", dom.root.textContent, secondRuns);
+
+  const staticProps = { title: "held" };
+  livePage.update(browser.__h("p", staticProps, ["static again"]));
+  console.log("static-unsubscribed", secondSubscriptions);
+  staticProps.title = "changed";
+  second.set("unused");
+  await new Promise(resolve => queueMicrotask(resolve));
+  console.log("function-to-static", dom.root.textContent, dom.root.childNodes[0].getAttribute("title"), secondRuns);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"##,
+    );
+
+    assert!(text.contains("to-reactive first one 1"), "{text}");
+    assert!(text.contains("reactive-update first changed 2"), "{text}");
+    assert!(text.contains("initial-reactive first changed 1"), "{text}");
+    assert!(text.contains("old-dependency second two 1"), "{text}");
+    assert!(text.contains("new-dependency second fresh 2"), "{text}");
+    assert!(text.contains("static-unsubscribed 0"), "{text}");
+    assert!(
+        text.contains("function-to-static static again held 2"),
+        "{text}"
+    );
+}
+
+#[test]
+fn mount_update_transitions_work_in_headless_chromium_when_available() {
+    let chromium = std::env::var("VEY_CHROMIUM").ok().or_else(|| {
+        [
+            "chromium",
+            "chromium-browser",
+            "google-chrome",
+            "google-chrome-stable",
+        ]
+        .into_iter()
+        .find(|name| {
+            Command::new(name)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+        .map(str::to_owned)
+    });
+    let Some(chromium) = chromium else {
+        eprintln!("Skipping real-browser mount test: Chromium is not installed.");
+        return;
+    };
+
+    let dir = temp_dir("mount-update-chromium");
+    fs::write(dir.join("runtime.js"), vey::runtime::source()).unwrap();
+    let page = dir.join("index.html");
+    fs::write(
+        &page,
+        r##"<!doctype html>
+<div id="app"></div>
+<pre id="result"></pre>
+<script src="runtime.js"></script>
+<script>
+const browser = createVeyRuntime(window, null);
+const flushEffects = () => new Promise(resolve => queueMicrotask(resolve));
+(async function () {
+  const first = browser.signal("one");
+  const second = browser.signal("two");
+  let secondSubscriptions = 0;
+  const subscribeSecond = second.subscribe;
+  second.subscribe = function (listener) {
+    const unsubscribe = subscribeSecond.call(second, listener);
+    secondSubscriptions += 1;
+    let active = true;
+    return function () {
+      if (!active) return;
+      active = false;
+      secondSubscriptions -= 1;
+      unsubscribe();
+    };
+  };
+
+  const staticPage = browser.mount("#app", browser.__h("p", {}, ["static"]));
+  let firstRuns = 0;
+  staticPage.update(() => {
+    firstRuns += 1;
+    return browser.__h("p", {}, ["first " + first.value]);
+  });
+  const staticToReactiveInitial = [document.querySelector("#app").textContent, firstRuns];
+  first.set("changed");
+  await flushEffects();
+  const staticToReactiveUpdate = [document.querySelector("#app").textContent, firstRuns];
+  staticPage.destroy();
+
+  let initialRuns = 0;
+  const reactivePage = browser.mount("#app", () => {
+    initialRuns += 1;
+    return browser.__h("p", {}, ["first " + first.value]);
+  });
+  let secondRuns = 0;
+  reactivePage.update(() => {
+    secondRuns += 1;
+    return browser.__h("p", {}, ["second " + second.value]);
+  });
+  first.set("stale");
+  await flushEffects();
+  const staleDependency = [document.querySelector("#app").textContent, secondRuns];
+  second.set("fresh");
+  await flushEffects();
+  const newDependency = [document.querySelector("#app").textContent, secondRuns];
+
+  const props = { title: "held" };
+  reactivePage.update(browser.__h("p", props, ["static again"]));
+  const subscriptionsAfterStaticUpdate = secondSubscriptions;
+  props.title = "changed";
+  second.set("unused");
+  await flushEffects();
+  const staticResult = [
+    document.querySelector("#app").textContent,
+    document.querySelector("#app p").getAttribute("title"),
+    secondRuns,
+    secondSubscriptions
+  ];
+
+  document.querySelector("#result").textContent = JSON.stringify({
+    staticToReactiveInitial,
+    staticToReactiveUpdate,
+    initialRuns,
+    staleDependency,
+    newDependency,
+    subscriptionsAfterStaticUpdate,
+    staticResult
+  });
+})().catch(error => {
+  document.querySelector("#result").textContent = "ERROR: " + String(error && error.stack || error);
+});
+</script>"##,
+    )
+    .unwrap();
+
+    let address = format!("file://{}", page.canonicalize().unwrap().display());
+    let output = Command::new(chromium)
+        .args([
+            "--headless",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--allow-file-access-from-files",
+            "--dump-dom",
+        ])
+        .arg(address)
+        .output()
+        .expect("failed to start Chromium");
+    assert!(
+        output.status.success(),
+        "Chromium failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        r#"["first changed",2]"#,
+        r#"["second two",1]"#,
+        r#"["second fresh",2]"#,
+        r#""subscriptionsAfterStaticUpdate":0"#,
+        r#"["static again","held",2,0]"#,
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "Missing {expected:?}: {rendered}"
+        );
+    }
+}
+
+#[test]
 fn the_page_of_the_server_is_taken_over_by_the_browser() {
     let text = run_browser(
         "water",
