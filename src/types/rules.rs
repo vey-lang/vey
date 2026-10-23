@@ -361,6 +361,7 @@ pub(crate) fn function_has_vars(function: &FunctionType) -> bool {
 pub(crate) fn type_has_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
+        Type::Recursion(_, args) => args.iter().any(type_has_var),
         Type::Array(inner) => type_has_var(inner),
         Type::Tuple(items) => items.iter().any(type_has_var),
         Type::Dict(key, value) => type_has_var(key) || type_has_var(value),
@@ -567,6 +568,7 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
 pub(crate) fn has_type_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
+        Type::Recursion(_, args) => args.iter().any(has_type_var),
         Type::Array(inner) => has_type_var(inner),
         Type::Tuple(items) => items.iter().any(has_type_var),
         Type::Dict(key, value) => has_type_var(key) || has_type_var(value),
@@ -704,6 +706,20 @@ pub(crate) fn unify_types(
             return unify_types(&bound, expected, subst);
         }
         return false;
+    }
+
+    if let (
+        Type::Recursion(actual_name, actual_args),
+        Type::Recursion(expected_name, expected_args),
+    ) = (actual, expected)
+    {
+        if actual_name == expected_name {
+            return actual_args.len() == expected_args.len()
+                && actual_args
+                    .iter()
+                    .zip(expected_args)
+                    .all(|(actual, expected)| unify_types(actual, expected, subst));
+        }
     }
 
     if matches!(actual, Type::Any | Type::Recursion(_, _))
@@ -924,5 +940,18 @@ pub(crate) fn substitute_with(
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_type_var, type_has_var};
+    use crate::types::core::Type;
+
+    #[test]
+    fn recursive_placeholder_arguments_count_as_type_variables() {
+        let ty = Type::Recursion("Tree".into(), vec![Type::Var("T".into())]);
+        assert!(type_has_var(&ty));
+        assert!(has_type_var(&ty));
     }
 }

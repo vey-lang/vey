@@ -283,3 +283,14 @@ Ayrıca `unknown.field` ve desteklenmeyen ordinary member türleri genel fallbac
 
 - Düzeltme öncesi `recursive_generic_shapes_survive_reexport_layers` probe'u hatalı nested değerleri kabul etti; aynı module alias'ını wrapper ve consumer'da tekrar kullanma varyantı da hatayı yeniden üretti. Düzeltme sonrası güçlendirilmiş regression **1/1 geçti**.
 - Son `cargo test --all-targets`: **404 geçti, 0 başarısız**; `git diff --check` temiz.
+
+
+### Recursive placeholder argümanlarında generic function unification
+
+`type Node<T> = { children: [Node<T>] }` örneğinde `T` yalnızca `Type::Recursion` argümanında bulunuyor. `type_has_var` bu argümanları taramadığı için `identity<T>(Node<T>) -> Node<T>` generic değilmiş gibi ele alınıyor; ayrıca `unify_types` recursive placeholder'ları koşulsuz wildcard sayıp argümanlarını karşılaştırmıyordu. Sonuç olarak bu identity fonksiyonu `(Node<number>) -> Node<string>` tipine atanabiliyordu.
+
+`type_has_var` ve `has_type_var` artık recursive placeholder argümanlarını inceliyor. Aynı recursive alias kimliği karşılaştırıldığında `unify_types` argümanları unifie ediyor; böylece `T` input'tan `number` olarak bağlanıyor ve output'taki `string` ile uyuşmazlık reddediliyor. Pozitif atama (`number -> number`), negatif atama (`number -> string`) ve iki var-presence yardımcısı için doğrudan unit regression eklendi.
+
+- `generic_function_assignability_sees_recursive_placeholder_variables`: **1 geçti**; uyumlu specialization kabul, uyumsuz dönüş tipi ret.
+- `recursive_placeholder_arguments_count_as_type_variables`: helper-level regresyon.
+- Son tam doğrulama: `cargo test --all-targets` **406 geçti, 0 başarısız**; `git diff --check` temiz.

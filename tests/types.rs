@@ -448,6 +448,22 @@ fn recursive_generic_shapes_survive_reexport_layers() {
 }
 
 #[test]
+fn generic_function_assignability_sees_recursive_placeholder_variables() {
+    check_ok(
+        "generic-recursive-function-compatible",
+        "type Node<T> = { children: [Node<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet fixed: (Node<number>) -> Node<number> = identity\n",
+    );
+    let mismatch = check_err(
+        "generic-recursive-function-incompatible",
+        "type Node<T> = { children: [Node<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet wrong: (Node<number>) -> Node<string> = identity\n",
+    );
+    assert!(
+        mismatch.contains("expected") || mismatch.contains("assignable"),
+        "{mismatch}"
+    );
+}
+
+#[test]
 fn an_unknown_name_in_an_alias_is_reported() {
     let error = check_err("alias-unknown", "type Alias = { v: Nope }\n");
     assert!(error.contains("unknown type 'Nope'"), "{error}");
