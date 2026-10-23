@@ -1590,13 +1590,14 @@ app.start(() => {
     port: app.port(),
     path: "/",
     method: "POST",
-    headers: { "Content-Type": "text/plain", "Content-Length": "64" }
+    headers: { "Content-Type": "text/plain", "Content-Length": "64", "Connection": "keep-alive" }
   }, (res) => {
     let body = "";
     res.on("data", (chunk) => { body += chunk; });
     res.on("end", () => {
       console.log(res.statusCode);
       console.log(body);
+      console.log(res.headers.connection);
       app.stop();
       process.exit(0);
     });
@@ -1607,6 +1608,7 @@ app.start(() => {
     );
     assert!(text.contains("413"), "{text}");
     assert!(text.contains("too large"), "{text}");
+    assert!(text.lines().any(|line| line == "close"), "{text}");
 }
 
 #[test]
@@ -1652,6 +1654,56 @@ app.start(() => {
     assert_eq!(
         text.lines().last(),
         Some(r#"{"status":413,"body":"The request is too large.","handled":false}"#)
+    );
+}
+
+#[test]
+fn an_oversized_incomplete_chunked_body_gets_413_and_closes_the_connection() {
+    let text = run_runtime(
+        "incomplete-chunked-body",
+        r#"
+const net = require("node:net");
+const app = runtime.server(0);
+app.use(runtime.bodyLimit(16));
+app.post("/", () => "handled");
+app.start(() => {
+  const socket = net.connect(app.port(), "127.0.0.1");
+  let data = "";
+  let finished = false;
+  let timer;
+  function responseDetails() {
+    const head = data.split("\r\n\r\n")[0];
+    const status = (head.match(/^HTTP\/1\.1\s+(\d+)/) || [])[1] || null;
+    const connection = (head.match(/(?:^|\r\n)connection:\s*([^\r\n]+)/i) || [])[1] || null;
+    return { status, connection };
+  }
+  function finish(closed) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    console.log(JSON.stringify(Object.assign(responseDetails(), { closed })));
+    socket.destroy();
+    app.stop().then(() => process.exit(0));
+  }
+  socket.on("connect", () => {
+    socket.write(
+      "POST / HTTP/1.1\r\n" +
+      "Host: 127.0.0.1\r\n" +
+      "Transfer-Encoding: chunked\r\n" +
+      "Connection: keep-alive\r\n\r\n" +
+      "40\r\n" + "x".repeat(64) + "\r\n"
+    );
+  });
+  socket.on("data", chunk => { data += chunk.toString("latin1"); });
+  socket.on("error", () => {});
+  socket.on("close", () => finish(true));
+  timer = setTimeout(() => finish(false), 1000);
+});
+"#,
+    );
+    assert!(
+        text.contains(r#"{"status":"413","connection":"close","closed":true}"#),
+        "{text}"
     );
 }
 

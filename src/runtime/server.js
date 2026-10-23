@@ -936,6 +936,16 @@ function veyServer(ctx) {
       var res = makeResponse(response);
       var method = request.method;
 
+      function failBodyRequest(info, err) {
+        if (err && err.tooLarge) {
+          // The rest of this request may still be unread, so its connection
+          // must not be reused after the 413 answer is sent.
+          response.shouldKeepAlive = false;
+          res.set("Connection", "close");
+        }
+        fail(info, res, err);
+      }
+
       // File helpers stream asynchronously so serving a large file does not
       // block the event loop or keep the whole body in memory.
       res.sendFile = function (file, options) {
@@ -1039,7 +1049,7 @@ function veyServer(ctx) {
       if (declared !== undefined && Number(declared) > max) {
         var tooBig = veyError("the request is too large");
         tooBig.tooLarge = true;
-        fail(makeRequest(request, url, found ? found.params : {}), res, tooBig);
+        failBodyRequest(makeRequest(request, url, found ? found.params : {}), tooBig);
         return;
       }
       readBody(request, max).then(function (body) {
@@ -1091,7 +1101,7 @@ function veyServer(ctx) {
         });
       }).catch(function (err) {
         var info = makeRequest(request, url, {});
-        fail(info, res, err);
+        failBodyRequest(info, err);
       });
     }
 
