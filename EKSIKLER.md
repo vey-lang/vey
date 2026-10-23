@@ -1100,8 +1100,8 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 Ayrıca `fetch(url, { signal, timeout: 100 })` → kullanıcı `signal` verdiğinde `timeout` **sessizce yutuluyor** (`http.js:249-259`: `if (!opts.signal && ...)`).
 `Response` sahte bir nesne: `arrayBuffer()`, `blob()`, `formData()`, `body` stream, `headers.getSetCookie()`, `statusText` eksik (`http.js:140-178`).
 
-### D16 · `fs` API'si senkron ve eksik
-`src/runtime/node.js:156-258` — `readFileSync`/`writeFileSync` → **tüm bağlantıları bloklar**. `stat`, `rename`, `copy`, `realpath`, `watch`, `chmod`, atomik yazma yok.
+### D16 · `fs` API'si 🟡 **async işlemler eklendi**
+`fs.readAsync`, `writeAsync`, `appendAsync`, `listAsync`, `stat`, `rename`, `copy`, `realpath` ve `chmod` artık Promise tabanlı Node API'leri olarak mevcut; senkron kısa yollar geriye dönük uyumluluk için korunuyor. `watch`, atomik yazma ve AbortSignal desteği hâlâ eksik. Test: `tests/runtime.rs::async_fs_operations_do_not_require_sync_helpers`.
 
 ### D17 · `crypto` ve `zlib` senkron
 `src/runtime/node.js:261-358` — `gzipSync`/`gunzipSync` event loop'u bloklar.

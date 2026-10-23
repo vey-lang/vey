@@ -281,6 +281,49 @@ function veyNode(ctx) {
         stream.on("finish", function () { resolve(); });
         stream.end(toText(value));
       });
+    },
+    readAsync: function (path, encoding) {
+      needNode("fs.readAsync()");
+      return nodeModule("node:fs").promises.readFile(path, encoding || "utf8");
+    },
+    writeAsync: function (path, value, options) {
+      needNode("fs.writeAsync()");
+      return nodeModule("node:fs").promises.writeFile(path, toText(value), options || "utf8");
+    },
+    appendAsync: function (path, value, options) {
+      needNode("fs.appendAsync()");
+      return nodeModule("node:fs").promises.appendFile(path, toText(value), options || "utf8");
+    },
+    listAsync: function (path) {
+      needNode("fs.listAsync()");
+      return nodeModule("node:fs").promises.readdir(path);
+    },
+    stat: function (path) {
+      needNode("fs.stat()");
+      return nodeModule("node:fs").promises.stat(path).then(function (info) {
+        return {
+          size: info.size,
+          mtimeMs: info.mtimeMs,
+          isFile: info.isFile(),
+          isDirectory: info.isDirectory()
+        };
+      });
+    },
+    rename: function (from, to) {
+      needNode("fs.rename()");
+      return nodeModule("node:fs").promises.rename(from, to);
+    },
+    copy: function (from, to) {
+      needNode("fs.copy()");
+      return nodeModule("node:fs").promises.copyFile(from, to);
+    },
+    realpath: function (path) {
+      needNode("fs.realpath()");
+      return nodeModule("node:fs").promises.realpath(path);
+    },
+    chmod: function (path, mode) {
+      needNode("fs.chmod()");
+      return nodeModule("node:fs").promises.chmod(path, mode);
     }
   };
 

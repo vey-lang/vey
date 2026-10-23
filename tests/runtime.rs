@@ -1152,6 +1152,31 @@ app.start(async () => {
 }
 
 #[test]
+fn async_fs_operations_do_not_require_sync_helpers() {
+    let text = run_runtime(
+        "fs-async",
+        r#"
+const nodeFs = require("node:fs");
+const path = require("node:path");
+const root = nodeFs.mkdtempSync(path.join(require("node:os").tmpdir(), "vey-fs-async-"));
+const first = path.join(root, "first.txt");
+const second = path.join(root, "second.txt");
+(async () => {
+  await runtime.fs.writeAsync(first, "hello");
+  await runtime.fs.appendAsync(first, " world");
+  const value = await runtime.fs.readAsync(first);
+  const info = await runtime.fs.stat(first);
+  await runtime.fs.copy(first, second);
+  await runtime.fs.rename(second, path.join(root, "renamed.txt"));
+  console.log(value, info.size, (await runtime.fs.listAsync(root)).length, await runtime.fs.realpath(first) === nodeFs.realpathSync(first));
+  nodeFs.rmSync(root, { recursive: true, force: true });
+})();
+"#,
+    );
+    assert!(text.contains("hello world 11 2 true"), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",
