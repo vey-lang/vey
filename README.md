@@ -561,7 +561,9 @@ let flag = true
 ```
 <!-- check -->
 
-Member access supports optional chaining and nullish fallback:
+Member access and calls support JavaScript optional chaining and nullish fallback.
+If the value before `?.` is `null` or `undefined`, the result is `undefined`;
+the checked type includes `undefined` as well.
 
 ```vey
 let city = user?.address?.city ?? "unknown"
@@ -619,8 +621,9 @@ dictionary index may produce `undefined` when the index or key is absent; use
 `??` or a check before treating it as present. Writing an index is checked
 against the list element or dictionary value type. Fixed objects and tuples
 require literal property names and literal, in-range tuple indices; an
-`unknown` value must be narrowed before computed access. Use a dictionary or
-list when the key or index is only known at runtime.
+`unknown` value must be narrowed before member or computed access. Use a dictionary or
+list when the key or index is only known at runtime. Ordinary member access on a
+nullable union requires narrowing first; use `?.` to short-circuit instead.
 
 The fields of an object may be written one under the other, with or without a
 comma. The same goes for the fields of an object value.

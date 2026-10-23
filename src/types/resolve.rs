@@ -82,7 +82,7 @@ impl TypeChecker<'_> {
                                 // The alias refers to itself. The part that
                                 // is still open cannot be written out, so it
                                 // stays a reference to the alias.
-                                return Ok(Type::Recursion(name.clone()));
+                                return Ok(Type::Recursion(name.clone(), Vec::new()));
                             }
                             // The body of an alias was resolved when it was
                             // declared, so it cannot pick up the type
@@ -237,7 +237,7 @@ impl TypeChecker<'_> {
                     // The alias refers to itself. The part that is still
                     // open cannot be written out, so it stays a reference to
                     // the alias.
-                    return Ok(Type::Recursion(name.clone()));
+                    return Ok(Type::Recursion(name.clone(), resolved_args));
                 }
                 stack.push(name.clone());
                 let mut alias_vars = HashMap::new();

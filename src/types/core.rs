@@ -38,7 +38,7 @@ pub enum Type {
     ///
     /// The alias cannot be written out, so the part that is still open is
     /// checked loosely.
-    Recursion(String),
+    Recursion(String, Vec<Type>),
     /// An object type that has a name, such as a type alias.
     Named(String, Vec<ObjectField>),
     /// A value that will be there later, such as the result of a request.
@@ -209,7 +209,15 @@ impl Type {
             Self::Enum(name, variant) => format!("{}.{}", name, variant),
             Self::EnumUnion(name) => name.clone(),
             Self::EnumNamespace(name) => format!("enum {}", name),
-            Self::Recursion(name) => name.clone(),
+            Self::Recursion(name, args) if !args.is_empty() => format!(
+                "{}<{}>",
+                name,
+                args.iter()
+                    .map(Type::display)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::Recursion(name, _) => name.clone(),
             Self::Named(name, _) => name.clone(),
             Self::Promise(inner) => format!("Promise<{}>", inner.display()),
             Self::Result(ok, err) => {

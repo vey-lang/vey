@@ -347,16 +347,28 @@ fn an_imported_recursive_alias_checks_fields_after_recursive_edges() {
     let dir = common::temp_dir("recursive-imported-alias");
     std::fs::write(
         dir.join("types.vey"),
-        "export type Tree = { value: number, children: [Tree] }\n",
+        "export type Tree = { value: number, children: [Tree] }\nexport type GenericTree<T> = { value: T, children: [GenericTree<T>] }\n",
     )
     .unwrap();
     std::fs::write(
         dir.join("valid.vey"),
-        "use \"./types.vey\" as t\nlet good: t.Tree = { value: 1, children: [{ value: 2, children: [] }] }\n",
+        "use \"./types.vey\" as t\nlet good: t.Tree = { value: 1, children: [{ value: 2, children: [] }] }\nfn child_value(tree: t.GenericTree<number>) -> number { return tree.children[0]?.value ?? 0 }\n",
     )
     .unwrap();
     let valid = common::check_file(&dir.join("valid.vey"));
     assert!(valid.status.success(), "{}", common::stderr(&valid));
+
+    std::fs::write(
+        dir.join("generic-invalid.vey"),
+        "use \"./types.vey\" as t\nfn wrong(tree: t.GenericTree<number>) -> string { return tree.children[0]?.value ?? 0 }\n",
+    )
+    .unwrap();
+    let generic_invalid = common::check_file(&dir.join("generic-invalid.vey"));
+    assert!(
+        !generic_invalid.status.success(),
+        "generic recursive field lost its type"
+    );
+    assert!(common::stderr(&generic_invalid).contains("expected string"));
 
     std::fs::write(
         dir.join("app.vey"),
@@ -506,8 +518,26 @@ type Node = { value: number, next: Node | null }
 let a: Node = { value: 1, next: null }
 let b: Node = { value: 2, next: { value: 3, next: null } }
 print(a.value)
-print(b.next.value)
+print(b.next?.value)
 "#,
+    );
+    let mismatch = check_err(
+        "recursive-member-keeps-its-field-type",
+        "type Node = { value: number, next: Node | null }\nfn wrong(node: Node) -> string { return node.next?.value ?? 0 }\n",
+    );
+    assert!(mismatch.contains("expected string"), "{mismatch}");
+
+    check_ok(
+        "generic-recursive-member-keeps-its-field-type",
+        "type Node<T> = { value: T, next: Node<T> | null }\nfn read(node: Node<number>) -> number { return node.next?.value ?? 0 }\n",
+    );
+    let generic_mismatch = check_err(
+        "generic-recursive-member-rejects-wrong-field-type",
+        "type Node<T> = { value: T, next: Node<T> | null }\nfn wrong(node: Node<number>) -> string { return node.next?.value ?? 0 }\n",
+    );
+    assert!(
+        generic_mismatch.contains("expected string"),
+        "{generic_mismatch}"
     );
 }
 
@@ -1558,6 +1588,65 @@ fn a_union_with_a_non_indexable_member_must_be_narrowed_before_access() {
 }
 
 #[test]
+fn optional_access_uses_undefined_for_nullish_results() {
+    check_ok(
+        "optional-access-on-null",
+        "let value: null = null\nlet result: undefined = value?.name\n",
+    );
+    check_ok(
+        "optional-computed-access-on-undefined",
+        "let value: undefined = undefined\nlet result: undefined = value?.[0]\n",
+    );
+    check_ok(
+        "optional-call-result-is-undefined",
+        "type Callback = () -> number\nlet callback: Callback | null = null\nlet result: number | undefined = callback?.()\nlet nothing: null = null\nlet no_call: undefined = nothing?.()\n",
+    );
+
+    let error = check_err(
+        "optional-member-does-not-return-null-for-short-circuit",
+        "let value: { count: number } | null = null\nlet count: number | null = value?.count\n",
+    );
+    assert!(error.contains("undefined"), "{error}");
+
+    let bad_argument = check_err(
+        "optional-nullish-call-still-checks-arguments",
+        "let nothing: null = null\nlet ignored = nothing?.(missing)\n",
+    );
+    assert!(
+        bad_argument.contains("unknown variable 'missing'"),
+        "{bad_argument}"
+    );
+}
+
+#[test]
+fn ordinary_nullable_calls_require_narrowing() {
+    let error = check_err(
+        "nullable-call-without-narrowing",
+        "type Callback = () -> number\nlet callback: Callback | null = null\nlet result = callback()\n",
+    );
+    assert!(error.contains("null is not callable"), "{error}");
+
+    check_ok(
+        "nullable-call-after-narrowing",
+        "type Callback = () -> number\nlet callback: Callback | null = null\nif callback != null { let result: number = callback() }\n",
+    );
+}
+
+#[test]
+fn ordinary_nullable_member_access_requires_narrowing() {
+    let error = check_err(
+        "nullable-member-without-narrowing",
+        "let value: { count: number } | null = null\nlet count = value.count\n",
+    );
+    assert!(error.contains("null"), "{error}");
+
+    check_ok(
+        "nullable-member-after-narrowing",
+        "let value: { count: number } | null = null\nif value != null { let count: number = value.count }\n",
+    );
+}
+
+#[test]
 fn a_dynamic_key_on_a_typed_object_needs_a_dictionary_type() {
     let error = check_err(
         "dynamic-object-index",
@@ -1656,6 +1745,20 @@ fn an_unknown_value_needs_object_narrowing_before_use_as_object() {
     assert!(
         computed.contains("unknown value must be narrowed before computed access"),
         "{computed}"
+    );
+
+    let named = check_err(
+        "unknown-named-access",
+        "fn get(value: unknown) -> string { return value.name }\n",
+    );
+    assert!(
+        named.contains("unknown value must be narrowed before member access"),
+        "{named}"
+    );
+
+    check_ok(
+        "tuple-length-is-number",
+        "let pair: [number, string] = [1, \"x\"]\nlet size: number = pair.length\n",
     );
 }
 

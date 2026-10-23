@@ -923,9 +923,9 @@ component Header() {
 
 component UserCard(user: User | null) {
   if user != null {
-    button click=fn() {
-      user = null
-    } { user.name }
+      button click=fn() {
+        user = null
+      } { user?.name }
   }
 }
 
@@ -996,6 +996,29 @@ print(id(3))
     let output = run_file(&file);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output).trim(), "1\nx\n2\nnone\n3\n1\na\n3\n3");
+}
+
+#[test]
+fn optional_chaining_returns_undefined_for_nullish_bases() {
+    let dir = temp_dir("optional-chaining");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+type Callback = () -> number
+let nil: null = null
+let missing: undefined = undefined
+let callback: Callback | null = null
+print(nil?.count)
+print(missing?.[0])
+print(callback?.())
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output).trim(), "undefined\nundefined\nundefined");
 }
 
 #[test]

@@ -37,7 +37,7 @@ fn collect_object_shape_candidates(
                 collect_object_shape_candidates(item, aliases, seen, out);
             }
         }
-        Type::Recursion(name) if seen.insert(name.clone()) => {
+        Type::Recursion(name, _) if seen.insert(name.clone()) => {
             if let Some(shape) = aliases.get(name) {
                 collect_object_shape_candidates(shape, aliases, seen, out);
             }
@@ -676,6 +676,12 @@ impl TypeChecker<'_> {
         } else {
             callee_ty
         };
+        if optional && matches!(callee_ty, Type::Never | Type::Void) {
+            for arg in args {
+                self.infer_expr(arg)?;
+            }
+            return Ok(Type::Undefined);
+        }
         let (positional, named) = self.split_named(args)?;
         let order = if named.is_empty() {
             positional.iter().cloned().map(Some).collect()
@@ -688,7 +694,7 @@ impl TypeChecker<'_> {
         if !named.is_empty() {
             self.resolved.insert((pos.line, pos.col), order);
         }
-        self.check_call_named(
+        let result = self.check_call_named(
             &callee_ty,
             &arg_types,
             has_spread,
@@ -696,7 +702,13 @@ impl TypeChecker<'_> {
             explicit,
             expected,
             !named.is_empty(),
-        )
+            optional,
+        )?;
+        Ok(if optional {
+            union(vec![result, Type::Undefined])
+        } else {
+            result
+        })
     }
 
     /// The types of the arguments of a call, checked against the
@@ -1088,7 +1100,7 @@ impl TypeChecker<'_> {
         type_args: Option<&[Type]>,
         expected: Option<&Type>,
     ) -> Result<Type, VeyError> {
-        self.check_call_named(callee, args, has_spread, pos, type_args, expected, false)
+        self.check_call_named(callee, args, has_spread, pos, type_args, expected, false, false)
     }
 
     /// The same, but the arguments may have been given by name.
@@ -1105,6 +1117,7 @@ impl TypeChecker<'_> {
         type_args: Option<&[Type]>,
         expected: Option<&Type>,
         named: bool,
+        optional: bool,
     ) -> Result<Type, VeyError> {
         match callee {
             Type::Any => Ok(Type::Any),
@@ -1341,7 +1354,7 @@ impl TypeChecker<'_> {
                 // Every member of the union has to take the arguments.
                 let mut results = Vec::new();
                 for item in items {
-                    if matches!(item, Type::Null | Type::Undefined | Type::Void) {
+                    if optional && matches!(item, Type::Null | Type::Undefined | Type::Void) {
                         continue;
                     }
                     let result =
@@ -1349,7 +1362,7 @@ impl TypeChecker<'_> {
                     results.push(result);
                 }
                 if results.is_empty() {
-                    Ok(Type::Any)
+                    Ok(if optional { Type::Undefined } else { Type::Any })
                 } else {
                     Ok(union(results))
                 }
@@ -1530,7 +1543,7 @@ impl TypeChecker<'_> {
                 let full = format!("{}.{}", path, name);
                 if let Some(ty) = self.lookup_member_path(&full) {
                     return Ok(if optional {
-                        union(vec![ty, Type::Null])
+                        union(vec![ty, Type::Undefined])
                     } else {
                         ty
                     });
@@ -1543,9 +1556,10 @@ impl TypeChecker<'_> {
             // A local name of its own wins over the alias of a module.
             if self.is_shadowed(alias) {
                 let object_ty = self.infer_expr(object)?;
-                let ty = self.lookup_member_for_access(&object_ty, name, pos, for_write)?;
+                let ty =
+                    self.lookup_member_for_access(&object_ty, name, pos, for_write, optional)?;
                 return Ok(if optional {
-                    union(vec![ty, Type::Null])
+                    union(vec![ty, Type::Undefined])
                 } else {
                     ty
                 });
@@ -1568,7 +1582,7 @@ impl TypeChecker<'_> {
                                     if let Some(methods) = env.impls.get(name) {
                                         if let Some(method) = methods.get(name) {
                                             return Ok(if optional {
-                                                union(vec![method.clone(), Type::Null])
+                                                union(vec![method.clone(), Type::Undefined])
                                             } else {
                                                 method.clone()
                                             });
@@ -1611,7 +1625,7 @@ impl TypeChecker<'_> {
                     },
                 };
                 return Ok(if optional {
-                    union(vec![ty, Type::Null])
+                    union(vec![ty, Type::Undefined])
                 } else {
                     ty
                 });
@@ -1633,7 +1647,7 @@ impl TypeChecker<'_> {
                         };
                         let ty = self.variant_type(&format!("{}.{}", alias, enum_name), found)?;
                         return Ok(if optional {
-                            union(vec![ty, Type::Null])
+                            union(vec![ty, Type::Undefined])
                         } else {
                             ty
                         });
@@ -1645,7 +1659,7 @@ impl TypeChecker<'_> {
         let object_ty = self.infer_expr(object)?;
         let ty = match prop {
             MemberProp::Name(name) => {
-                self.lookup_member_for_access(&object_ty, name, pos, for_write)?
+                self.lookup_member_for_access(&object_ty, name, pos, for_write, optional)?
             }
             MemberProp::Computed(index) => {
                 let index_ty = self.infer_expr(index)?;
@@ -1661,7 +1675,7 @@ impl TypeChecker<'_> {
             }
         };
         if optional {
-            Ok(union(vec![ty, Type::Null]))
+            Ok(union(vec![ty, Type::Undefined]))
         } else {
             Ok(ty)
         }
@@ -1750,7 +1764,7 @@ impl TypeChecker<'_> {
             }
             Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => {
                 if let Some(name) = literal_string(index) {
-                    self.lookup_member_for_access(ty, name, pos, for_write)
+                    self.lookup_member_for_access(ty, name, pos, for_write, optional)
                 } else {
                     Err(self.error(
                         pos,
@@ -1778,11 +1792,12 @@ impl TypeChecker<'_> {
                     )?);
                 }
                 if out.is_empty() {
-                    Ok(Type::Never)
+                    Ok(Type::Undefined)
                 } else {
                     Ok(union(out))
                 }
             }
+            Type::Null | Type::Undefined | Type::Void if optional => Ok(Type::Undefined),
             Type::Any => Ok(Type::Any),
             Type::Unknown => Err(self.error(
                 pos,
@@ -1963,7 +1978,7 @@ impl TypeChecker<'_> {
     }
 
     pub(crate) fn lookup_member(&self, ty: &Type, name: &str, pos: Pos) -> Result<Type, VeyError> {
-        self.lookup_member_for_access(ty, name, pos, false)
+        self.lookup_member_for_access(ty, name, pos, false, false)
     }
 
     fn lookup_member_for_access(
@@ -1972,8 +1987,9 @@ impl TypeChecker<'_> {
         name: &str,
         pos: Pos,
         for_write: bool,
+        optional: bool,
     ) -> Result<Type, VeyError> {
-        self.lookup_member_inner(ty, name, pos, for_write, &mut HashSet::new())
+        self.lookup_member_inner(ty, name, pos, for_write, optional, &mut HashSet::new())
     }
 
     fn lookup_member_inner(
@@ -1982,6 +1998,7 @@ impl TypeChecker<'_> {
         name: &str,
         pos: Pos,
         for_write: bool,
+        optional: bool,
         resolving_bounds: &mut HashSet<String>,
     ) -> Result<Type, VeyError> {
         match ty {
@@ -1993,9 +2010,70 @@ impl TypeChecker<'_> {
                 if !resolving_bounds.insert(type_param.clone()) {
                     return Err(self.no_field_error(ty, name, pos));
                 }
-                let result =
-                    self.lookup_member_inner(&bound, name, pos, for_write, resolving_bounds);
+                let result = self.lookup_member_inner(
+                    &bound,
+                    name,
+                    pos,
+                    for_write,
+                    optional,
+                    resolving_bounds,
+                );
                 resolving_bounds.remove(type_param);
+                result
+            }
+            Type::Recursion(alias_name, args) => {
+                let marker = format!("recursive:{}", alias_name);
+                if !resolving_bounds.insert(marker.clone()) {
+                    return Err(self.no_field_error(ty, name, pos));
+                }
+                let expanded = if let Some((module, plain_name)) = alias_name.split_once('.') {
+                    if let Some(alias) = self
+                        .imports
+                        .get(module)
+                        .and_then(|env| env.generic_aliases.get(plain_name))
+                    {
+                        if alias.params.len() == args.len() {
+                            let subst = alias
+                                .params
+                                .iter()
+                                .cloned()
+                                .zip(args.iter().cloned())
+                                .collect();
+                            Some(substitute(&alias.body, &subst))
+                        } else {
+                            None
+                        }
+                    } else {
+                        self.alias_types.get(alias_name).cloned()
+                    }
+                } else if let Some(alias) = self.aliases.get(alias_name) {
+                    if alias.params.len() == args.len() {
+                        let vars = alias
+                            .params
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                            .collect();
+                        let mut stack = vec![alias_name.clone()];
+                        Some(self.resolve_type_with(&alias.body, &mut stack, &vars)?)
+                    } else {
+                        None
+                    }
+                } else {
+                    self.alias_types.get(alias_name).cloned()
+                };
+                let result = match expanded {
+                    Some(expanded) => self.lookup_member_inner(
+                        &expanded,
+                        name,
+                        pos,
+                        for_write,
+                        optional,
+                        resolving_bounds,
+                    ),
+                    None => Err(self.no_field_error(ty, name, pos)),
+                };
+                resolving_bounds.remove(&marker);
                 result
             }
             Type::EnumNamespace(enum_name) => {
@@ -2068,6 +2146,7 @@ impl TypeChecker<'_> {
                 Err(self.no_field_error(ty, name, pos))
             }
             Type::Array(_) if name == "length" => Ok(Type::Number),
+            Type::Tuple(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
             // Every key of a dictionary has the same type of value.
             Type::Dict(key, value) => {
@@ -2107,7 +2186,7 @@ impl TypeChecker<'_> {
             Type::Union(items) => {
                 let mut out = Vec::new();
                 for item in items {
-                    if matches!(item, Type::Null | Type::Void) {
+                    if optional && matches!(item, Type::Null | Type::Undefined | Type::Void) {
                         continue;
                     }
                     // A member that does not have the field is a mistake:
@@ -2118,24 +2197,31 @@ impl TypeChecker<'_> {
                         name,
                         pos,
                         for_write,
+                        optional,
                         resolving_bounds,
                     )?);
                 }
                 if out.is_empty() {
-                    Ok(Type::Null)
+                    Ok(Type::Undefined)
                 } else {
                     Ok(union(out))
                 }
             }
+            Type::Null | Type::Undefined | Type::Void if optional => Ok(Type::Undefined),
             // The values of the language have no fields of their own.
             Type::Number
             | Type::Bool
             | Type::Null
+            | Type::Undefined
             | Type::Void
             | Type::Never
             | Type::Array(_)
             | Type::String => Err(self.no_field_error(ty, name, pos)),
-            _ => Ok(Type::Any),
+            Type::Unknown => Err(self.error(
+                pos,
+                "an unknown value must be narrowed before member access",
+            )),
+            _ => Err(self.no_field_error(ty, name, pos)),
         }
     }
 

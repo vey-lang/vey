@@ -91,7 +91,7 @@ impl<'a> Opening<'a> {
 
     /// The shape of an alias, when it is one that may be opened.
     fn shape(&self, ty: &Type) -> Option<&'a Type> {
-        let Type::Recursion(name) = ty else {
+        let Type::Recursion(name, _) = ty else {
             return None;
         };
         self.aliases?.get(name)
@@ -116,13 +116,13 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
     // A type that refers to itself is opened one step at a time, and the
     // pair is remembered while it is being checked. A pair that comes again
     // is the same question as before, so it is taken to fit.
-    if matches!(source, Type::Recursion(_)) || matches!(target, Type::Recursion(_)) {
+    if matches!(source, Type::Recursion(_, _)) || matches!(target, Type::Recursion(_, _)) {
         let open_source = opening.shape(source);
         let open_target = opening.shape(target);
         // Without a shape the open part is taken to fit anything, as it has
         // no written form.
-        if (matches!(source, Type::Recursion(_)) && open_source.is_none())
-            || (matches!(target, Type::Recursion(_)) && open_target.is_none())
+        if (matches!(source, Type::Recursion(_, _)) && open_source.is_none())
+            || (matches!(target, Type::Recursion(_, _)) && open_target.is_none())
         {
             return true;
         }
@@ -142,8 +142,8 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
 
     // The open part of a recursive alias is checked loosely, because it
     // cannot be written out.
-    if matches!(source, Type::Any | Type::Recursion(_))
-        || matches!(target, Type::Any | Type::Recursion(_))
+    if matches!(source, Type::Any | Type::Recursion(_, _))
+        || matches!(target, Type::Any | Type::Recursion(_, _))
     {
         return true;
     }
@@ -389,6 +389,9 @@ pub(crate) fn instantiate_function(
 pub(crate) fn erase_type_vars(ty: &Type) -> Type {
     match ty {
         Type::Var(_) => Type::Any,
+        Type::Recursion(name, args) => {
+            Type::Recursion(name.clone(), args.iter().map(erase_type_vars).collect())
+        }
         Type::Array(inner) => Type::Array(Box::new(erase_type_vars(inner))),
         Type::Tuple(items) => {
             Type::Tuple(items.iter().map(erase_type_vars).collect())
@@ -465,6 +468,12 @@ pub(crate) fn substitute_bound(ty: &Type, subst: &HashMap<String, Type>) -> Type
             Some(bound) => bound.clone(),
             None => ty.clone(),
         },
+        Type::Recursion(name, args) => Type::Recursion(
+            name.clone(),
+            args.iter()
+                .map(|arg| substitute_bound(arg, subst))
+                .collect(),
+        ),
         Type::Array(inner) => Type::Array(Box::new(substitute_bound(inner, subst))),
         Type::Tuple(items) => {
             Type::Tuple(items.iter().map(|item| substitute_bound(item, subst)).collect())
@@ -568,6 +577,11 @@ pub(crate) fn collect_type_vars(ty: &Type, out: &mut Vec<String>) {
                 out.push(name.clone());
             }
         }
+        Type::Recursion(_, args) => {
+            for arg in args {
+                collect_type_vars(arg, out);
+            }
+        }
         Type::Array(inner) => collect_type_vars(inner, out),
         Type::Tuple(items) => {
             for item in items {
@@ -616,6 +630,7 @@ pub(crate) fn collect_type_vars(ty: &Type, out: &mut Vec<String>) {
 pub(crate) fn type_contains_var(ty: &Type, name: &str) -> bool {
     match ty {
         Type::Var(other) => other == name,
+        Type::Recursion(_, args) => args.iter().any(|arg| type_contains_var(arg, name)),
         Type::Array(inner) => type_contains_var(inner, name),
         Type::Tuple(items) => items.iter().any(|item| type_contains_var(item, name)),
         Type::Dict(key, value) => {
@@ -677,8 +692,8 @@ pub(crate) fn unify_types(
         return false;
     }
 
-    if matches!(actual, Type::Any | Type::Recursion(_))
-        || matches!(expected, Type::Any | Type::Recursion(_))
+    if matches!(actual, Type::Any | Type::Recursion(_, _))
+        || matches!(expected, Type::Any | Type::Recursion(_, _))
     {
         return true;
     }
@@ -813,6 +828,12 @@ pub(crate) fn substitute_with(
                 None => Type::Any,
             }
         }
+        Type::Recursion(name, args) => Type::Recursion(
+            name.clone(),
+            args.iter()
+                .map(|arg| substitute_with(arg, subst, seen))
+                .collect(),
+        ),
         Type::Array(inner) => Type::Array(Box::new(substitute_with(inner, subst, seen))),
         Type::Tuple(items) => Type::Tuple(
             items

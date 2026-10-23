@@ -462,8 +462,13 @@ pub(crate) fn markup_has_await(nodes: &[MarkupNode]) -> bool {
 pub(crate) fn qualified_type(module: &str, ty: Type) -> Type {
     fn qualify_recursions(module: &str, ty: &mut Type) {
         match ty {
-            Type::Recursion(name) if !name.contains('.') => {
-                *name = format!("{}.{}", module, name);
+            Type::Recursion(name, args) => {
+                if !name.contains('.') {
+                    *name = format!("{}.{}", module, name);
+                }
+                for arg in args {
+                    qualify_recursions(module, arg);
+                }
             }
             Type::Array(inner) | Type::Promise(inner) => qualify_recursions(module, inner),
             Type::Tuple(items) | Type::Union(items) => {
