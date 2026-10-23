@@ -1072,6 +1072,9 @@ impl Names {
         use vey::ast::Stmt;
         match stmt {
             Stmt::Var(decl) => {
+                if let Some(ty) = &decl.ty {
+                    self.type_expr(ty);
+                }
                 if let Some(init) = &decl.init {
                     self.expr(init);
                 }
@@ -1088,8 +1091,19 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "function");
+                for param in &decl.type_params {
+                    if let Some(constraint) = &param.constraint {
+                        self.type_expr(constraint);
+                    }
+                }
+                if let Some(ret) = &decl.ret {
+                    self.type_expr(ret);
+                }
                 self.push_scope(Some((decl.body.start, decl.body.end)));
                 for param in &decl.params {
+                    if let Some(ty) = &param.ty {
+                        self.type_expr(ty);
+                    }
                     if let Some(default) = &param.default {
                         self.expr(default);
                     }
@@ -1106,6 +1120,9 @@ impl Names {
                 self.define(&decl.name, pos, "component");
                 self.push_scope(Some((decl.body_start, decl.body_end)));
                 for param in &decl.params {
+                    if let Some(ty) = &param.ty {
+                        self.type_expr(ty);
+                    }
                     if let Some(default) = &param.default {
                         self.expr(default);
                     }
@@ -1125,6 +1142,11 @@ impl Names {
                 self.define(&decl.name, pos, "enum");
                 for variant in &decl.variants {
                     self.define(&variant.name, variant.pos, "variant");
+                    for field in &variant.fields {
+                        if let Some(ty) = &field.ty {
+                            self.type_expr(ty);
+                        }
+                    }
                 }
             }
             Stmt::Type(decl) => {
@@ -1133,6 +1155,12 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "type");
+                self.type_expr(&decl.ty);
+                for param in &decl.type_params {
+                    if let Some(constraint) = &param.constraint {
+                        self.type_expr(constraint);
+                    }
+                }
             }
             Stmt::Interface(decl) => {
                 if decl.exported {
@@ -1140,15 +1168,39 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "interface");
+                for param in &decl.type_params {
+                    if let Some(constraint) = &param.constraint {
+                        self.type_expr(constraint);
+                    }
+                }
+                for member in &decl.members {
+                    match member {
+                        vey::ast::InterfaceMember::Field(field) => self.type_expr(&field.ty),
+                        vey::ast::InterfaceMember::Method(method) => {
+                            for param in &method.params {
+                                if let Some(ty) = &param.ty {
+                                    self.type_expr(ty);
+                                }
+                            }
+                            self.type_expr(&method.ret);
+                        }
+                    }
+                }
             }
             Stmt::Impl(decl) => {
                 let pos = self.identifier_pos(decl.pos, &decl.type_name);
                 self.define(&decl.type_name, pos, "type");
                 for method in &decl.methods {
                     self.define(&method.name, method.pos, "method");
+                    if let Some(ret) = &method.ret {
+                        self.type_expr(ret);
+                    }
                     self.push_scope(Some((method.body.start, method.body.end)));
                     self.define_hidden("self", "variable");
                     for param in &method.params {
+                        if let Some(ty) = &param.ty {
+                            self.type_expr(ty);
+                        }
                         if let Some(default) = &param.default {
                             self.expr(default);
                         }
@@ -1194,6 +1246,9 @@ impl Names {
             Stmt::Defer(decl) => self.expr(&decl.value),
             Stmt::Throw(decl) => self.expr(&decl.value),
             Stmt::For(decl) => {
+                if let Some(ty) = &decl.ty {
+                    self.type_expr(ty);
+                }
                 if let Some(step) = &decl.step {
                     self.expr(step);
                 }
@@ -1284,7 +1339,16 @@ impl Names {
                 MarkupNode::Expr(expr) => self.expr(expr),
                 MarkupNode::Element(element) => {
                     if element.component {
-                        if let Some((module, _)) = element.tag.rsplit_once('.') {
+                        if let Some((module, member)) = element.tag.rsplit_once('.') {
+                            self.module_member_uses.push(ModuleMemberUse {
+                                alias: module.to_string(),
+                                receiver_symbol: self.resolve(module),
+                                name: member.to_string(),
+                                pos: vey::lexer::Pos::new(
+                                    element.pos.line,
+                                    element.pos.col + module.chars().count() + 1,
+                                ),
+                            });
                             self.use_name(module, element.pos);
                         } else {
                             self.use_name(&element.tag, element.pos);
@@ -1360,6 +1424,63 @@ impl Names {
         }
     }
 
+    fn type_expr(&mut self, ty: &vey::ast::TypeExpr) {
+        use vey::ast::TypeExpr;
+        match ty {
+            TypeExpr::Qualified(module, member, pos) => {
+                self.module_member_uses.push(ModuleMemberUse {
+                    alias: module.clone(),
+                    receiver_symbol: self.resolve(module),
+                    name: member.clone(),
+                    pos: vey::lexer::Pos::new(
+                        pos.line,
+                        pos.col + module.chars().count() + 1,
+                    ),
+                });
+                self.use_name(module, *pos);
+            }
+            TypeExpr::Generic(name, args, pos) => {
+                if let Some((module, member)) = name.rsplit_once('.') {
+                    self.module_member_uses.push(ModuleMemberUse {
+                        alias: module.to_string(),
+                        receiver_symbol: self.resolve(module),
+                        name: member.to_string(),
+                        pos: vey::lexer::Pos::new(
+                            pos.line,
+                            pos.col + module.chars().count() + 1,
+                        ),
+                    });
+                    self.use_name(module, *pos);
+                }
+                for arg in args {
+                    self.type_expr(arg);
+                }
+            }
+            TypeExpr::Array(inner, _) | TypeExpr::Optional(inner, _) => self.type_expr(inner),
+            TypeExpr::Tuple(items, _) | TypeExpr::Union(items, _) => {
+                for item in items {
+                    self.type_expr(item);
+                }
+            }
+            TypeExpr::Dict(key, value, _) => {
+                self.type_expr(key);
+                self.type_expr(value);
+            }
+            TypeExpr::Object(fields, _) => {
+                for field in fields {
+                    self.type_expr(&field.ty);
+                }
+            }
+            TypeExpr::Function(params, ret, _, _) => {
+                for param in params {
+                    self.type_expr(param);
+                }
+                self.type_expr(ret);
+            }
+            TypeExpr::Name(_, _) => {}
+        }
+    }
+
     fn expr(&mut self, expr: &vey::ast::Expr) {
         use vey::ast::Expr;
         match expr {
@@ -1397,8 +1518,17 @@ impl Names {
                 self.expr(then_value);
                 self.expr(else_value);
             }
-            Expr::Call(callee, args, _, _) | Expr::CallGeneric(callee, _, args, _, _) => {
+            Expr::Call(callee, args, _, _) => {
                 self.expr(callee);
+                for arg in args {
+                    self.expr(arg);
+                }
+            }
+            Expr::CallGeneric(callee, types, args, _, _) => {
+                self.expr(callee);
+                for ty in types {
+                    self.type_expr(ty);
+                }
                 for arg in args {
                     self.expr(arg);
                 }
@@ -1419,9 +1549,15 @@ impl Names {
                     self.expr(index);
                 }
             }
-            Expr::Fn(params, body, _, _) => {
+            Expr::Fn(params, body, ret, _) => {
+                if let Some(ret) = ret {
+                    self.type_expr(ret);
+                }
                 self.push_scope(Some((body.start, body.end)));
                 for param in params {
+                    if let Some(ty) = &param.ty {
+                        self.type_expr(ty);
+                    }
                     if let Some(default) = &param.default {
                         self.expr(default);
                     }
@@ -1430,13 +1566,24 @@ impl Names {
                 self.body(&body.body);
                 self.pop_scope();
             }
-            Expr::Arrow(_, params, body, _, _) => {
+            Expr::Arrow(type_params, params, body, ret, _) => {
+                for param in type_params {
+                    if let Some(constraint) = &param.constraint {
+                        self.type_expr(constraint);
+                    }
+                }
+                if let Some(ret) = ret {
+                    self.type_expr(ret);
+                }
                 let region = match body {
                     vey::ast::ArrowBody::Block(block) => Some((block.start, block.end)),
                     vey::ast::ArrowBody::Expr(_, start, end) => Some((*start, *end)),
                 };
                 self.push_scope(region);
                 for param in params {
+                    if let Some(ty) = &param.ty {
+                        self.type_expr(ty);
+                    }
                     if let Some(default) = &param.default {
                         self.expr(default);
                     }
@@ -1465,7 +1612,10 @@ impl Names {
             Expr::Await(value, _) | Expr::Try(value, _) | Expr::Spread(value, _) => {
                 self.expr(value)
             }
-            Expr::As(value, _, _) | Expr::Is(value, _, _) => self.expr(value),
+            Expr::As(value, ty, _) | Expr::Is(value, ty, _) => {
+                self.expr(value);
+                self.type_expr(ty);
+            }
             Expr::Yield(value, _) => self.expr(value),
             _ => {}
         }

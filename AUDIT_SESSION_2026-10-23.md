@@ -8,7 +8,7 @@
 
 ## Kısa sonuç
 
-İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness taramasındaki dört doğrulanmış hata, tooling bulguları ve imported exported member için cross-file LSP definition/references/rename düzeltildi. Son `cargo test --all-targets` **390 geçti, 0 başarısız**. Daha geniş LSP workspace index'i (markup/type/dynamic member kullanımları dahil) bu düzeltmenin kapsamı değil; performans ölçülmedi.
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri ve qualified type/enum kullanımları için düzeltildi. Son `cargo test --all-targets` **390 geçti, 0 başarısız**. LSP'nin tamamlanmamış alanları aşağıdaki kapsam notlarında listelenmiştir; performans ölçülmedi.
 
 ## A. Doğrulanmış bulgular
 
@@ -42,7 +42,7 @@ Veyboard README ve `src/site.vey` gözden geçirildi. README üç açık sınır
 
 ## E. İlk oturum sonunda kalan işler (takipte güncellendi)
 
-İlk oturum sonunda runtime test sözleşmesi, cache fingerprint ve daha geniş doğruluk/tooling taraması açık bırakılmıştı. Sonraki bölümlerde runtime test beklentileri belgelenmiş HTTP sözleşmesine göre düzeltildi, cache riski kaynak/build fingerprint'iyle kapatıldı; type-soundness, tooling ve doğrudan imported-member LSP taraması tamamlandı. LSP değişikliği doğrudan `m.area` gibi statik imported-value erişimlerini kapsar; markup bileşen etiketleri, type-only qualified names, dinamik/computed properties ve açık olmayan belgeler için kapsamlı workspace index'i bu oturumda yapılmadı. Önceki `AUDIT_START.md` gözlemleri tek başına bu oturumda doğrulanmış sayılmaz.
+İlk oturum sonunda runtime test sözleşmesi, cache fingerprint ve daha geniş doğruluk/tooling taraması açık bırakılmıştı. Sonraki bölümlerde runtime test beklentileri belgelenmiş HTTP sözleşmesine göre düzeltildi, cache riski kaynak/build fingerprint'iyle kapatıldı; type-soundness, tooling ve LSP çapraz-dosya taraması genişletildi. LSP artık doğrudan static expression üyelerini (`m.area`), qualified markup components (`m.Card`) ve qualified type/enum adlarını (`m.Box<T>`, `m.Color`) kapsar. Unqualified local type-name kullanımları, final enum variant segmentleri, dynamic/computed properties ve açık olmayan belgeler için genel workspace index'i hâlâ bu değişikliğin kapsamı dışındadır. Önceki `AUDIT_START.md` gözlemleri tek başına bu oturumda doğrulanmış sayılmaz.
 
 ## F. Performans
 
@@ -50,11 +50,10 @@ Bu oturumda dosya değişikliği algılama, derleme, süreç yeniden başlatma v
 
 ## G. Git özeti
 
-- Dal: `main` (`origin/main` ile aynı HEAD: `7ba80adf8bd0c7a1308b77e0eea24202445511f0`)
-- Değiştirilen: `README.md`; `src/cli/{dev,lsp,run,scaffold}.rs`; `src/compiler/cache.rs`; `src/runtime/core.js`; `src/types/{checker,exprs,helpers,resolve}.rs`; `tests/{cli,dev,runtime,types}.rs`.
-- Yeni: `AUDIT_SESSION_2026-10-23.md`, `build.rs`.
-- `git diff --check`: geçti.
-- Commit veya push yapılmadı.
+- Denetim başlangıç HEAD'i: `7ba80adf8bd0c7a1308b77e0eea24202445511f0`.
+- İlk audit commit/push: `0e46312` (`main` -> `origin/main`, başarılı).
+- Post-push LSP devamı: `src/cli/lsp.rs`, `tests/cli.rs` ve bu rapor güncellendi; follow-up commit/push kimliği teslim notunda verilir.
+- Son doğrulama: `cargo test --all-targets` **390 geçti, 0 başarısız**; `git diff --check` temiz.
 
 
 ## Takip denetimi — 23 Ekim 2026, 19:40 (+03:00)
@@ -150,7 +149,7 @@ Bu doğrulama correctness ve cache hit/miss davranışı içindir; saniye cinsin
 - Commit veya push yapılmadı. Cache/build fingerprint için performans ölçümü yapılmadı; bu raporda yer alan test kanıtı doğruluk ve davranış kapsamındadır.
 
 
-## Tooling ve LSP devamı — 23 Ekim 2026, 20:24 (+03:00)
+## Tooling ve LSP devamı — 23 Ekim 2026, 20:38 (+03:00)
 
 ### Doğrulanıp düzeltilen iki davranış
 
@@ -176,11 +175,11 @@ print(m.area())
 
 Düzeltme öncesi `textDocument/references`, `math.vey` içindeki `area` konumunda (line 0, character 13; `includeDeclaration: true`) yalnızca tanımı döndürüyor; `main.vey` içindeki `m.area` kullanımı eksikti. `textDocument/rename` (`newName: "measure"`) da yalnızca `math.vey` için edit üretiyordu.
 
-**Düzeltme:** `Names` artık imported aliases, lexical receiver binding identity, exported top-level value names ve direct static module-member use'ları topluyor. LSP sorgusu import yolunu canonical file URI'ye çözüyor ve sembolü dosya URI'si, ad ve tanım konumuyla tanımlıyor; böylece aynı isimli başka modül veya alias'ı gölgeleyen yerel parametre yanlışlıkla eşleşmiyor. `definition` imported kullanımda hedef tanımı döndürüyor; `references` tanım ile açık dosyalardaki kullanımları listeliyor; `rename` her ilgili URI için WorkspaceEdit üretiyor.
+**Düzeltme:** `Names` imported aliases, lexical receiver binding identity, exported top-level names ve static module-member uses topluyor. Bu kayıtlar artık `m.area` expression'larının yanında README'de belgelenen `m.Card` markup tag'lerini, `m.Box<T>` generic type'larını ve `m.Color` qualified enum/type adlarını da kapsıyor. Type walker annotations, declarations, signatures, constraints, casts/type tests ve explicit generic type arguments içinden qualified names topluyor. LSP import yolunu canonical URI'ye çözüyor; sembolü URI, ad ve declaration konumuyla tanımlayıp aynı adlı başka modül veya shadowed alias'ın yanlış eşleşmesini önlüyor. `definition`, `references` ve per-file WorkspaceEdit rename bu ortak çözümlemeyi kullanıyor.
 
-Yeni `the_language_server_resolves_exported_members_across_open_files` regresyonu `math.vey`/`main.vey` yanında aynı `area` adına sahip bağımsız ikinci modülü ve shadowed `m` parametresini decoy olarak açıyor. Definition, references ve rename hem tanım hem kullanım imlecinden sorgulanıyor. Test yalnızca hedef tanım ve gerçek imported kullanımın döndüğünü; diğer modülün ve shadowed property'sinin değiştirilmediğini; astral Unicode öncesindeki UTF-16 range'lerinin doğru kaldığını doğruluyor. Mevcut `the_language_server_answers_the_places_of_the_names` testi de gölgelenmiş yerel değişken bağlarının bozulmadığını koruyor.
+`the_language_server_resolves_exported_members_across_open_files` artık dört açık dosyada aynı adları export eden iki modül ile shadowed `m` decoy'larını kullanıyor. Function member `area`, markup component `Card`, generic alias `Box<T>` ve enum `Color` için definition/references/rename, tanım ve kullanım imlecinden sınanıyor. Test yalnızca hedef modül/gerçek kullanımları edit'lediğini, markup ve type alanlarının doğru range'lerini, enum type annotation'ı ile iç expression member'ını ve astral Unicode öncesindeki UTF-16 konumlarını doğruluyor. Mevcut single-file LSP testi de shadowed local binding regresyonunu koruyor.
 
-**Kapsam notu:** Çözüm açık belgelerdeki doğrudan statik expression üyelerine (`m.area`) yöneliktir. Qualified markup component tags, type-only qualified names, computed/dynamic member erişimleri ve açık olmayan belgeler için genel workspace symbol index'i bu değişiklikte uygulanmadı.
+**Kapsam notu:** Bu takipte unqualified/local type-name uses ve type-parameter isimleri için ayrı type namespace index'i eklenmedi. `m.Color` enum type kullanımı desteklenir; final enum variant segmenti (`m.Color.Red` içindeki `Red`) bu cross-file symbol resolver'a bağlanmadı. Computed/dynamic members (`m[key]`, `m["area"]`) ve açık olmayan belgeler için genel workspace index'i de kapsam dışındadır. Parser'ın type grammar'ı tek module qualifier taşır; çok segmentli qualified type yazımı ayrıca tasarlanmalıdır.
 
 ### Güncel doğrulama
 
@@ -188,6 +187,6 @@ Yeni `the_language_server_resolves_exported_members_across_open_files` regresyon
 - `cargo test --test dev dev_reloads_the_title_when_project_config_changes -- --exact`: **1 geçti**.
 - `cargo test --test cli the_language_server_resolves_exported_members_across_open_files -- --exact`: **1 geçti**; ayrıca var olan single-file LSP shadowing test **1 geçti**.
 - Son `cargo test --all-targets`: **390 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 84.
-- `git diff --check`: temiz. Commit veya push yapılmadı.
+- `git diff --check`: temiz. İlk audit commit'i `0e46312` `main` dalına push edildi; post-push LSP kapsam genişletmesi follow-up olarak bu rapora işlendi. Nihai follow-up commit/push kimliği teslim notunda verilir.
 
 Bu audit performans ölçümü içermez. Canlı config yenileme kapsamı sayfa title'ıdır; dinleyen soketin host/port ayarını çalışan süreçte yeniden bind etme davranışı bu değişiklikle kapsama alınmadı.

@@ -1970,11 +1970,12 @@ fn the_language_server_resolves_exported_members_across_open_files() {
     let main = dir.join("main.vey");
     let other = dir.join("other.vey");
     let other_main = dir.join("other-main.vey");
-    let math_source = "export fn area() { return 1 }\n";
-    let main_source =
-        "use \"./math.vey\" as m\nprint(\"😀\", m.area())\nfn decoy(m) { print(m.area()) }\n";
-    let other_source = "export fn area() { return 2 }\n";
-    let other_main_source = "use \"./other.vey\" as m\nprint(m.area())\n";
+    let math_source =
+        "export fn area() { return 1 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\n";
+    let main_source = "use \"./math.vey\" as m\nprint(\"😀\", m.area())\nfn decoy(m) { print(m.area()) }\nlet item: m.Box<number> = { value: 1 }\ncomponent App() {\n  m.Card title=\"Card\"\n}\nlet color: m.Color = m.Color.Red\n";
+    let other_source =
+        "export fn area() { return 2 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\n";
+    let other_main_source = "use \"./other.vey\" as m\nlet otherItem: m.Box<number> = { value: 2 }\nprint(m.area())\ncomponent Another() {\n  m.Card title=\"Other\"\n}\nlet otherColor: m.Color = m.Color.Red\n";
     write(&math, math_source);
     write(&main, main_source);
     write(&other, other_source);
@@ -2041,6 +2042,105 @@ fn the_language_server_resolves_exported_members_across_open_files() {
                 14,
                 ",\"newName\":\"measure\"",
             ),
+            (6, "textDocument/definition", &main_uri, 5, 4, ""),
+            (
+                7,
+                "textDocument/references",
+                &math_uri,
+                1,
+                17,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                8,
+                "textDocument/rename",
+                &math_uri,
+                1,
+                17,
+                ",\"newName\":\"Panel\"",
+            ),
+            (
+                9,
+                "textDocument/references",
+                &main_uri,
+                5,
+                4,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                10,
+                "textDocument/rename",
+                &main_uri,
+                5,
+                4,
+                ",\"newName\":\"Panel\"",
+            ),
+            (11, "textDocument/definition", &main_uri, 3, 12, ""),
+            (
+                12,
+                "textDocument/references",
+                &math_uri,
+                2,
+                12,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                13,
+                "textDocument/rename",
+                &math_uri,
+                2,
+                12,
+                ",\"newName\":\"Container\"",
+            ),
+            (
+                14,
+                "textDocument/references",
+                &main_uri,
+                3,
+                12,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                15,
+                "textDocument/rename",
+                &main_uri,
+                3,
+                12,
+                ",\"newName\":\"Container\"",
+            ),
+            (16, "textDocument/definition", &main_uri, 7, 13, ""),
+            (
+                17,
+                "textDocument/references",
+                &math_uri,
+                3,
+                12,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                18,
+                "textDocument/rename",
+                &math_uri,
+                3,
+                12,
+                ",\"newName\":\"Hue\"",
+            ),
+            (
+                19,
+                "textDocument/references",
+                &main_uri,
+                7,
+                13,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                20,
+                "textDocument/rename",
+                &main_uri,
+                7,
+                13,
+                ",\"newName\":\"Hue\"",
+            ),
         ] {
             let params = format!(
                 "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}{}}}",
@@ -2093,6 +2193,54 @@ for (const id of [3, 5]) {
     assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
     assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[0, 10, 14, "measure"]]);
     assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 14, 18, "measure"]]);
+}
+const componentDefinition = result(6);
+assert.equal(componentDefinition.uri, mathUri);
+assert.deepEqual([componentDefinition.range.start.line, componentDefinition.range.start.character], [1, 17]);
+for (const id of [7, 9]) {
+    const references = result(id);
+    assert.equal(references.length, 2, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(references.find(item => item.uri === mainUri).range.start, { line: 5, character: 4 });
+}
+for (const id of [8, 10]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 17, 21, "Panel"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[5, 4, 8, "Panel"]]);
+}
+const typeDefinition = result(11);
+assert.equal(typeDefinition.uri, mathUri);
+assert.deepEqual([typeDefinition.range.start.line, typeDefinition.range.start.character], [2, 12]);
+for (const id of [12, 14]) {
+    const references = result(id);
+    assert.equal(references.length, 2, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(references.find(item => item.uri === mainUri).range.start, { line: 3, character: 12 });
+}
+for (const id of [13, 15]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[2, 12, 15, "Container"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[3, 12, 15, "Container"]]);
+}
+const enumDefinition = result(16);
+assert.equal(enumDefinition.uri, mathUri);
+assert.deepEqual([enumDefinition.range.start.line, enumDefinition.range.start.character], [3, 12]);
+for (const id of [17, 19]) {
+    const references = result(id);
+    assert.equal(references.length, 3, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mainUri, mathUri].sort());
+    assert.deepEqual(references.filter(item => item.uri === mainUri).map(item => item.range.start), [
+        { line: 7, character: 13 },
+        { line: 7, character: 23 },
+    ]);
+}
+for (const id of [18, 20]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[3, 12, 17, "Hue"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[7, 13, 18, "Hue"], [7, 23, 28, "Hue"]]);
 }
 "#,
         )
