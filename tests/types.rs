@@ -451,7 +451,7 @@ fn recursive_generic_shapes_survive_reexport_layers() {
 fn generic_function_assignability_sees_recursive_placeholder_variables() {
     check_ok(
         "generic-recursive-function-compatible",
-        "type Node<T> = { children: [Node<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet fixed: (Node<number>) -> Node<number> = identity\n",
+        "type Node<T> = { children: [Node<T>] }\ntype Mirror<T> = { children: [Mirror<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet fixed: (Node<number>) -> Node<number> = identity\nlet mirror: (Mirror<number>) -> Mirror<number> = identity\n",
     );
     let mismatch = check_err(
         "generic-recursive-function-incompatible",
@@ -460,6 +460,10 @@ fn generic_function_assignability_sees_recursive_placeholder_variables() {
     assert!(
         mismatch.contains("expected") || mismatch.contains("assignable"),
         "{mismatch}"
+    );
+    check_err(
+        "generic-recursive-function-cross-alias-incompatible",
+        "type Node<T> = { children: [Node<T>] }\ntype Mirror<T> = { children: [Mirror<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet wrong: (Mirror<number>) -> Mirror<string> = identity\n",
     );
 }
 

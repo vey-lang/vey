@@ -287,10 +287,10 @@ Ayrıca `unknown.field` ve desteklenmeyen ordinary member türleri genel fallbac
 
 ### Recursive placeholder argümanlarında generic function unification
 
-`type Node<T> = { children: [Node<T>] }` örneğinde `T` yalnızca `Type::Recursion` argümanında bulunuyor. `type_has_var` bu argümanları taramadığı için `identity<T>(Node<T>) -> Node<T>` generic değilmiş gibi ele alınıyor; ayrıca `unify_types` recursive placeholder'ları koşulsuz wildcard sayıp argümanlarını karşılaştırmıyordu. Sonuç olarak bu identity fonksiyonu `(Node<number>) -> Node<string>` tipine atanabiliyordu.
+`type Node<T> = { children: [Node<T>] }` örneğinde `T` yalnızca `Type::Recursion` argümanında bulunuyor. `type_has_var` bu argümanları taramadığı için `identity<T>(Node<T>) -> Node<T>` generic değilmiş gibi ele alınıyor; ayrıca `unify_types` recursive placeholder'ları koşulsuz wildcard sayıp argümanlarını karşılaştırmıyordu. Aynı yapıya sahip farklı `Mirror<T>` alias'ı üzerinden yapılan sonraki probe da `(Mirror<number>) -> Mirror<string>` imzasının kabul edildiğini gösterdi; ilk düzeltme yalnızca aynı alias adındaki recursive placeholder'ları kapsıyordu.
 
-`type_has_var` ve `has_type_var` artık recursive placeholder argümanlarını inceliyor. Aynı recursive alias kimliği karşılaştırıldığında `unify_types` argümanları unifie ediyor; böylece `T` input'tan `number` olarak bağlanıyor ve output'taki `string` ile uyuşmazlık reddediliyor. Pozitif atama (`number -> number`), negatif atama (`number -> string`) ve iki var-presence yardımcısı için doğrudan unit regression eklendi.
+`type_has_var` ve `has_type_var` artık recursive placeholder argümanlarını inceliyor. `unify_types`, aynı recursive alias kimliğinde argüman sayısının tutmasını zorunlu kılıyor; yapısal karşılaştırmada farklı alias adlarının argüman sayıları eşitse argümanları da unifie ediyor. Böylece `T` input'tan `number` olarak bağlanıyor ve output'taki `string` ile uyuşmazlık reddediliyor. Pozitif atamalar hem aynı hem farklı alias adı üzerinden doğrulanıyor; iki mismatch de reddediliyor ve var-presence yardımcıları doğrudan unit regression ile kapsanıyor.
 
-- `generic_function_assignability_sees_recursive_placeholder_variables`: **1 geçti**; uyumlu specialization kabul, uyumsuz dönüş tipi ret.
+- `generic_function_assignability_sees_recursive_placeholder_variables`: **1 geçti**; uyumlu aynı/farklı-alias specialization kabul, uyumsuz dönüş tipi atamaları ret.
 - `recursive_placeholder_arguments_count_as_type_variables`: helper-level regresyon.
 - Son tam doğrulama: `cargo test --all-targets` **406 geçti, 0 başarısız**; `git diff --check` temiz.
