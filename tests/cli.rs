@@ -2559,6 +2559,20 @@ fn the_language_server_navigates_to_unopened_imported_modules() {
                 .write_all(lsp_message(id, method, &params).as_bytes())
                 .unwrap();
         }
+        let references_without_declaration = format!(
+            "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":2,\"character\":2}},\"context\":{{\"includeDeclaration\":false}}}}",
+            main_uri
+        );
+        stdin
+            .write_all(
+                lsp_message(
+                    8,
+                    "textDocument/references",
+                    &references_without_declaration,
+                )
+                .as_bytes(),
+            )
+            .unwrap();
         let type_definition = format!(
             "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":1,\"character\":13}}}}",
             main_uri
@@ -2635,6 +2649,8 @@ assert.deepEqual([definition.range.start.line, definition.range.start.character]
 const references = result(2);
 assert.equal(references.length, 3, JSON.stringify(references));
 assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri, otherUri].sort());
+const referencesWithoutDeclaration = result(8);
+assert.deepEqual(referencesWithoutDeclaration.map(item => item.uri).sort(), [mainUri, otherUri].sort());
 const changes = result(3).changes;
 assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri, otherUri].sort());
 assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[5, 10, 14, "measure"]]);

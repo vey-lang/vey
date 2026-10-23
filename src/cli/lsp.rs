@@ -259,7 +259,15 @@ impl Server {
             "textDocument/references" => {
                 let id = id?;
                 let (uri, line, col) = self.place(message)?;
-                Some(answer(id, self.references(&uri, line, col)))
+                let include_declaration = message
+                    .get("params")
+                    .and_then(|params| params.get("context"))
+                    .and_then(|context| context.get("includeDeclaration"))
+                    != Some(&Value::Bool(false));
+                Some(answer(
+                    id,
+                    self.references(&uri, line, col, include_declaration),
+                ))
             }
             "textDocument/rename" => {
                 let id = id?;
@@ -706,7 +714,7 @@ impl Server {
     }
 
     /// Where a name is used.
-    fn references(&self, uri: &str, line: usize, col: usize) -> Value {
+    fn references(&self, uri: &str, line: usize, col: usize, include_declaration: bool) -> Value {
         let Some((target_uri, target_name, target_pos)) = self.symbol_target_at(uri, line, col)
         else {
             return Value::List(Vec::new());
@@ -718,6 +726,9 @@ impl Server {
             occurrences
                 .iter()
                 .filter_map(|(file_uri, _name, pos, range_len)| {
+                    if !include_declaration && file_uri == &target_uri && *pos == target_pos {
+                        return None;
+                    }
                     let source = self.source(file_uri)?;
                     Some(location_with_width(file_uri, &source, pos, *range_len))
                 })
