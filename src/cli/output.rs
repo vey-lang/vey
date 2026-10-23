@@ -363,8 +363,12 @@ Build the site and synchronize a local folder for a static host. Stale files
 from earlier Vey deployments are removed; files not owned by Vey are kept,
 and collisions with unmanaged files are refused.
 
+  -o, --out <dir>  the folder the site is built in (default: .dist)
+  --title <text>   the title of the page
+  --force          empty the build folder, even when it holds files that
+                   the build did not write
   --target <dir>   the folder the site is copied to
-  -h, --help         this message
+  -h, --help       this message
 "#,
         _ => {
             print_help();

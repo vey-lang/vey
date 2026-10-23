@@ -735,7 +735,12 @@ impl Parser {
         if self.is_punct("{") {
             return Ok(ArrowBody::Block(self.parse_block()?));
         }
-        Ok(ArrowBody::Expr(Box::new(self.parse_expression()?)))
+        let start = self.tok.pos;
+        let expr = self.parse_expression()?;
+        // The token behind the expression is where the body ends. The span
+        // is what a completion uses to know whether the cursor is still in
+        // the body.
+        Ok(ArrowBody::Expr(Box::new(expr), start, self.tok.pos))
     }
 
     pub(crate) fn parse_array(&mut self) -> Result<Expr, VeyError> {
@@ -833,11 +838,15 @@ impl Parser {
             self.expect_op("=>")?;
             // The body of an arm ends with the line, so that the arm that
             // follows is not read as part of it.
+            let body_start = self.tok.pos;
             let body = self.parse_statement_expression()?;
+            let body_end = self.tok.pos;
             arms.push(MatchArm {
                 patterns,
                 guard,
                 body,
+                body_start,
+                body_end,
             });
             if self.is_punct(",") {
                 self.advance()?;

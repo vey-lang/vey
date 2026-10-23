@@ -1393,8 +1393,31 @@ component App() {
 }
 
 #[test]
-fn a_signal_is_typed_by_the_value_it_is_given() {
+fn the_question_mark_needs_a_result() {
+    for source in [
+        "fn f(value: number) -> number {\n  let n = value?\n  return n\n}\n",
+        "fn f(value: string | null) -> string {\n  let text = value?\n  return text\n}\n",
+        "fn f(value: unknown) -> number {\n  let n = value?\n  return 1\n}\n",
+    ] {
+        let error = check_err("question-mark-needs-result", source);
+        assert!(error.contains("needs a Result"), "{error}");
+    }
+
     check_ok(
+        "question-mark-result-union",
+        "fn a() -> Result<number, string> { return ok(1) }\n\
+         fn b(flag: bool) -> Result<number, string> {\n\
+           let value = match flag {\n\
+             true => a()\n\
+             false => ok(2)\n\
+           }\n\
+           return ok(value? + 1)\n\
+         }\n",
+    );
+}
+
+#[test]
+fn a_signal_is_typed_by_the_value_it_is_given() {    check_ok(
         "signal-typed",
         r#"
 const count = signal(0)

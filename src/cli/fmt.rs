@@ -15,7 +15,7 @@ use crate::cli::output::print_command_help;
 const INDENT: usize = 2;
 
 pub(crate) fn cmd_fmt(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("fmt", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

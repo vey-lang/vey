@@ -14,7 +14,7 @@ use crate::cli::entry::{collect_tool_files, collect_vey_files, default_title, en
 use crate::cli::output::{node_script, print_command_help, report, report_warnings, temp_file};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("run", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);
@@ -56,7 +56,7 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
 }
 
 pub(crate) fn cmd_test(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("test", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);
@@ -281,7 +281,7 @@ fn wait_for_change(files: &[PathBuf]) -> bool {
 }
 
 pub(crate) fn cmd_check(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("check", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

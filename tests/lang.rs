@@ -1619,6 +1619,23 @@ fn a_tag_that_is_not_a_tag_of_html_is_reported() {
 }
 
 #[test]
+fn a_custom_element_with_a_hyphen_is_accepted() {
+    let dir = temp_dir("custom-element");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        "component C() {\n  main {\n    my-element title=\"hello\" { \"x\" }\n  }\n}\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("check")
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
 fn the_value_of_an_attribute_may_be_written_in_braces() {
     let dir = temp_dir("attr-value");
     let file = dir.join("main.vey");
@@ -1830,6 +1847,32 @@ for key in person {
     assert!(text.contains("4"), "{text}");
     assert!(text.contains("name"), "{text}");
     assert!(text.contains("age"), "{text}");
+}
+
+#[test]
+fn a_loop_with_a_step_may_walk_a_list() {
+    let dir = temp_dir("loop-step-list");
+    let file = dir.join("main.vey");
+    fs::write(
+        &file,
+        r#"
+let items = [10, 20, 30, 40, 50, 60]
+for item in items by 2 {
+  print(item)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&file);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("10"), "{text}");
+    assert!(text.contains("30"), "{text}");
+    assert!(text.contains("50"), "{text}");
+    assert!(!text.contains("20"), "{text}");
+    assert!(!text.contains("40"), "{text}");
+    assert!(!text.contains("60"), "{text}");
 }
 
 #[test]

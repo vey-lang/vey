@@ -14,7 +14,7 @@ use crate::cli::args::parse_args;
 use crate::cli::output::{node_script, print_command_help, temp_file};
 
 pub(crate) fn cmd_repl(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("repl", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

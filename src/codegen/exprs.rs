@@ -329,7 +329,7 @@ impl Codegen {
         self.push_scope();
         let param_text = self.gen_params(params)?;
         match body {
-            ArrowBody::Expr(expr) => {
+            ArrowBody::Expr(expr, _, _) => {
                 let value = self.gen_expr(expr)?;
                 let async_kw = if expr_has_await(expr) { "async " } else { "" };
                 self.pop_scope();

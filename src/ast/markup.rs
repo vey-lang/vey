@@ -47,6 +47,10 @@ pub struct MFor {
     /// change without the page being built again.
     pub key: Option<Expr>,
     pub body: Vec<MarkupNode>,
+    /// The position of the `{` that opens the body.
+    pub body_start: Pos,
+    /// The position of the `}` that closes the body.
+    pub body_end: Pos,
 }
 
 /// A `match` in the markup.
@@ -61,4 +65,8 @@ pub struct MMatchArm {
     pub patterns: Vec<Pattern>,
     pub guard: Option<Expr>,
     pub body: Vec<MarkupNode>,
+    /// The position of the `{` that opens the body.
+    pub body_start: Pos,
+    /// The position of the `}` that closes the body.
+    pub body_end: Pos,
 }

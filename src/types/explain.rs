@@ -295,7 +295,7 @@ impl Walker {
             // a name inside it is found.
             Expr::Fn(_, body, _, _) => self.body(&body.body),
             Expr::Arrow(_, _, body, _, _) => match body {
-                ArrowBody::Expr(expr) => self.expr(expr),
+                ArrowBody::Expr(expr, _, _) => self.expr(expr),
                 ArrowBody::Block(block) => self.body(&block.body),
             },
             _ => {}

@@ -28,6 +28,10 @@ pub struct DocComment {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub body: Vec<Stmt>,
+    /// The position of the `{` that opens the block.
+    pub start: Pos,
+    /// The position of the `}` that closes the block.
+    pub end: Pos,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +105,10 @@ pub struct ComponentDecl {
     pub children: Vec<MarkupNode>,
     pub exported: bool,
     pub pos: Pos,
+    /// The `{` that opens the component body.
+    pub body_start: Pos,
+    /// The `}` that closes the component body.
+    pub body_end: Pos,
 }
 
 #[derive(Debug, Clone)]

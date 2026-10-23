@@ -528,7 +528,8 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {        self.scopes.push();
+    fn check_component(&mut self, decl: &ComponentDecl) -> Result<(), VeyError> {
+        self.scopes.push();
         for param in &decl.params {
             if let Some(default) = &param.default {
                 self.check_expr(default)?;
@@ -826,7 +827,7 @@ impl Checker<'_> {
 
     fn check_arrow(&mut self, params: &[Param], body: &ArrowBody) -> Result<(), VeyError> {
         match body {
-            ArrowBody::Expr(expr) => {
+            ArrowBody::Expr(expr, _, _) => {
                 let loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 self.scopes.push();

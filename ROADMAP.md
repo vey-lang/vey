@@ -32,7 +32,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] `exit`/`shutdown` yaşam döngüsünü, bozuk/eksik frame parse-error davranışını ve unknown request/notification ayrımını JSON-RPC'ye uygunlaştır; Content-Length sınırı ve subprocess testleri ekle.
 - [x] LSP `position.character` ve `Range` değerlerini UTF-16 birimlerine dönüştür; token içi cursor ve astral Unicode rename/range testleri ekle.
 - [x] `file://` URI yollarını UTF-8 byte dizileriyle decode et, diagnostic URI'larını encode et; malformed escape, UTF-8, local/remote authority ve percent-encoded Unicode-path testleri ekle.
-- [ ] Completion'ı cursor ve kapsam-duyarlı hâle getir; bunu mevcut rename/position düzeltmelerinden ayrı özellik işi olarak takip et.
+- [x] Completion'ı cursor ve kapsam-duyarlı hâle getir; bunu mevcut rename/position düzeltmelerinden ayrı özellik işi olarak takip et.
 
 ## 4. CLI, build ve yayınlama davranışı
 
@@ -40,12 +40,12 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] `migrate` dry-run'da değişiklik varsa exit status 1 döndür; dosyanın yazılmadığını ve güncel dosyanın exit 0 verdiğini regresyonla doğrula.
 - [x] `[build].minify` no-op davranışını kaldır: `true` static, Node ve deploy build'lerinde açıkça reddedilir; gerçek minification desteklenmiyor.
 - [ ] Gerçek minification eklenirse JS/CSS/HTML kapsamını ve source map doğruluğunu tanımlayan güvenli parser/tool tabanlı bir uygulama seç.
-- [ ] Lint'in config dosyasını hedef dosyanın proje kökünden çözmesini sağla.
-- [ ] CLI option parser'ında komut-başına geçerli seçenekleri doğrula; etkisiz ve yanlış yazılmış seçeneklerin sessizce yutulmasını önle.
+- [x] Lint'in config dosyasını hedef dosyanın proje kökünden çözmesini sağla.
+- [x] CLI option parser'ında komut-başına geçerli seçenekleri doğrula; etkisiz ve yanlış yazılmış seçeneklerin sessizce yutulmasını önle.
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [x] Tam `cargo test --all-targets` çalıştır: **364 geçti, 0 kaldı**; CLI 44, types 79, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
+- [x] Tam `cargo test --all-targets` çalıştır: **371 geçti, 0 kaldı**; CLI 48, types 80, runtime 100 ve server hedefindeki dört test (`a_malformed_path_does_not_take_the_server_down` dahil) başarılı. Server test harness'ındaki `kill` komutuna `--` eklendi ve process group lideri reap edilmeden kapatılıyor; seri server hedefi 0,49 saniyede geçti, `SIGTERM/143` tekrarlanmadı.
 - [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build ve deploy iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

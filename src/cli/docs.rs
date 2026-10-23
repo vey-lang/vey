@@ -14,7 +14,7 @@ use crate::cli::entry::collect_tool_files;
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_docs(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("docs", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

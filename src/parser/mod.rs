@@ -500,7 +500,7 @@ impl Parser {
         if self.is_punct(":") {
             return Err(self.error_at(self.tok.pos, "a component has no return type"));
         }
-        self.expect_punct("{")?;
+        let open = self.expect_punct("{")?;
         // A component may have values of its own, which are kept when the
         // page is written again.
         let mut body = Vec::new();
@@ -508,7 +508,7 @@ impl Parser {
             body.push(self.parse_statement()?);
         }
         let children = self.parse_markup_nodes()?;
-        self.expect_punct("}")?;
+        let close = self.expect_punct("}")?;
         Ok(Stmt::Component(ComponentDecl {
             name,
             params,
@@ -516,6 +516,8 @@ impl Parser {
             children,
             exported,
             pos: start.pos,
+            body_start: open.pos,
+            body_end: close.pos,
         }))
     }
 
@@ -674,7 +676,7 @@ impl Parser {
     }
 
     fn parse_block(&mut self) -> Result<Block, VeyError> {
-        self.expect_punct("{")?;
+        let open = self.expect_punct("{")?;
         let mut body = Vec::new();
         while !self.is_punct("}") {
             if self.tok.kind == TokKind::Eof {
@@ -682,8 +684,12 @@ impl Parser {
             }
             body.push(self.parse_statement()?);
         }
-        self.expect_punct("}")?;
-        Ok(Block { body })
+        let close = self.expect_punct("}")?;
+        Ok(Block {
+            body,
+            start: open.pos,
+            end: close.pos,
+        })
     }
 
     /// The name of a loop, when a `break` or a `continue` names it.

@@ -15,7 +15,7 @@ use crate::cli::entry::collect_tool_files;
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_migrate(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("migrate", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

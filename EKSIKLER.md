@@ -482,7 +482,7 @@ Yani **çağıran** slot işaretliyor, **çağıran taraf** (bileşenin kendisi)
 - Slot içeriğinin **tip denetimi** ve generic slot desteği.
 - Aynı slot adına iki çocuk → bugün hata veriyor (`types/stmts.rs:977`), ama "ilk olan kaybolur" yerine düzgün bir hata — bu kısım doğru.
 
-### A4 · SVG ve HTML dışı etiketler **yazılamıyor** 🔴  🟡 **yarısı düzeldi**
+### A4 · SVG ve HTML dışı etiketler **yazılamıyor** 🟡 **yarısı düzeldi** (web component'ler artık destekleniyor)
 
 > **Durum (22 Ekim 2026):** `svg`, `path`, `circle` ve diğer SVG etiketleri artık **yazılabiliyor ve çizilebiliyor** (`html(App())` → `<svg viewBox="0 0 24 24"><circle ...></circle></svg>`); `slot` de var. **Web component etiketleri (`my-element`) hâlâ yok** — `unknown tag` diyor. Kanıt aşağıda ilk incelemeye ait.
 
@@ -539,7 +539,7 @@ error: unexpected token 'let'
 
 `src/parser/mod.rs:39` — `MAX_DEPTH: usize = 64`. Derin iç içe ifade reddediliyor (koruma iyi, ama sınır düşük; 256'ya çıkarılabilir).
 
-### A10 · `for ... by` yalnızca `range` ile çalışıyor
+### A10 · `for ... by` yalnızca `range` ile çalışıyor ✅ **düzeltildi** (listeler de destekleniyor)
 
 `src/codegen/mod.rs:485-495` — "a loop with a step must walk a range". `for x in list by 2` yazılamıyor.
 
@@ -576,7 +576,7 @@ error: unexpected token 'let'
 
 **Sonuç:** `await` operatörü `any` üretiyor; `await` sonrası narrowing çalışmıyor.
 
-### B2 · `Result<T,E>` de tam çalışmıyor
+### B2 · `Result<T,E>` de tam çalışmıyor ✅ **kısmen düzeltildi** (`ok()`/`err()` artık tipli `Result` döndürüyor)
 
 `ok()` / `err()` `any` dönüyor (`builtins.rs:209-210`). `?` operatörü `src/types/exprs.rs:427` → `Type::Result(ok, _) => *ok` → **hata tipi (`E`) tamamen düşüyor**. `catch` bloğundaki hata değeri `Type::Any` (`src/types/stmts.rs:471`).
 

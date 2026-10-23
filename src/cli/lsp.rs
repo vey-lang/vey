@@ -15,7 +15,7 @@ use crate::cli::args::parse_args;
 use crate::cli::json::{self, Value};
 
 pub(crate) fn cmd_lsp(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("lsp", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);
@@ -213,8 +213,8 @@ impl Server {
             }
             "textDocument/completion" => {
                 let id = id?;
-                let (uri, _line, _col) = self.place(message)?;
-                Some(answer(id, self.completion(&uri)))
+                let (uri, line, col) = self.place(message)?;
+                Some(answer(id, self.completion(&uri, line, col)))
             }
             "textDocument/documentSymbol" => {
                 let id = id?;
@@ -336,12 +336,35 @@ impl Server {
         // editor, which may not be written on the disk yet. The places of
         // the other files are the ones on the disk.
         let opened = path.canonicalize().ok();
-        let file_of = |file: &str| -> Option<String> {
-            if opened.as_deref() == Some(std::path::Path::new(file)) {
-                None
-            } else {
-                Some(file.to_string())
+        let opened_parent = path.parent();
+        let canonical_parent = opened.as_deref().and_then(std::path::Path::parent);
+        let file_uri_of = |file: &str| -> Option<String> {
+            let canonical = std::path::Path::new(file);
+            // A problem of the file that is opened belongs to the buffer of
+            // the editor, which may not be written on the disk yet.
+            if opened.as_deref() == Some(canonical) {
+                return None;
             }
+            // The editor may have opened a file through a path that is not
+            // the canonical one, as a symbolic link makes possible. The URI
+            // of the document that is open is the name the editor knows.
+            for (open_uri, _) in &self.files {
+                let Some(open_path) = path_of(open_uri) else {
+                    continue;
+                };
+                if open_path.canonicalize().ok().as_deref() == Some(canonical) {
+                    return Some(open_path.to_string_lossy().to_string());
+                }
+            }
+            // A module next to the opened file keeps the spelling of the
+            // folder that the editor used, even when the compiler resolved
+            // the real path behind a symbolic link.
+            if let (Some(parent), Some(real_parent)) = (opened_parent, canonical_parent) {
+                if let Ok(relative) = canonical.strip_prefix(real_parent) {
+                    return Some(parent.join(relative).to_string_lossy().to_string());
+                }
+            }
+            Some(file.to_string())
         };
         let mut parser = match Parser::new(text, &label) {
             Ok(parser) => parser,
@@ -357,13 +380,13 @@ impl Server {
         match vey::compiler::check_file(&path, Some(text)) {
             Ok(problems) => {
                 for warning in &problems.warnings {
-                    out.push((file_of(&warning.file), warning_problem(warning)));
+                    out.push((file_uri_of(&warning.file), warning_problem(warning)));
                 }
                 for err in &problems.errors {
-                    out.push((file_of(&err.file), problem(err, err.line, err.col)));
+                    out.push((file_uri_of(&err.file), problem(err, err.line, err.col)));
                 }
             }
-            Err(err) => out.push((file_of(&err.file), problem(&err, err.line, err.col))),
+            Err(err) => out.push((file_uri_of(&err.file), problem(&err, err.line, err.col))),
         }
         out
     }
@@ -495,7 +518,7 @@ impl Server {
     }
 
     /// The names that may be written at a place.
-    fn completion(&self, uri: &str) -> Value {
+    fn completion(&self, uri: &str, line: usize, col: usize) -> Value {
         let Some(text) = self.files.get(uri) else {
             return Value::List(Vec::new());
         };
@@ -503,25 +526,45 @@ impl Server {
             return Value::List(Vec::new());
         };
         let label = path.to_string_lossy().to_string();
-        let mut parser = match Parser::new(text, &label) {
-            Ok(parser) => parser,
-            Err(_) => return Value::List(Vec::new()),
-        };
-        let program = match parser.parse_program() {
-            Ok(program) => program,
-            Err(_) => return Value::List(Vec::new()),
-        };
 
+        // The names of the scopes that hold the cursor, from the nearest
+        // one out. A local name is only offered where it may be written.
         let mut names: Vec<Value> = Vec::new();
-        for stmt in &program.body {
-            if let Some((name, _)) = stmt.exported_name() {
-                names.push(json::object(vec![("label", json::text(name))]));
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if let Ok(mut parser) = Parser::new(text, &label) {
+            if let Ok(program) = parser.parse_program() {
+                for (name, kind) in Names::of(&program, text).visible_values(line, col) {
+                    if seen.insert(name.clone()) {
+                        names.push(json::object(vec![
+                            ("label", json::text(&name)),
+                            ("kind", json::number(completion_kind(kind))),
+                        ]));
+                    }
+                }
             }
         }
         for name in vey::builtins::BUILTINS {
-            names.push(json::object(vec![("label", json::text(name))]));
+            if seen.insert((*name).to_string()) {
+                names.push(json::object(vec![
+                    ("label", json::text(name)),
+                    ("kind", json::number(3.0)),
+                ]));
+            }
         }
         Value::List(names)
+    }
+}
+
+/// The shape of a completion item, in the numbers of the protocol.
+fn completion_kind(kind: &str) -> f64 {
+    match kind {
+        "function" | "component" => 3.0,
+        "module" => 9.0,
+        "enum" => 13.0,
+        "interface" => 8.0,
+        "type" => 25.0,
+        "method" => 2.0,
+        _ => 6.0,
     }
 }
 
@@ -588,10 +631,26 @@ struct Names {
     use_symbols: Vec<Option<usize>>,
     /// The value names in each lexical scope.
     scopes: Vec<HashMap<String, usize>>,
+    /// The stable identity of each scope on the stack.
+    scope_ids: Vec<usize>,
+    /// The source range of each lexical scope, by its stable identity. The
+    /// top level has no range, because it is everywhere.
+    scope_regions: Vec<Option<(vey::lexer::Pos, vey::lexer::Pos)>>,
+    next_scope_id: usize,
+    /// The names that a completion may offer, with the scope they live in.
+    values: Vec<ScopedName>,
     /// A binding's declaration, indexed by its stable identity.
     symbols: Vec<NameSymbol>,
     /// Top-level bindings are visible to function bodies before their text.
     predeclared: Vec<(String, vey::lexer::Pos, usize)>,
+}
+
+/// A name that may be written at a place of the program.
+struct ScopedName {
+    name: String,
+    pos: vey::lexer::Pos,
+    kind: &'static str,
+    scope: usize,
 }
 
 struct NameSymbol {
@@ -607,6 +666,10 @@ impl Names {
             uses: Vec::new(),
             use_symbols: Vec::new(),
             scopes: vec![HashMap::new()],
+            scope_ids: vec![0],
+            scope_regions: vec![None],
+            next_scope_id: 1,
+            values: Vec::new(),
             symbols: Vec::new(),
             predeclared: Vec::new(),
         }
@@ -645,7 +708,7 @@ impl Names {
                     if let Some(pos) = decl.alias_pos {
                         self.reserve(&decl.alias, pos);
                     } else {
-                        self.define_hidden(&decl.alias);
+                        self.define_hidden(&decl.alias, "module");
                     }
                 }
                 _ => {}
@@ -736,6 +799,16 @@ impl Names {
         }
         self.defs.push((name.to_string(), pos, kind));
         self.def_symbols.push(symbol);
+        // A variant and a method are written after a dot, not on their own,
+        // so they are not offered as bare names.
+        if kind != "variant" && kind != "method" {
+            self.values.push(ScopedName {
+                name: name.to_string(),
+                pos,
+                kind,
+                scope: *self.scope_ids.last().unwrap_or(&0),
+            });
+        }
     }
 
     fn use_name(&mut self, name: &str, pos: vey::lexer::Pos) {
@@ -750,7 +823,7 @@ impl Names {
             .find_map(|scope| scope.get(name).copied())
     }
 
-    fn define_hidden(&mut self, name: &str) {
+    fn define_hidden(&mut self, name: &str, kind: &'static str) {
         if self
             .scopes
             .last()
@@ -763,22 +836,72 @@ impl Names {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), symbol);
         }
+        // A name that the compiler makes has no token of its own. It is
+        // written before any cursor in its scope, so a completion may still
+        // offer it.
+        self.values.push(ScopedName {
+            name: name.to_string(),
+            pos: vey::lexer::Pos::new(0, 0),
+            kind,
+            scope: *self.scope_ids.last().unwrap_or(&0),
+        });
     }
 
-    fn push_scope(&mut self) {
+    fn push_scope(&mut self, region: Option<(vey::lexer::Pos, vey::lexer::Pos)>) {
         self.scopes.push(HashMap::new());
+        self.scope_ids.push(self.next_scope_id);
+        self.scope_regions.push(region);
+        self.next_scope_id += 1;
     }
 
     fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
             self.scopes.pop();
+            self.scope_ids.pop();
         }
     }
 
-    fn block(&mut self, body: &[vey::ast::Stmt]) {
-        self.push_scope();
-        self.body(body);
+    fn block(&mut self, block: &vey::ast::Block) {
+        self.push_scope(Some((block.start, block.end)));
+        self.body(&block.body);
         self.pop_scope();
+    }
+
+    /// The names that may be written at a place of the program.
+    ///
+    /// The scopes are walked from the innermost one out, so that a name that
+    /// hides another one is offered once, and with the nearest meaning.
+    fn visible_values(&self, line: usize, col: usize) -> Vec<(String, &'static str)> {
+        let cursor = vey::lexer::Pos::new(line, col);
+        let mut found: Vec<(String, &'static str)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for scope in (0..self.scope_regions.len()).rev() {
+            if scope != 0 {
+                let Some((start, end)) = self.scope_regions.get(scope).copied().flatten() else {
+                    continue;
+                };
+                // The cursor may be at either end of the range, because a
+                // position is the place before the character that it names.
+                let before_start = cursor.line < start.line
+                    || (cursor.line == start.line && cursor.col < start.col);
+                let after_end =
+                    cursor.line > end.line || (cursor.line == end.line && cursor.col > end.col);
+                if before_start || after_end {
+                    continue;
+                }
+            }
+            for value in self.values.iter().filter(|value| value.scope == scope) {
+                // A local name is not there before its declaration. The
+                // top level is known before the program runs.
+                if scope != 0 && value.pos.after(&cursor) {
+                    continue;
+                }
+                if seen.insert(value.name.clone()) {
+                    found.push((value.name.clone(), value.kind));
+                }
+            }
+        }
+        found
     }
 
     fn stmt(&mut self, stmt: &vey::ast::Stmt) {
@@ -793,7 +916,7 @@ impl Names {
             Stmt::Fn(decl) => {
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "function");
-                self.push_scope();
+                self.push_scope(Some((decl.body.start, decl.body.end)));
                 for param in &decl.params {
                     if let Some(default) = &param.default {
                         self.expr(default);
@@ -806,7 +929,7 @@ impl Names {
             Stmt::Component(decl) => {
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "component");
-                self.push_scope();
+                self.push_scope(Some((decl.body_start, decl.body_end)));
                 for param in &decl.params {
                     if let Some(default) = &param.default {
                         self.expr(default);
@@ -839,8 +962,8 @@ impl Names {
                 self.define(&decl.type_name, pos, "type");
                 for method in &decl.methods {
                     self.define(&method.name, method.pos, "method");
-                    self.push_scope();
-                    self.define_hidden("self");
+                    self.push_scope(Some((method.body.start, method.body.end)));
+                    self.define_hidden("self", "variable");
                     for param in &method.params {
                         if let Some(default) = &param.default {
                             self.expr(default);
@@ -853,16 +976,16 @@ impl Names {
             }
             Stmt::If(decl) => {
                 self.expr(&decl.test);
-                self.block(&decl.then_block.body);
+                self.block(&decl.then_block);
                 if let Some(branch) = &decl.else_branch {
                     self.stmt(branch);
                 }
             }
             Stmt::IfLet(decl) => {
                 self.expr(&decl.value);
-                self.push_scope();
+                self.push_scope(Some((decl.then_block.start, decl.then_block.end)));
                 self.pattern_match(&decl.pattern);
-                self.block(&decl.then_block.body);
+                self.block(&decl.then_block);
                 self.pop_scope();
                 if let Some(branch) = &decl.else_branch {
                     self.stmt(branch);
@@ -870,11 +993,11 @@ impl Names {
             }
             Stmt::While(decl) => {
                 self.expr(&decl.test);
-                self.block(&decl.body.body);
+                self.block(&decl.body);
             }
             Stmt::WhileLet(decl) => {
                 self.expr(&decl.value);
-                self.push_scope();
+                self.push_scope(Some((decl.body.start, decl.body.end)));
                 self.pattern_match(&decl.pattern);
                 self.body(&decl.body.body);
                 self.pop_scope();
@@ -882,7 +1005,7 @@ impl Names {
             Stmt::LetElse(decl) => {
                 self.expr(&decl.value);
                 self.pattern(&decl.pattern, "variable");
-                self.block(&decl.otherwise.body);
+                self.block(&decl.otherwise);
             }
             Stmt::Defer(decl) => self.expr(&decl.value),
             Stmt::Throw(decl) => self.expr(&decl.value),
@@ -891,14 +1014,14 @@ impl Names {
                     self.expr(step);
                 }
                 self.expr(&decl.iter);
-                self.push_scope();
+                self.push_scope(Some((decl.body.start, decl.body.end)));
                 self.pattern(&decl.pattern, "variable");
                 self.body(&decl.body.body);
                 self.pop_scope();
             }
             Stmt::Repeat(decl) => {
                 self.expr(&decl.count);
-                self.block(&decl.body.body);
+                self.block(&decl.body);
             }
             Stmt::Return(decl) => {
                 if let Some(value) = &decl.value {
@@ -906,17 +1029,17 @@ impl Names {
                 }
             }
             Stmt::Try(decl) => {
-                self.block(&decl.body.body);
+                self.block(&decl.body);
                 if let Some(catch) = &decl.catch {
-                    self.push_scope();
+                    self.push_scope(Some((catch.start, catch.end)));
                     if let Some(name) = &decl.name {
-                        self.define_hidden(name);
+                        self.define_hidden(name, "variable");
                     }
                     self.body(&catch.body);
                     self.pop_scope();
                 }
                 if let Some(finally) = &decl.finally {
-                    self.block(&finally.body);
+                    self.block(finally);
                 }
             }
             Stmt::Expr(decl) => self.expr(&decl.expr),
@@ -924,12 +1047,12 @@ impl Names {
                 self.expr(&decl.target);
                 self.expr(&decl.value);
             }
-            Stmt::Block(block, _) => self.block(&block.body),
+            Stmt::Block(block, _) => self.block(block),
             Stmt::Use(decl) if !decl.path.ends_with(".css") => {
                 if let Some(pos) = decl.alias_pos {
                     self.define(&decl.alias, pos, "module");
                 } else {
-                    self.define_hidden(&decl.alias);
+                    self.define_hidden(&decl.alias, "module");
                 }
             }
             Stmt::Use(_) => {}
@@ -952,7 +1075,7 @@ impl Names {
                     self.pattern(item, kind);
                 }
                 if let Some(rest) = rest {
-                    self.define_hidden(rest);
+                    self.define_hidden(rest, kind);
                 }
             }
             BindingPattern::Object { fields, rest, .. } => {
@@ -960,7 +1083,7 @@ impl Names {
                     self.pattern(&field.pattern, kind);
                 }
                 if let Some(rest) = rest {
-                    self.define_hidden(rest);
+                    self.define_hidden(rest, kind);
                 }
             }
         }
@@ -994,10 +1117,10 @@ impl Names {
                 }
                 MarkupNode::For(loop_node) => {
                     self.expr(&loop_node.iter);
-                    self.push_scope();
-                    self.define_hidden(&loop_node.name);
+                    self.push_scope(Some((loop_node.body_start, loop_node.body_end)));
+                    self.define_hidden(&loop_node.name, "variable");
                     if let Some(index) = &loop_node.index {
-                        self.define_hidden(index);
+                        self.define_hidden(index, "variable");
                     }
                     if let Some(key) = &loop_node.key {
                         self.expr(key);
@@ -1008,7 +1131,7 @@ impl Names {
                 MarkupNode::Match(m) => {
                     self.expr(&m.subject);
                     for arm in &m.arms {
-                        self.push_scope();
+                        self.push_scope(Some((arm.body_start, arm.body_end)));
                         for pattern in &arm.patterns {
                             self.pattern_match(pattern);
                         }
@@ -1099,7 +1222,7 @@ impl Names {
                 }
             }
             Expr::Fn(params, body, _, _) => {
-                self.push_scope();
+                self.push_scope(Some((body.start, body.end)));
                 for param in params {
                     if let Some(default) = &param.default {
                         self.expr(default);
@@ -1110,7 +1233,11 @@ impl Names {
                 self.pop_scope();
             }
             Expr::Arrow(_, params, body, _, _) => {
-                self.push_scope();
+                let region = match body {
+                    vey::ast::ArrowBody::Block(block) => Some((block.start, block.end)),
+                    vey::ast::ArrowBody::Expr(_, start, end) => Some((*start, *end)),
+                };
+                self.push_scope(region);
                 for param in params {
                     if let Some(default) = &param.default {
                         self.expr(default);
@@ -1118,7 +1245,7 @@ impl Names {
                     self.pattern(&param.pattern, "parameter");
                 }
                 match body {
-                    vey::ast::ArrowBody::Expr(value) => self.expr(value),
+                    vey::ast::ArrowBody::Expr(value, _, _) => self.expr(value),
                     vey::ast::ArrowBody::Block(block) => self.body(&block.body),
                 }
                 self.pop_scope();
@@ -1126,7 +1253,7 @@ impl Names {
             Expr::Match(subject, arms, _) => {
                 self.expr(subject);
                 for arm in arms {
-                    self.push_scope();
+                    self.push_scope(Some((arm.body_start, arm.body_end)));
                     for pattern in &arm.patterns {
                         self.pattern_match(pattern);
                     }

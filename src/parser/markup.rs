@@ -75,6 +75,11 @@ impl Parser {
         if is_known_tag(&name) {
             return Ok(None);
         }
+        // A custom element of the web, such as `my-element`, is a tag
+        // even when it is not one of the tags the markup knows.
+        if name.contains('-') {
+            return Ok(None);
+        }
         let next = self.peek()?;
         if next.kind == TokKind::Punct && next.value == "{" {
             return Ok(Some(name));
@@ -100,6 +105,12 @@ impl Parser {
         if self.qualified_name_ahead()? {
             return Ok(true);
         }
+        // A custom element of the web, such as `my-element`. The name of
+        // such an element holds a hyphen, so the token behind it is an
+        // operator that is read as part of the name.
+        if self.custom_element_ahead()? {
+            return Ok(true);
+        }
         let next = self.peek()?;
         if next.kind == TokKind::Punct
             && (next.value == "{" || next.value == "." || next.value == "#")
@@ -117,6 +128,18 @@ impl Parser {
             return Ok(is_known_tag(&self.tok.value));
         }
         Ok(false)
+    }
+
+    /// Whether the current token begins a custom element, such as
+    /// `my-element`. A custom element's name holds a hyphen.
+    fn custom_element_ahead(&mut self) -> Result<bool, VeyError> {
+        let next = self.peek()?;
+        if next.kind != TokKind::Op || next.value != "-" {
+            return Ok(false);
+        }
+        // There has to be another word behind the hyphen.
+        let after = self.peek_n(2)?;
+        Ok(after.kind == TokKind::Ident)
     }
 
     /// Whether the tag is the name of a component of another module.
@@ -196,13 +219,22 @@ impl Parser {
 
     pub(crate) fn parse_element(&mut self, in_component: bool) -> Result<Element, VeyError> {
         let tag_token = self.advance()?;
-        let component = tag_token
-            .value
+        // A custom element may hold a hyphen, such as `my-element`. The
+        // hyphen is an operator in the lexer, so it is read back here and
+        // folded into the name of the tag.
+        let mut tag = tag_token.value.clone();
+        while self.is_op("-") {
+            self.advance()?;
+            let part = self.expect_ident("custom element name part")?;
+            tag.push('-');
+            tag.push_str(&part);
+        }
+        let component = tag
             .chars()
             .next()
             .is_some_and(|c| c.is_uppercase());
         let mut element = Element {
-            tag: tag_token.value,
+            tag,
             component,
             classes: Vec::new(),
             id: None,
@@ -381,15 +413,17 @@ impl Parser {
         } else {
             None
         };
-        self.expect_punct("{")?;
+        let body_start = self.expect_punct("{")?.pos;
         let body = self.parse_markup_nodes()?;
-        self.expect_punct("}")?;
+        let body_end = self.expect_punct("}")?.pos;
         Ok(MFor {
             name,
             index,
             iter,
             key,
             body,
+            body_start,
+            body_end,
         })
     }
 
@@ -414,9 +448,9 @@ impl Parser {
                 None
             };
             self.expect_op("=>")?;
-            self.expect_punct("{")?;
+            let body_start = self.expect_punct("{")?.pos;
             let body = self.parse_markup_nodes()?;
-            self.expect_punct("}")?;
+            let body_end = self.expect_punct("}")?.pos;
             // The arms may be told apart with a comma, as in an expression.
             if self.is_punct(",") {
                 self.advance()?;
@@ -425,6 +459,8 @@ impl Parser {
                 patterns,
                 guard,
                 body,
+                body_start,
+                body_end,
             });
         }
         self.expect_punct("}")?;

@@ -966,7 +966,7 @@ impl TypeChecker<'_> {
         expected: Option<&[Type]>,
     ) -> Result<(Type, Vec<Type>), VeyError> {
         match body {
-            ArrowBody::Expr(expr) => {
+            ArrowBody::Expr(expr, _, _) => {
                 self.push_scope();
                 self.declare_params(params, expected)?;
                 let ty = self.infer_expr(expr)?;

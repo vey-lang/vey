@@ -13,7 +13,7 @@ use crate::cli::args::parse_args;
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_explain(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("explain", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

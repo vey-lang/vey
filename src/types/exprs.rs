@@ -541,21 +541,42 @@ impl TypeChecker<'_> {
                     ));
                 }
                 // The type of a value that hands its failure on is the type
-                // of the value inside it.
+                // of the value inside it. A plain value has no failure to
+                // hand on, so accepting one here would silently turn `?`
+                // into a no-op at runtime.
                 let ty = self.infer_expr(inner)?;
-                Ok(match ty {
-                    Type::Result(ok, _) => *ok,
-                    Type::Union(items) => union(
-                        items
-                            .iter()
-                            .map(|item| match item {
-                                Type::Result(ok, _) => (**ok).clone(),
-                                other => other.clone(),
-                            })
-                            .collect(),
-                    ),
-                    other => other,
-                })
+                match &ty {
+                    Type::Result(ok, _) => Ok((**ok).clone()),
+                    Type::Any => Ok(Type::Any),
+                    Type::Never => Ok(Type::Never),
+                    Type::Union(items) => {
+                        let mut values = Vec::new();
+                        for item in items {
+                            match item {
+                                Type::Result(ok, _) => values.push((**ok).clone()),
+                                Type::Never => {}
+                                _ => {
+                                    return Err(self.error(
+                                        *pos,
+                                        format!(
+                                            "the ? needs a Result, found {}",
+                                            ty.display()
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        if values.is_empty() {
+                            Ok(Type::Never)
+                        } else {
+                            Ok(union(values))
+                        }
+                    }
+                    _ => Err(self.error(
+                        *pos,
+                        format!("the ? needs a Result, found {}", ty.display()),
+                    )),
+                }
             }
             Expr::Yield(inner, _) => {
                 // The type of the value is kept, so that the type of a
@@ -2157,7 +2178,7 @@ fn is_builtin_kind(ty: &TypeExpr) -> bool {
         // The names of the builtin types are one list, so that a type may be
         // checked with `is` whenever it may be written.
         TypeExpr::Name(name, _) => {
-            is_builtin_type(name) || matches!(name.as_str(), "int" | "boolean" | "function")
+            is_builtin_type(name)
         }
         TypeExpr::Array(_, _) | TypeExpr::Tuple(_, _) => true,
         TypeExpr::Object(_, _) => true,

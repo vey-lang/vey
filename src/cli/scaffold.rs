@@ -14,15 +14,7 @@ pub(crate) const PROJECT_LOGO: &str = include_str!("../../logo.svg");
 pub(crate) const PROJECT_FAVICON: &str = include_str!("../../favicon.svg");
 
 pub(crate) fn cmd_new(args: &[String]) -> i32 {
-    // The `--force` mark is read here, and not by every command.
-    let force = crate::cli::args::wants_force(args);
-    let rest: Vec<String> = args
-        .iter()
-        .filter(|arg| arg.as_str() != "--force")
-        .cloned()
-        .collect();
-    let args = &rest[..];
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("new", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);
@@ -33,6 +25,7 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
         print_command_help("new");
         return 0;
     }
+    let force = parsed.force;
     let Some(name) = parsed.files.first() else {
         eprintln!("usage: vey new <directory>");
         return 1;

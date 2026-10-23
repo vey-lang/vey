@@ -16,6 +16,10 @@ pub struct MatchArm {
     /// The condition that has to hold as well.
     pub guard: Option<Expr>,
     pub body: Expr,
+    /// The place where the body begins.
+    pub body_start: Pos,
+    /// The place where the body ends.
+    pub body_end: Pos,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +101,9 @@ pub enum MemberProp {
 
 #[derive(Debug, Clone)]
 pub enum ArrowBody {
-    Expr(Box<Expr>),
+    /// A body that is one expression, with the place where it begins and
+    /// the place where it ends.
+    Expr(Box<Expr>, Pos, Pos),
     Block(Block),
 }
 

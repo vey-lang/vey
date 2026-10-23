@@ -188,7 +188,11 @@ impl Codegen {
             .filter(|stmt| self.is_written(stmt))
             .cloned()
             .collect();
-        self.gen_body(&Block { body: rest })?;
+        self.gen_body(&Block {
+            body: rest,
+            start: Pos::new(1, 1),
+            end: Pos::new(1, 1),
+        })?;
         if self.module {
             for name in self.exports.clone() {
                 if self.unused.contains(&name) {
@@ -538,19 +542,16 @@ impl Codegen {
                     .map(|name| format!("{}: ", name))
                     .unwrap_or_default();
                 // A loop over a range walks it with a counter, so that it may
-                // have a step.
+                // have a step. A loop over a list may have a step as well,
+                // and it walks the list by index.
                 let range = match &decl.step {
                     Some(_) => match &decl.iter {
                         Expr::Range(start, end, _) => Some((start, end)),
-                        _ => {
-                            return Err(self.err_at(
-                                decl.pos,
-                                "a loop with a step must walk a range",
-                            ))
-                        }
+                        _ => None,
                     },
                     None => None,
                 };
+                let step_on_list = decl.step.is_some() && range.is_none();
                 let pattern = self.gen_binding_pattern(&decl.pattern)?;
                 if let Some((start_expr, end_expr)) = range {
                     let mut start = self.gen_expr(start_expr)?;
@@ -587,6 +588,47 @@ impl Codegen {
                     self.emit(&format!("const {} = {};", pattern, counter));
                     // The body of the loop has a block of its own, so that the
                     // pieces of code that run when it is left belong to it.
+                    self.gen_block(&decl.body)?;
+                    self.pop_scope();
+                    self.indent -= 1;
+                    self.emit("}");
+                    return Ok(());
+                }
+                if step_on_list {
+                    // A loop over a list with a step walks the list by
+                    // index, so that every step-th item is visited.
+                    let iter = self.gen_expr(&decl.iter)?;
+                    let step_expr = decl.step.as_ref().expect("the step");
+                    let step = self.gen_expr(step_expr)?;
+                    let down = is_negative(step_expr);
+                    let arr = format!("__veyA{}", self.temp);
+                    self.temp += 1;
+                    self.emit(&format!("const {} = V.iterate({});", arr, iter));
+                    let counter = format!("__veyI{}", self.temp);
+                    self.temp += 1;
+                    let (start, test, update) = if down {
+                        (
+                            format!("{}.length - 1", arr),
+                            format!("{} >= 0", counter),
+                            format!("{} += {}", counter, step),
+                        )
+                    } else {
+                        (
+                            "0".to_string(),
+                            format!("{} < {}.length", counter, arr),
+                            format!("{} += {}", counter, step),
+                        )
+                    };
+                    self.emit(&format!(
+                        "{}for (let {} = {}; {}; {}) {{",
+                        label, counter, start, test, update
+                    ));
+                    self.indent += 1;
+                    self.push_scope();
+                    for (name, _) in decl.pattern.bindings() {
+                        self.declare(name);
+                    }
+                    self.emit(&format!("const {} = {}[{}];", pattern, arr, counter));
                     self.gen_block(&decl.body)?;
                     self.pop_scope();
                     self.indent -= 1;

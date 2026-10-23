@@ -12,7 +12,7 @@ use crate::cli::json::{self, Value};
 use crate::cli::output::print_command_help;
 
 pub(crate) fn cmd_add(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("add", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

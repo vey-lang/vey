@@ -128,11 +128,26 @@ function veyServer(ctx) {
 
   function server(port, options) {
     if (!req) throw veyError("server() is only available in Node.");
-    var httpModule = req("node:http");
+    var opts = options || {};
+    // A server may be told to speak TLS, so that the visitor's data is
+    // kept secret. The certificate and the key may be given as files or
+    // as their contents.
+    var tls = opts.tls || null;
+    var httpModule = tls ? req("node:https") : req("node:http");
     var fs = req("node:fs");
     var pathModule = req("node:path");
     var cryptoModule = req("node:crypto");
-    var opts = options || {};
+    if (tls) {
+      var cert = tls.cert;
+      var key = tls.key;
+      if (typeof cert === "string") {
+        try { cert = fs.readFileSync(cert, "utf8"); } catch (e) { /* keep as is */ }
+      }
+      if (typeof key === "string") {
+        try { key = fs.readFileSync(key, "utf8"); } catch (e) { /* keep as is */ }
+      }
+      opts = Object.assign({}, opts, { __tlsCert: cert, __tlsKey: key });
+    }
     var routes = [];
     var middlewares = [];
     var sockets = [];
@@ -333,7 +348,17 @@ function veyServer(ctx) {
     function staticDescriptorPath(fd) {
       var candidates = ["/proc/self/fd/" + fd, "/dev/fd/" + fd];
       for (var i = 0; i < candidates.length; i++) {
-        try { return fs.realpathSync(candidates[i]); } catch (ignored) { }
+        try {
+          var resolved = fs.realpathSync(candidates[i]);
+          // macOS resolves `/dev/fd/N` to the devfs path itself rather than
+          // to the file behind it. That name says nothing about the file, so
+          // the identity fallback of the caller is used instead.
+          if (resolved !== candidates[i] &&
+              resolved.indexOf("/proc/self/fd/") !== 0 &&
+              resolved.indexOf("/dev/fd/") !== 0) {
+            return resolved;
+          }
+        } catch (ignored) { }
       }
       return null;
     }
@@ -976,7 +1001,13 @@ function veyServer(ctx) {
       };
     }
 
-    var serverInstance = httpModule.createServer(function (request, response) {
+    var tlsOptions = null;
+    if (tls) {
+      tlsOptions = { cert: opts.__tlsCert, key: opts.__tlsKey };
+      if (tls.ca) tlsOptions.ca = tls.ca;
+      if (tls.passphrase) tlsOptions.passphrase = tls.passphrase;
+    }
+    var requestHandler = function (request, response) {
       // A malformed request must not take the whole process down.
       try {
         handleRequest(request, response);
@@ -989,7 +1020,10 @@ function veyServer(ctx) {
           response.end();
         }
       }
-    });
+    };
+    var serverInstance = tlsOptions
+      ? httpModule.createServer(tlsOptions, requestHandler)
+      : httpModule.createServer(requestHandler);
 
     // The times that the server waits for the visitor.
     if (opts.requestTimeout !== undefined) {
@@ -1443,7 +1477,7 @@ function veyServer(ctx) {
           // every address has no name of its own.
           var host = address && address.address ? address.address : "";
           if (host === "::" || host === "0.0.0.0") host = "localhost";
-          print("Vey server listening on http://" + host + ":" + port);
+          print("Vey server listening on " + (tls ? "https" : "http") + "://" + host + ":" + port);
           if (callback) callback();
         });
         return this;

@@ -2399,11 +2399,14 @@ const secret = path.join(parent, "secret.txt");
 nodeFs.mkdirSync(root);
 nodeFs.writeFileSync(asset, "public data");
 nodeFs.writeFileSync(secret, "private data");
+// The root may be reached through a symbolic link, as it is on macOS, so the
+// swap is keyed by the real path that the server resolves.
+const realAsset = path.join(nodeFs.realpathSync(root), "asset.txt");
 const originalRealpathSync = nodeFs.realpathSync;
 let swapped = false;
 nodeFs.realpathSync = function(filename, options) {
   const resolved = originalRealpathSync.call(nodeFs, filename, options);
-  if (!swapped && path.resolve(String(filename)) === path.resolve(asset)) {
+  if (!swapped && path.resolve(String(filename)) === path.resolve(realAsset)) {
     nodeFs.unlinkSync(asset);
     nodeFs.symlinkSync(secret, asset);
     swapped = true;
@@ -2511,13 +2514,16 @@ const secret = path.join(parent, "secret.txt");
 nodeFs.mkdirSync(root);
 nodeFs.writeFileSync(asset, "public data");
 nodeFs.writeFileSync(secret, "private data");
+// The real path is the one the server opens when the temporary folder is
+// behind a symbolic link.
+const realAsset = path.join(nodeFs.realpathSync(root), "asset.txt");
 const originalOpenSync = nodeFs.openSync;
 let swapped = false;
 const app = runtime.server(0);
 app.static(root);
 app.start(() => {
   nodeFs.openSync = function(filename, flags, mode) {
-    if (!swapped && path.resolve(String(filename)) === path.resolve(asset)) {
+    if (!swapped && path.resolve(String(filename)) === path.resolve(realAsset)) {
       nodeFs.unlinkSync(asset);
       nodeFs.symlinkSync(secret, asset);
       swapped = true;

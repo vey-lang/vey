@@ -28,7 +28,7 @@ const MAX_DEPTH: usize = 4;
 const MIN_DISTANCE: usize = 2;
 
 pub(crate) fn cmd_lint(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("lint", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);
@@ -53,10 +53,9 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
     }
 
     // The length of a line that is still easy to read may be given by the
-    // settings of the project.
-    let config = Config::find(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-    let max_line = config.max_line.unwrap_or(MAX_LINE);
-
+    // settings of the project. A file is linted with the settings of the
+    // project that holds it, not with the settings of the folder the command
+    // happens to be run from.
     let mut found = 0;
     for file in &files {
         let source = match fs::read_to_string(file) {
@@ -67,6 +66,9 @@ pub(crate) fn cmd_lint(args: &[String]) -> i32 {
             }
         };
         let label = file.display().to_string();
+        let folder = file.parent().unwrap_or_else(|| Path::new("."));
+        let config = Config::find(folder);
+        let max_line = config.max_line.unwrap_or(MAX_LINE);
 
         // The lines that are too long.
         for (index, line) in source.lines().enumerate() {

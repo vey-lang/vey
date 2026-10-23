@@ -22,7 +22,7 @@ const MAX_DEPLOY_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DEPLOY_FILES: usize = 1_000_000;
 
 pub(crate) fn cmd_deploy(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("deploy", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

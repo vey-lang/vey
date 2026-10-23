@@ -135,7 +135,7 @@ pub(crate) fn expr_assigns_name(expr: &Expr, name: &str) -> bool {
         Expr::Fn(_, body, _, _) => block_assigns_name(body, name),
         Expr::Arrow(_, _, body, _, _) => match body {
             ArrowBody::Block(block) => block_assigns_name(block, name),
-            ArrowBody::Expr(expr) => expr_assigns_name(expr, name),
+            ArrowBody::Expr(expr, _, _) => expr_assigns_name(expr, name),
         },
         Expr::Array(items, _) => items.iter().any(|item| expr_assigns_name(item, name)),
         Expr::Object(props, _) => props.iter().any(|prop| match prop {

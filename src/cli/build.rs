@@ -16,7 +16,7 @@ use crate::cli::site::write_site;
 pub(crate) const OUTPUT_FOLDER: &str = ".dist";
 
 pub(crate) fn cmd_build(args: &[String]) -> i32 {
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args("build", args) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{}", err);

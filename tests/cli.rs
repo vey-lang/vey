@@ -408,6 +408,39 @@ fn a_page_may_not_take_the_place_of_the_home_of_the_site() {
 }
 
 #[test]
+fn lint_reads_the_settings_of_the_project_that_holds_the_file() {
+    let dir = temp_dir("lint-config-root");
+    let project = dir.join("project");
+    let other = dir.join("elsewhere");
+    write(
+        &project.join("vey.toml"),
+        "[lint]\nmaxLine = 20\n",
+    );
+    let file = project.join("src/main.vey");
+    write(
+        &file,
+        "fn main() {\n  let a_rather_long_name = 1\n  print(a_rather_long_name)\n}\n",
+    );
+    fs::create_dir_all(&other).unwrap();
+
+    // The command is run away from the project, so the settings can only be
+    // found from the file that is linted.
+    let output = vey()
+        .current_dir(&other)
+        .arg("lint")
+        .arg(&file)
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains("characters long"), "{text}");
+}
+
+#[test]
 fn an_option_that_is_not_known_is_reported() {
     let output = vey().arg("build").arg("--nonsense").output().unwrap();
     assert!(!output.status.success());
@@ -417,10 +450,35 @@ fn an_option_that_is_not_known_is_reported() {
 
 #[test]
 fn an_option_without_a_value_is_reported() {
-    let output = vey().arg("build").arg("--port").output().unwrap();
+    let output = vey().arg("build").arg("--title").output().unwrap();
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(error.contains("needs a value"), "{error}");
+}
+
+#[test]
+fn an_option_of_another_command_is_reported() {
+    for (command, option) in [
+        ("build", "--port"),
+        ("lint", "--write"),
+        ("check", "--node"),
+        ("run", "--target"),
+        ("test", "--force"),
+    ] {
+        let output = vey()
+            .arg(command)
+            .arg(option)
+            .arg("3000")
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "vey {command} accepted {option}");
+        let error = String::from_utf8_lossy(&output.stderr).to_string();
+        assert!(
+            error.contains(&format!("unknown option '{}'", option)),
+            "{error}"
+        );
+        assert!(error.contains(&format!("vey {command}")), "{error}");
+    }
 }
 
 #[test]
@@ -1476,6 +1534,196 @@ fn serde_escape(source: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[test]
+fn completion_offers_the_names_that_are_in_scope_at_the_cursor() {
+    let dir = temp_dir("lsp-completion");
+    let file = dir.join("main.vey");
+    let source = r#"fn outer(first: number) {
+  let outer_name = first
+  if first > 0 {
+    let inner_name = outer_name
+    print(inner_name)
+  }
+  let sibling = 1
+  print(sibling)
+}
+
+fn other(second: number) {
+  let other_name = second
+  print(other_name)
+}
+
+fn main() {
+  let top = 1
+  print(top)
+}
+"#;
+    write(&file, source);
+    let uri = format!("file://{}", file.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("lsp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        let open = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+            uri,
+            serde_escape(source)
+        );
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
+        for (id, line, character) in [(1, 4, 10), (2, 7, 8), (3, 12, 10)] {
+            stdin
+                .write_all(
+                    lsp_message(
+                        id,
+                        "textDocument/completion",
+                        &format!(
+                            "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}",
+                            uri, line, character
+                        ),
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+
+    let result = |id: i64| {
+        let marker = format!("\"id\":{},\"result\":[", id);
+        let start = text.find(&marker).unwrap_or_else(|| panic!("no answer {id}:\n{text}")) + marker.len();
+        let end = text[start..].find(']').map(|end| start + end).unwrap();
+        &text[start..end]
+    };
+    let inner = result(1);
+    for name in ["inner_name", "outer_name", "first", "outer", "main", "len"] {
+        assert!(inner.contains(&format!("\"label\":\"{}\"", name)), "{name} missing:\n{inner}");
+    }
+    for name in ["sibling", "other_name", "second", "top"] {
+        assert!(!inner.contains(&format!("\"label\":\"{}\"", name)), "{name} leaked:\n{inner}");
+    }
+
+    let later = result(2);
+    assert!(later.contains("\"label\":\"sibling\""), "{later}");
+    assert!(!later.contains("\"label\":\"inner_name\""), "{later}");
+
+    let other = result(3);
+    for name in ["other_name", "second", "other", "main"] {
+        assert!(other.contains(&format!("\"label\":\"{}\"", name)), "{name} missing:\n{other}");
+    }
+    for name in ["outer_name", "inner_name", "sibling", "top"] {
+        assert!(!other.contains(&format!("\"label\":\"{}\"", name)), "{name} leaked:\n{other}");
+    }
+}
+
+#[test]
+fn completion_offers_the_bindings_of_arrow_and_markup_scopes() {
+    let dir = temp_dir("lsp-completion-scopes");
+    let file = dir.join("main.vey");
+    let source = r#"fn main() {
+  let double = (amount: number) => amount * 2
+  print(double(2))
+}
+
+fn label(value: number) -> number {
+  match value {
+    0 => 1
+    n => n + 1
+  }
+}
+
+component App() {
+  let items = ["one", "two"]
+  main {
+    ul {
+      for item in items {
+        li { item }
+      }
+    }
+  }
+}
+"#;
+    write(&file, source);
+    let uri = format!("file://{}", file.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("lsp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        let open = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+            uri,
+            serde_escape(source)
+        );
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
+        for (id, line, character) in [(1, 1, 37), (2, 8, 9), (3, 17, 14)] {
+            stdin
+                .write_all(
+                    lsp_message(
+                        id,
+                        "textDocument/completion",
+                        &format!(
+                            "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}}}",
+                            uri, line, character
+                        ),
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+
+    let result = |id: i64| {
+        let marker = format!("\"id\":{},\"result\":[", id);
+        let start = text
+            .find(&marker)
+            .unwrap_or_else(|| panic!("no answer {id}:\n{text}"))
+            + marker.len();
+        let end = text[start..].find(']').map(|end| start + end).unwrap();
+        &text[start..end]
+    };
+    let has = |answer: &str, name: &str| answer.contains(&format!("\"label\":\"{}\"", name));
+
+    let arrow = result(1);
+    for name in ["amount", "double", "main"] {
+        assert!(has(arrow, name), "{name} missing:\n{arrow}");
+    }
+    for name in ["item", "items", "n"] {
+        assert!(!has(arrow, name), "{name} leaked:\n{arrow}");
+    }
+
+    let arm = result(2);
+    for name in ["n", "value", "label", "main"] {
+        assert!(has(arm, name), "{name} missing:\n{arm}");
+    }
+    for name in ["amount", "item", "items"] {
+        assert!(!has(arm, name), "{name} leaked:\n{arm}");
+    }
+
+    let loop_body = result(3);
+    for name in ["item", "items", "App", "main"] {
+        assert!(has(loop_body, name), "{name} missing:\n{loop_body}");
+    }
+    for name in ["amount", "n", "value"] {
+        assert!(!has(loop_body, name), "{name} leaked:\n{loop_body}");
+    }
 }
 
 #[test]
