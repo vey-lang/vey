@@ -1964,18 +1964,18 @@ fn the_templates_of_a_new_project_build_what_they_run() {
 }
 
 #[test]
-fn the_language_server_resolves_exported_members_across_open_files() {
+fn the_language_server_resolves_cross_file_members_and_local_type_symbols() {
     let dir = temp_dir("lsp-cross-file");
     let math = dir.join("math.vey");
     let main = dir.join("main.vey");
     let other = dir.join("other.vey");
     let other_main = dir.join("other-main.vey");
     let math_source =
-        "export fn area() { return 1 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\n";
-    let main_source = "use \"./math.vey\" as m\nprint(\"😀\", m.area())\nfn decoy(m) { print(m.area()) }\nlet item: m.Box<number> = { value: 1 }\ncomponent App() {\n  m.Card title=\"Card\"\n}\nlet color: m.Color = m.Color.Red\n";
+        "export fn area() { return 1 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\nlet primary = Color.Red\nenum Shape { Red, Blue }\nlet shape = Shape.Red\n";
+    let main_source = "use \"./math.vey\" as m\nprint(\"😀\", m.area())\nfn decoy(m) { print(m.area()) }\nlet item: m.Box<number> = { value: 1 }\ncomponent App() {\n  m.Card title=\"Card\"\n}\nlet color: m.Color = m.Color.Red\ntype Box<T> = { value: T }\nlet Box = 2\nlet localBox: Box<number> = { value: 2 }\nprint(Box)\nlet matched = match color { m.Color.Red => 1, _ => 0 }\n";
     let other_source =
-        "export fn area() { return 2 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\n";
-    let other_main_source = "use \"./other.vey\" as m\nlet otherItem: m.Box<number> = { value: 2 }\nprint(m.area())\ncomponent Another() {\n  m.Card title=\"Other\"\n}\nlet otherColor: m.Color = m.Color.Red\n";
+        "export fn area() { return 2 }\nexport component Card(title: string) { h2 { title } }\nexport type Box<T> = { value: T }\nexport enum Color { Red, Blue }\nlet primary = Color.Red\nenum Shape { Red, Blue }\nlet shape = Shape.Red\n";
+    let other_main_source = "use \"./other.vey\" as m\nlet otherItem: m.Box<number> = { value: 2 }\nprint(m.area())\ncomponent Another() {\n  m.Card title=\"Other\"\n}\nlet otherColor: m.Color = m.Color.Red\nlet otherVariant = m.Color.Red\n";
     write(&math, math_source);
     write(&main, main_source);
     write(&other, other_source);
@@ -2141,6 +2141,130 @@ fn the_language_server_resolves_exported_members_across_open_files() {
                 13,
                 ",\"newName\":\"Hue\"",
             ),
+            (21, "textDocument/definition", &main_uri, 10, 14, ""),
+            (
+                22,
+                "textDocument/references",
+                &main_uri,
+                8,
+                5,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                23,
+                "textDocument/rename",
+                &main_uri,
+                8,
+                5,
+                ",\"newName\":\"LocalBox\"",
+            ),
+            (
+                24,
+                "textDocument/references",
+                &main_uri,
+                10,
+                14,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                25,
+                "textDocument/rename",
+                &main_uri,
+                10,
+                14,
+                ",\"newName\":\"LocalBox\"",
+            ),
+            (26, "textDocument/definition", &main_uri, 8, 23, ""),
+            (
+                27,
+                "textDocument/references",
+                &main_uri,
+                8,
+                9,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                28,
+                "textDocument/rename",
+                &main_uri,
+                8,
+                23,
+                ",\"newName\":\"Value\"",
+            ),
+            (
+                29,
+                "textDocument/definition",
+                &main_uri,
+                9,
+                4,
+                "",
+            ),
+            (
+                30,
+                "textDocument/references",
+                &main_uri,
+                9,
+                4,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                31,
+                "textDocument/rename",
+                &main_uri,
+                9,
+                4,
+                ",\"newName\":\"Amount\"",
+            ),
+            (32, "textDocument/definition", &main_uri, 7, 29, ""),
+            (
+                33,
+                "textDocument/references",
+                &math_uri,
+                3,
+                20,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                34,
+                "textDocument/rename",
+                &math_uri,
+                3,
+                20,
+                ",\"newName\":\"Crimson\"",
+            ),
+            (
+                35,
+                "textDocument/references",
+                &main_uri,
+                7,
+                29,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                36,
+                "textDocument/rename",
+                &main_uri,
+                7,
+                29,
+                ",\"newName\":\"Crimson\"",
+            ),
+            (37, "textDocument/definition", &main_uri, 12, 36, ""),
+            (
+                38,
+                "textDocument/references",
+                &main_uri,
+                12,
+                36,
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (
+                39,
+                "textDocument/rename",
+                &main_uri,
+                12,
+                36,
+                ",\"newName\":\"Crimson\"",
+            ),
         ] {
             let params = format!(
                 "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}}{}}}",
@@ -2229,18 +2353,90 @@ assert.equal(enumDefinition.uri, mathUri);
 assert.deepEqual([enumDefinition.range.start.line, enumDefinition.range.start.character], [3, 12]);
 for (const id of [17, 19]) {
     const references = result(id);
-    assert.equal(references.length, 3, JSON.stringify(references));
-    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mainUri, mathUri].sort());
+    assert.equal(references.length, 5, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mainUri, mainUri, mathUri, mathUri].sort());
     assert.deepEqual(references.filter(item => item.uri === mainUri).map(item => item.range.start), [
         { line: 7, character: 13 },
         { line: 7, character: 23 },
+        { line: 12, character: 30 },
     ]);
 }
 for (const id of [18, 20]) {
     const changes = result(id).changes;
     assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
-    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[3, 12, 17, "Hue"]]);
-    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[7, 13, 18, "Hue"], [7, 23, 28, "Hue"]]);
+    assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[3, 12, 17, "Hue"], [4, 14, 19, "Hue"]]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[7, 13, 18, "Hue"], [7, 23, 28, "Hue"], [12, 30, 35, "Hue"]]);
+}
+const localTypeDefinition = result(21);
+assert.equal(localTypeDefinition.uri, mainUri);
+assert.deepEqual([localTypeDefinition.range.start.line, localTypeDefinition.range.start.character], [8, 5]);
+for (const id of [22, 24]) {
+    const references = result(id);
+    assert.equal(references.length, 2, JSON.stringify(references));
+    assert.deepEqual(references.map(item => item.range.start), [
+        { line: 8, character: 5 },
+        { line: 10, character: 14 },
+    ]);
+}
+for (const id of [23, 25]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes), [mainUri]);
+    assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [
+        [8, 5, 8, "LocalBox"],
+        [10, 14, 17, "LocalBox"],
+    ]);
+}
+const typeParameterDefinition = result(26);
+assert.equal(typeParameterDefinition.uri, mainUri);
+assert.deepEqual([typeParameterDefinition.range.start.line, typeParameterDefinition.range.start.character], [8, 9]);
+const typeParameterReferences = result(27);
+assert.equal(typeParameterReferences.length, 2);
+assert.deepEqual(typeParameterReferences.map(item => item.range.start), [
+    { line: 8, character: 9 },
+    { line: 8, character: 23 },
+]);
+const typeParameterRename = result(28).changes;
+assert.deepEqual(typeParameterRename[mainUri].map(edit => [edit.range.start.character, edit.range.end.character, edit.newText]), [
+    [9, 10, "Value"],
+    [23, 24, "Value"],
+]);
+const valueDefinition = result(29);
+assert.deepEqual([valueDefinition.range.start.line, valueDefinition.range.start.character], [9, 4]);
+const valueReferences = result(30);
+assert.equal(valueReferences.length, 2);
+assert.deepEqual(valueReferences.map(item => item.range.start), [
+    { line: 9, character: 4 },
+    { line: 11, character: 6 },
+]);
+const valueRename = result(31).changes;
+assert.deepEqual(valueRename[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [
+    [9, 4, 7, "Amount"],
+    [11, 6, 9, "Amount"],
+]);
+const variantDefinition = result(32);
+assert.equal(variantDefinition.uri, mathUri);
+assert.deepEqual([variantDefinition.range.start.line, variantDefinition.range.start.character], [3, 20]);
+const expectedVariantReferences = [
+    [mathUri, 3, 20],
+    [mathUri, 4, 20],
+    [mainUri, 7, 29],
+    [mainUri, 12, 36],
+].sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1] || a[2] - b[2]);
+for (const id of [33, 35, 38]) {
+    const references = result(id);
+    assert.equal(references.length, 4, JSON.stringify(references));
+    const actual = references.map(item => [item.uri, item.range.start.line, item.range.start.character])
+        .sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1] || a[2] - b[2]);
+    assert.deepEqual(actual, expectedVariantReferences);
+}
+for (const id of [34, 36, 39]) {
+    const changes = result(id).changes;
+    assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+    const edits = uri => changes[uri]
+        .map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    assert.deepEqual(edits(mathUri), [[3, 20, 23, "Crimson"], [4, 20, 23, "Crimson"]]);
+    assert.deepEqual(edits(mainUri), [[7, 29, 32, "Crimson"], [12, 36, 39, "Crimson"]]);
 }
 "#,
         )

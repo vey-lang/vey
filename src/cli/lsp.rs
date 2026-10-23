@@ -449,23 +449,58 @@ impl Server {
                 return Some((uri.to_string(), name.clone(), *pos));
             }
         }
-        let member = names.module_member_uses.iter().find(|member| {
+        if let Some(member) = names.module_member_uses.iter().find(|member| {
             member.pos.line == line
                 && col >= member.pos.col
                 && col < member.pos.col + member.name.chars().count()
-        })?;
-        let target_uri = self.imported_module_uri(uri, &names, &member.alias, member.receiver_symbol)?;
-        let target_names = self.names(&target_uri)?;
-        if !target_names.exports.contains(&member.name) {
-            return None;
+        }) {
+            if let Some(target_uri) =
+                self.imported_module_uri(uri, &names, &member.alias, member.receiver_symbol)
+            {
+                if let Some(target_names) = self.names(&target_uri) {
+                    if target_names.exports.contains(&member.name) {
+                        if let Some((definition, (name, pos, _))) = target_names
+                            .defs
+                            .iter()
+                            .enumerate()
+                            .find(|(_, (name, _, _))| name == &member.name)
+                        {
+                            if target_names
+                                .def_symbols
+                                .get(definition)
+                                .copied()
+                                .flatten()
+                                .is_some()
+                            {
+                                return Some((target_uri, name.clone(), *pos));
+                            }
+                        }
+                    }
+                }
+            }
         }
-        let (definition, (name, pos, _)) = target_names
-            .defs
-            .iter()
-            .enumerate()
-            .find(|(_, (name, _, _))| name == &member.name)?;
-        target_names.def_symbols.get(definition).copied().flatten()?;
-        Some((target_uri, name.clone(), *pos))
+        let variant = names.enum_variant_uses.iter().find(|variant| {
+            variant.pos.line == line
+                && col >= variant.pos.col
+                && col < variant.pos.col + variant.name.chars().count()
+        })?;
+        if let Some(module) = &variant.module_alias {
+            let target_uri =
+                self.imported_module_uri(uri, &names, module, variant.receiver_symbol)?;
+            let target_names = self.names(&target_uri)?;
+            if !target_names.exports.contains(&variant.enum_name) {
+                return None;
+            }
+            let target = target_names.enum_variant_defs.iter().find(|definition| {
+                definition.enum_name == variant.enum_name && definition.name == variant.name
+            })?;
+            return Some((target_uri, target.name.clone(), target.pos));
+        }
+        let enum_symbol = variant.enum_symbol?;
+        let target = names.enum_variant_defs.iter().find(|definition| {
+            definition.enum_symbol == enum_symbol && definition.name == variant.name
+        })?;
+        Some((uri.to_string(), target.name.clone(), target.pos))
     }
 
     fn symbol_occurrences(
@@ -495,7 +530,8 @@ impl Server {
                 continue;
             };
             for member in &candidate_names.module_member_uses {
-                if member.name == target_name
+                if target_names.exports.contains(target_name)
+                    && member.name == target_name
                     && self
                         .imported_module_uri(
                             candidate_uri,
@@ -507,6 +543,46 @@ impl Server {
                         == Some(target_uri)
                 {
                     occurrences.push((candidate_uri.clone(), member.name.clone(), member.pos));
+                }
+            }
+        }
+        if let Some(target_variant) = target_names
+            .enum_variant_defs
+            .iter()
+            .find(|variant| variant.name == target_name && variant.pos == target_pos)
+        {
+            if target_variant.symbol == symbol {
+                for candidate_uri in self.files.keys() {
+                    let Some(candidate_names) = self.names(candidate_uri) else {
+                        continue;
+                    };
+                    for variant in &candidate_names.enum_variant_uses {
+                        if variant.enum_name != target_variant.enum_name
+                            || variant.name != target_variant.name
+                        {
+                            continue;
+                        }
+                        let same_enum = if let Some(module) = &variant.module_alias {
+                            self.imported_module_uri(
+                                candidate_uri,
+                                &candidate_names,
+                                module,
+                                variant.receiver_symbol,
+                            )
+                            .as_deref()
+                                == Some(target_uri)
+                        } else {
+                            candidate_uri == target_uri
+                                && variant.enum_symbol == Some(target_variant.enum_symbol)
+                        };
+                        if same_enum {
+                            occurrences.push((
+                                candidate_uri.clone(),
+                                variant.name.clone(),
+                                variant.pos,
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -742,6 +818,10 @@ struct Names {
     module_imports: Vec<(String, String, usize)>,
     /// Direct static member accesses on imported module aliases.
     module_member_uses: Vec<ModuleMemberUse>,
+    /// Variant declarations keyed by their containing enum's binding identity.
+    enum_variant_defs: Vec<EnumVariantDef>,
+    /// Local and imported enum-variant occurrences.
+    enum_variant_uses: Vec<EnumVariantUse>,
     /// Top-level names visible to another module.
     exports: HashSet<String>,
     /// The names that are declared.
@@ -754,6 +834,8 @@ struct Names {
     use_symbols: Vec<Option<usize>>,
     /// The value names in each lexical scope.
     scopes: Vec<HashMap<String, usize>>,
+    /// Type names in each lexical scope, separate from value bindings.
+    type_scopes: Vec<HashMap<String, usize>>,
     /// The stable identity of each scope on the stack.
     scope_ids: Vec<usize>,
     /// The source range of each lexical scope, by its stable identity. The
@@ -766,6 +848,8 @@ struct Names {
     symbols: Vec<NameSymbol>,
     /// Top-level bindings are visible to function bodies before their text.
     predeclared: Vec<(String, vey::lexer::Pos, usize)>,
+    /// Top-level type bindings are visible before their declarations.
+    type_predeclared: Vec<(String, vey::lexer::Pos, usize)>,
 }
 
 /// A name that may be written at a place of the program.
@@ -782,6 +866,21 @@ struct NameSymbol {
 
 struct ModuleMemberUse {
     alias: String,
+    receiver_symbol: Option<usize>,
+    name: String,
+    pos: vey::lexer::Pos,
+}
+struct EnumVariantDef {
+    enum_name: String,
+    enum_symbol: usize,
+    name: String,
+    symbol: usize,
+    pos: vey::lexer::Pos,
+}
+struct EnumVariantUse {
+    enum_name: String,
+    enum_symbol: Option<usize>,
+    module_alias: Option<String>,
     receiver_symbol: Option<usize>,
     name: String,
     pos: vey::lexer::Pos,
@@ -824,18 +923,22 @@ impl Names {
             source: source.to_string(),
             module_imports: Vec::new(),
             module_member_uses: Vec::new(),
+            enum_variant_defs: Vec::new(),
+            enum_variant_uses: Vec::new(),
             exports: HashSet::new(),
             defs: Vec::new(),
             def_symbols: Vec::new(),
             uses: Vec::new(),
             use_symbols: Vec::new(),
             scopes: vec![HashMap::new()],
+            type_scopes: vec![HashMap::new()],
             scope_ids: vec![0],
             scope_regions: vec![None],
             next_scope_id: 1,
             values: Vec::new(),
             symbols: Vec::new(),
             predeclared: Vec::new(),
+            type_predeclared: Vec::new(),
         }
     }
 
@@ -867,6 +970,25 @@ impl Names {
                 Stmt::Enum(decl) => {
                     let pos = self.identifier_pos(decl.pos, &decl.name);
                     self.reserve(&decl.name, pos);
+                    if let Some(symbol) = self
+                        .scopes
+                        .last()
+                        .and_then(|scope| scope.get(&decl.name))
+                    {
+                        if let Some(scope) = self.type_scopes.last_mut() {
+                            scope.insert(decl.name.clone(), *symbol);
+                        }
+                        self.type_predeclared
+                            .push((decl.name.clone(), pos, *symbol));
+                    }
+                }
+                Stmt::Type(decl) => {
+                    let pos = self.identifier_pos(decl.pos, &decl.name);
+                    self.reserve_type(&decl.name, pos);
+                }
+                Stmt::Interface(decl) => {
+                    let pos = self.identifier_pos(decl.pos, &decl.name);
+                    self.reserve_type(&decl.name, pos);
                 }
                 Stmt::Use(decl) if !decl.path.ends_with(".css") => {
                     if let Some(pos) = decl.alias_pos {
@@ -891,6 +1013,19 @@ impl Names {
         self.symbols.push(NameSymbol { declaration: None });
         scope.insert(name.to_string(), symbol);
         self.predeclared.push((name.to_string(), pos, symbol));
+    }
+
+    fn reserve_type(&mut self, name: &str, pos: vey::lexer::Pos) {
+        let Some(scope) = self.type_scopes.last_mut() else {
+            return;
+        };
+        if scope.contains_key(name) {
+            return;
+        }
+        let symbol = self.symbols.len();
+        self.symbols.push(NameSymbol { declaration: None });
+        scope.insert(name.to_string(), symbol);
+        self.type_predeclared.push((name.to_string(), pos, symbol));
     }
 
     fn identifier_pos(&self, base: vey::lexer::Pos, name: &str) -> vey::lexer::Pos {
@@ -925,7 +1060,21 @@ impl Names {
 
     fn define(&mut self, name: &str, pos: vey::lexer::Pos, kind: &'static str) {
         let definition = self.defs.len();
-        let symbol = if matches!(
+        let symbol = if matches!(kind, "type" | "interface") {
+            if let Some((_, _, symbol)) = self
+                .type_predeclared
+                .iter()
+                .find(|(reserved, reserved_pos, _)| reserved == name && *reserved_pos == pos)
+            {
+                Some(*symbol)
+            } else {
+                let symbol = self.symbols.len();
+                self.symbols.push(NameSymbol {
+                    declaration: Some(definition),
+                });
+                Some(symbol)
+            }
+        } else if matches!(
             kind,
             "variable" | "parameter" | "function" | "component" | "enum" | "module"
         ) {
@@ -963,6 +1112,11 @@ impl Names {
         }
         self.defs.push((name.to_string(), pos, kind));
         self.def_symbols.push(symbol);
+        if matches!(kind, "type" | "interface" | "enum") {
+            if let (Some(symbol), Some(scope)) = (symbol, self.type_scopes.last_mut()) {
+                scope.insert(name.to_string(), symbol);
+            }
+        }
         // A variant and a method are written after a dot, not on their own,
         // so they are not offered as bare names.
         if kind != "variant" && kind != "method" {
@@ -978,6 +1132,58 @@ impl Names {
     fn use_name(&mut self, name: &str, pos: vey::lexer::Pos) {
         self.uses.push((name.to_string(), pos));
         self.use_symbols.push(self.resolve(name));
+    }
+
+    fn define_type_parameter(&mut self, name: &str, pos: vey::lexer::Pos) {
+        let definition = self.defs.len();
+        let symbol = self.symbols.len();
+        self.symbols.push(NameSymbol {
+            declaration: Some(definition),
+        });
+        self.defs.push((name.to_string(), pos, "type_parameter"));
+        self.def_symbols.push(Some(symbol));
+        if let Some(scope) = self.type_scopes.last_mut() {
+            scope.insert(name.to_string(), symbol);
+        }
+    }
+
+    fn use_type_name(&mut self, name: &str, pos: vey::lexer::Pos) {
+        self.uses.push((name.to_string(), pos));
+        let symbol = self
+            .type_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied());
+        let built_in = matches!(
+            name,
+            "any"
+                | "unknown"
+                | "number"
+                | "string"
+                | "bool"
+                | "null"
+                | "undefined"
+                | "void"
+                | "never"
+                | "symbol"
+                | "bigint"
+                | "object"
+                | "Promise"
+                | "Option"
+                | "Signal"
+                | "Store"
+                | "Result"
+        );
+        let symbol = symbol.filter(|symbol| {
+            let is_type_parameter = self
+                .symbols
+                .get(*symbol)
+                .and_then(|symbol| symbol.declaration)
+                .and_then(|definition| self.defs.get(definition))
+                .is_some_and(|(_, _, kind)| *kind == "type_parameter");
+            is_type_parameter || !built_in
+        });
+        self.use_symbols.push(symbol);
     }
 
     fn resolve(&self, name: &str) -> Option<usize> {
@@ -1013,6 +1219,7 @@ impl Names {
 
     fn push_scope(&mut self, region: Option<(vey::lexer::Pos, vey::lexer::Pos)>) {
         self.scopes.push(HashMap::new());
+        self.type_scopes.push(HashMap::new());
         self.scope_ids.push(self.next_scope_id);
         self.scope_regions.push(region);
         self.next_scope_id += 1;
@@ -1021,6 +1228,7 @@ impl Names {
     fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
             self.scopes.pop();
+            self.type_scopes.pop();
             self.scope_ids.pop();
         }
     }
@@ -1091,6 +1299,10 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "function");
+                self.push_scope(Some((decl.body.start, decl.body.end)));
+                for param in &decl.type_params {
+                    self.define_type_parameter(&param.name, param.pos);
+                }
                 for param in &decl.type_params {
                     if let Some(constraint) = &param.constraint {
                         self.type_expr(constraint);
@@ -1099,7 +1311,6 @@ impl Names {
                 if let Some(ret) = &decl.ret {
                     self.type_expr(ret);
                 }
-                self.push_scope(Some((decl.body.start, decl.body.end)));
                 for param in &decl.params {
                     if let Some(ty) = &param.ty {
                         self.type_expr(ty);
@@ -1140,8 +1351,20 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "enum");
+                let enum_symbol = self.def_symbols.last().copied().flatten();
                 for variant in &decl.variants {
                     self.define(&variant.name, variant.pos, "variant");
+                    if let (Some(enum_symbol), Some(symbol)) =
+                        (enum_symbol, self.def_symbols.last().copied().flatten())
+                    {
+                        self.enum_variant_defs.push(EnumVariantDef {
+                            enum_name: decl.name.clone(),
+                            enum_symbol,
+                            name: variant.name.clone(),
+                            symbol,
+                            pos: variant.pos,
+                        });
+                    }
                     for field in &variant.fields {
                         if let Some(ty) = &field.ty {
                             self.type_expr(ty);
@@ -1155,12 +1378,17 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "type");
-                self.type_expr(&decl.ty);
+                self.push_scope(None);
+                for param in &decl.type_params {
+                    self.define_type_parameter(&param.name, param.pos);
+                }
                 for param in &decl.type_params {
                     if let Some(constraint) = &param.constraint {
                         self.type_expr(constraint);
                     }
                 }
+                self.type_expr(&decl.ty);
+                self.pop_scope();
             }
             Stmt::Interface(decl) => {
                 if decl.exported {
@@ -1168,6 +1396,10 @@ impl Names {
                 }
                 let pos = self.identifier_pos(decl.pos, &decl.name);
                 self.define(&decl.name, pos, "interface");
+                self.push_scope(None);
+                for param in &decl.type_params {
+                    self.define_type_parameter(&param.name, param.pos);
+                }
                 for param in &decl.type_params {
                     if let Some(constraint) = &param.constraint {
                         self.type_expr(constraint);
@@ -1186,10 +1418,11 @@ impl Names {
                         }
                     }
                 }
+                self.pop_scope();
             }
             Stmt::Impl(decl) => {
                 let pos = self.identifier_pos(decl.pos, &decl.type_name);
-                self.define(&decl.type_name, pos, "type");
+                self.use_type_name(&decl.type_name, pos);
                 for method in &decl.methods {
                     self.define(&method.name, method.pos, "method");
                     if let Some(ret) = &method.ret {
@@ -1403,7 +1636,42 @@ impl Names {
         use vey::ast::Pattern;
         match pattern {
             Pattern::Binding { name, pos } => self.define(name, *pos, "variable"),
-            Pattern::Enum { bindings, .. } => {
+            Pattern::Enum {
+                enum_name,
+                variant,
+                bindings,
+                pos,
+            } => {
+                let variant_pos = self.identifier_pos(*pos, variant);
+                if let Some((module, member)) = enum_name.split_once('.') {
+                    let receiver_symbol = self.resolve(module);
+                    self.module_member_uses.push(ModuleMemberUse {
+                        alias: module.to_string(),
+                        receiver_symbol,
+                        name: member.to_string(),
+                        pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
+                    });
+                    self.use_name(module, *pos);
+                    self.enum_variant_uses.push(EnumVariantUse {
+                        enum_name: member.to_string(),
+                        enum_symbol: None,
+                        module_alias: Some(module.to_string()),
+                        receiver_symbol,
+                        name: variant.clone(),
+                        pos: variant_pos,
+                    });
+                } else {
+                    let enum_symbol = self.resolve(enum_name);
+                    self.use_name(enum_name, *pos);
+                    self.enum_variant_uses.push(EnumVariantUse {
+                        enum_name: enum_name.clone(),
+                        enum_symbol,
+                        module_alias: None,
+                        receiver_symbol: None,
+                        name: variant.clone(),
+                        pos: variant_pos,
+                    });
+                }
                 for binding in bindings {
                     self.define(&binding.name, binding.pos, "variable");
                 }
@@ -1432,10 +1700,7 @@ impl Names {
                     alias: module.clone(),
                     receiver_symbol: self.resolve(module),
                     name: member.clone(),
-                    pos: vey::lexer::Pos::new(
-                        pos.line,
-                        pos.col + module.chars().count() + 1,
-                    ),
+                    pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
                 });
                 self.use_name(module, *pos);
             }
@@ -1445,12 +1710,11 @@ impl Names {
                         alias: module.to_string(),
                         receiver_symbol: self.resolve(module),
                         name: member.to_string(),
-                        pos: vey::lexer::Pos::new(
-                            pos.line,
-                            pos.col + module.chars().count() + 1,
-                        ),
+                        pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
                     });
                     self.use_name(module, *pos);
+                } else {
+                    self.use_type_name(name, *pos);
                 }
                 for arg in args {
                     self.type_expr(arg);
@@ -1477,7 +1741,7 @@ impl Names {
                 }
                 self.type_expr(ret);
             }
-            TypeExpr::Name(_, _) => {}
+            TypeExpr::Name(name, pos) => self.use_type_name(name, *pos),
         }
     }
 
@@ -1534,6 +1798,34 @@ impl Names {
                 }
             }
             Expr::Member(object, prop, _, pos) => {
+                if let vey::ast::MemberProp::Name(name) = prop {
+                    let variant_pos = member_name_pos(&self.source, *pos, name);
+                    match object.as_ref() {
+                        Expr::Ident(enum_name, _) => {
+                            self.enum_variant_uses.push(EnumVariantUse {
+                                enum_name: enum_name.clone(),
+                                enum_symbol: self.resolve(enum_name),
+                                module_alias: None,
+                                receiver_symbol: None,
+                                name: name.clone(),
+                                pos: variant_pos,
+                            });
+                        }
+                        Expr::Member(base, vey::ast::MemberProp::Name(enum_name), _, _)
+                            if let Expr::Ident(module, _) = base.as_ref() =>
+                        {
+                            self.enum_variant_uses.push(EnumVariantUse {
+                                enum_name: enum_name.clone(),
+                                enum_symbol: None,
+                                module_alias: Some(module.clone()),
+                                receiver_symbol: self.resolve(module),
+                                name: name.clone(),
+                                pos: variant_pos,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
                 if let (Expr::Ident(alias, _), vey::ast::MemberProp::Name(name)) =
                     (object.as_ref(), prop)
                 {
@@ -1567,6 +1859,14 @@ impl Names {
                 self.pop_scope();
             }
             Expr::Arrow(type_params, params, body, ret, _) => {
+                let region = match body {
+                    vey::ast::ArrowBody::Block(block) => Some((block.start, block.end)),
+                    vey::ast::ArrowBody::Expr(_, start, end) => Some((*start, *end)),
+                };
+                self.push_scope(region);
+                for param in type_params {
+                    self.define_type_parameter(&param.name, param.pos);
+                }
                 for param in type_params {
                     if let Some(constraint) = &param.constraint {
                         self.type_expr(constraint);
@@ -1575,11 +1875,6 @@ impl Names {
                 if let Some(ret) = ret {
                     self.type_expr(ret);
                 }
-                let region = match body {
-                    vey::ast::ArrowBody::Block(block) => Some((block.start, block.end)),
-                    vey::ast::ArrowBody::Expr(_, start, end) => Some((*start, *end)),
-                };
-                self.push_scope(region);
                 for param in params {
                     if let Some(ty) = &param.ty {
                         self.type_expr(ty);
@@ -1649,6 +1944,7 @@ fn symbol_kind(kind: &str) -> f64 {
         "enum" => 10.0,
         "variant" => 22.0,
         "parameter" => 13.0,
+        "type_parameter" => 26.0,
         "module" => 2.0,
         _ => 13.0,
     }
