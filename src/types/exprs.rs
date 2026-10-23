@@ -24,6 +24,28 @@ use crate::types::helpers::expr_has_yield;
 use crate::parser::exprs::NAMED_MARKER;
 use crate::suggest::did_you_mean;
 
+fn collect_object_shape_candidates(
+    ty: &Type,
+    aliases: &HashMap<String, Type>,
+    seen: &mut HashSet<String>,
+    out: &mut Vec<Type>,
+) {
+    match ty {
+        Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => out.push(ty.clone()),
+        Type::Union(items) => {
+            for item in items {
+                collect_object_shape_candidates(item, aliases, seen, out);
+            }
+        }
+        Type::Recursion(name) if seen.insert(name.clone()) => {
+            if let Some(shape) = aliases.get(name) {
+                collect_object_shape_candidates(shape, aliases, seen, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl TypeChecker<'_> {
     pub(crate) fn infer_expr(&mut self, expr: &Expr) -> Result<Type, VeyError> {
         match expr {
@@ -784,16 +806,38 @@ impl TypeChecker<'_> {
             Expr::Call(callee, args, optional, pos) => {
                 self.infer_call(callee, args, *optional, *pos, expected, None)
             }
-            // A list of values may be a tuple, when that is what is expected.
-            Expr::Array(items, pos) => {                if let Some(Type::Tuple(wanted)) = expected {
+            // A fresh list may take the element type it is given. A list
+            // stored in a name is checked invariantly by `fits` instead.
+            Expr::Array(items, pos) => {
+                if let Some(Type::Array(wanted)) = expected {
+                    if !has_type_var(wanted) {
+                        for item in items {
+                            let actual = match item {
+                                Expr::Spread(inner, spread_pos) => match self.infer_expr(inner)? {
+                                    Type::Array(element) => *element,
+                                    Type::Any | Type::Unknown => Type::Any,
+                                    other => {
+                                        return Err(self.error(
+                                            *spread_pos,
+                                            format!("cannot spread a {}", other.display()),
+                                        ))
+                                    }
+                                },
+                                other => self.infer_expr_as(other, Some(wanted))?,
+                            };
+                            if !self.fits(&actual, wanted) {
+                                return self.infer_expr(expr);
+                            }
+                        }
+                        return Ok(Type::Array(wanted.clone()));
+                    }
+                }
+                // A list literal may be a tuple when that is what is expected.
+                if let Some(Type::Tuple(wanted)) = expected {
                     if items.len() != wanted.len() {
                         return Err(self.error(
                             *pos,
-                            format!(
-                                "expected {} values, found {}",
-                                wanted.len(),
-                                items.len()
-                            ),
+                            format!("expected {} values, found {}", wanted.len(), items.len()),
                         ));
                     }
                     let mut out = Vec::new();
@@ -803,6 +847,9 @@ impl TypeChecker<'_> {
                             return Err(self.type_error(item.pos(), &actual, &wanted[index]));
                         }
                         out.push(actual);
+                    }
+                    if wanted.iter().all(|item| !has_type_var(item)) {
+                        return Ok(Type::Tuple(wanted.clone()));
                     }
                     return Ok(Type::Tuple(out));
                 }
@@ -824,6 +871,72 @@ impl TypeChecker<'_> {
                         }
                     }
                     return Ok(Type::Dict(key_ty.clone(), value_ty.clone()));
+                }
+                if let Some(expected_ty) = expected {
+                    let props_have_no_spread = props
+                        .iter()
+                        .all(|prop| matches!(prop, ObjectProp::Field(_, _)));
+                    let mut candidates = Vec::new();
+                    collect_object_shape_candidates(
+                        expected_ty,
+                        &self.alias_types,
+                        &mut HashSet::new(),
+                        &mut candidates,
+                    );
+                    let shape = candidates.into_iter().find_map(|shape_ty| {
+                        let fields = match &shape_ty {
+                            Type::Object(fields)
+                            | Type::Named(_, fields)
+                            | Type::Interface(_, fields) => fields.clone(),
+                            _ => return None,
+                        };
+                        let names_match = props.iter().all(|prop| match prop {
+                            ObjectProp::Field(name, _) => fields
+                                .iter()
+                                .any(|field| field.name.as_str() == name.as_str()),
+                            ObjectProp::Spread(_) => false,
+                        });
+                        let required_fields_are_present = fields.iter().all(|field| {
+                            field.optional
+                                || props.iter().any(|prop| {
+                                    matches!(prop, ObjectProp::Field(name, _) if name == &field.name)
+                                })
+                        });
+                        (names_match && required_fields_are_present).then_some((shape_ty, fields))
+                    });
+                    if let Some((shape_ty, fields)) = shape {
+                        let is_contextual_literal = props_have_no_spread
+                            && !self.has_methods(&shape_ty)
+                            && fields.iter().all(|field| !has_type_var(&field.ty))
+                            && props.iter().all(|prop| match prop {
+                                ObjectProp::Field(name, _) => fields
+                                    .iter()
+                                    .any(|field| field.name.as_str() == name.as_str()),
+                                ObjectProp::Spread(_) => false,
+                            })
+                            && fields.iter().all(|field| {
+                                field.optional
+                                    || props.iter().any(|prop| {
+                                        matches!(prop, ObjectProp::Field(name, _) if name == &field.name)
+                                    })
+                            });
+                        if is_contextual_literal {
+                            for prop in props {
+                                let ObjectProp::Field(name, value) = prop else {
+                                    continue;
+                                };
+                                let Some(field) = fields.iter().find(|field| field.name == *name)
+                                else {
+                                    return self.infer_expr(expr);
+                                };
+                                let actual = self.infer_expr_as(value, Some(&field.ty))?;
+                                if !self.fits(&actual, &field.ty) {
+                                    return self.infer_expr(expr);
+                                }
+                            }
+                            return Ok(expected_ty.clone());
+                        }
+                    }
                 }
                 self.infer_expr(expr)
             }

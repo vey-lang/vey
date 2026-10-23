@@ -108,6 +108,10 @@ pub(crate) fn assignable_with(source: &Type, target: &Type, opening: &mut Openin
     assignable_in(source, target, opening)
 }
 
+fn invariantly_assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
+    assignable_in(source, target, opening) && assignable_in(target, source, opening)
+}
+
 fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
     // A type that refers to itself is opened one step at a time, and the
     // pair is remembered while it is being checked. A pair that comes again
@@ -170,28 +174,27 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
     }
 
     match (source, target) {
-        (Type::Array(source), Type::Array(target)) => assignable_in(source, target, opening),
+        (Type::Array(source), Type::Array(target)) => {
+            invariantly_assignable_in(source, target, opening)
+        }
         (Type::Tuple(source), Type::Tuple(target)) => {
             source.len() == target.len()
                 && source
                     .iter()
                     .zip(target.iter())
-                    .all(|(source, target)| assignable_in(source, target, opening))
+                    .all(|(source, target)| invariantly_assignable_in(source, target, opening))
         }
-        // A list of any length fits a tuple of the same shape.
-        (Type::Array(source), Type::Tuple(target)) => {
-            target
-                .iter()
-                .all(|item| assignable_in(source, item, opening))
-        }
+        // Arrays and tuples are both mutable at runtime. An array's length
+        // is not known, so it cannot promise the positions of a tuple.
+        (Type::Array(_), Type::Tuple(_)) => false,
         (Type::Tuple(source), Type::Array(target)) => {
             source
                 .iter()
-                .all(|item| assignable_in(item, target, opening))
+                .all(|item| invariantly_assignable_in(item, target, opening))
         }
         (Type::Dict(source_key, source_value), Type::Dict(target_key, target_value)) => {
-            assignable_in(source_key, target_key, opening)
-                && assignable_in(source_value, target_value, opening)
+            invariantly_assignable_in(source_key, target_key, opening)
+                && invariantly_assignable_in(source_value, target_value, opening)
         }
         (Type::Object(source), Type::Object(target)) => {
             object_assignable_exact_in(source, target, opening)
@@ -262,10 +265,12 @@ fn object_assignable_in(
             .find(|source_field| source_field.name == target_field.name)
         {
             Some(source_field) => {
-                if source_field.optional && !target_field.optional {
+                // Fields can be written through an alias, so their type and
+                // optionality must be the same in both views.
+                if source_field.optional != target_field.optional {
                     return false;
                 }
-                if !assignable_in(&source_field.ty, &target_field.ty, opening) {
+                if !invariantly_assignable_in(&source_field.ty, &target_field.ty, opening) {
                     return false;
                 }
             }

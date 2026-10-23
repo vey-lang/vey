@@ -524,6 +524,179 @@ fn a_generic_parameter_is_not_a_concrete_return_type() {
 }
 
 #[test]
+fn mutable_arrays_and_tuples_do_not_allow_covariant_aliases() {
+    let error = check_err(
+        "mutable-array-covariance",
+        r#"
+type Animal = { name: string }
+type Dog = { name: string, bark: number }
+let dogs: [Dog] = [{ name: "Fido", bark: 1 }]
+let animals: [Animal] = dogs
+animals[0] = { name: "Felix" }
+let bark: number = dogs[0].bark
+"#,
+    );
+    assert!(error.contains("expected [Animal]"), "{error}");
+
+    let error = check_err(
+        "mutable-tuple-to-array-covariance",
+        r#"
+type Animal = { name: string }
+type Dog = { name: string, bark: number }
+let dogs: [Dog, Dog] = [{ name: "Fido", bark: 1 }, { name: "Rex", bark: 2 }]
+let animals: [Animal] = dogs
+animals[0] = { name: "Felix" }
+let bark: number = dogs[0].bark
+"#,
+    );
+    assert!(error.contains("expected [Animal]"), "{error}");
+
+    let error = check_err(
+        "mutable-array-to-tuple-covariance",
+        r#"
+type Animal = { name: string }
+type Dog = { name: string, bark: number }
+let dogs: [Dog] = [{ name: "Fido", bark: 1 }]
+let animals: [Animal, Animal] = dogs
+animals[0] = { name: "Felix" }
+let bark: number = dogs[0].bark
+"#,
+    );
+    assert!(error.contains("expected [Animal, Animal]"), "{error}");
+
+    let error = check_err(
+        "mutable-tuple-covariance",
+        r#"
+type Animal = { name: string }
+type Dog = { name: string, bark: number }
+let dogs: [Dog, Dog] = [{ name: "Fido", bark: 1 }, { name: "Rex", bark: 2 }]
+let animals: [Animal, Animal] = dogs
+animals[0] = { name: "Felix" }
+let bark: number = dogs[0].bark
+"#,
+    );
+    assert!(error.contains("expected [Animal, Animal]"), "{error}");
+
+    check_ok(
+        "mutable-array-same-type-alias",
+        "let values: [number] = [1]\nlet alias: [number] = values\nalias[0] = 2\n",
+    );
+    check_ok(
+        "mutable-tuple-to-array-same-type-alias",
+        "let pair: [number, number] = [1, 2]\nlet values: [number] = pair\nvalues[0] = 3\n",
+    );
+}
+
+#[test]
+fn mutable_objects_and_dictionaries_do_not_allow_covariant_aliases() {
+    let error = check_err(
+        "mutable-object-field-covariance",
+        r#"
+let narrow: { x: number } = { x: 1 }
+let wide: { x: number | string } = narrow
+wide.x = "oops"
+let n: number = narrow.x
+"#,
+    );
+    assert!(error.contains("number | string"), "{error}");
+
+    let error = check_err(
+        "mutable-named-field-covariance",
+        r#"
+type Narrow = { x: number }
+type Wide = { x: number | string }
+let narrow: Narrow = { x: 1 }
+let wide: Wide = narrow
+wide.x = "bad"
+let n: number = narrow.x
+"#,
+    );
+    assert!(error.contains("Wide"), "{error}");
+
+    let error = check_err(
+        "mutable-interface-field-covariance",
+        r#"
+interface Narrow { x: number }
+interface Wide { x: number | string }
+let narrow: Narrow = { x: 1 }
+let wide: Wide = narrow
+wide.x = "bad"
+let n: number = narrow.x
+"#,
+    );
+    assert!(error.contains("Wide"), "{error}");
+
+    let error = check_err(
+        "mutable-dictionary-value-covariance",
+        r#"
+let narrow: {[string]: number} = { x: 1 }
+let wide: {[string]: number | string} = narrow
+let key: string = "x"
+wide[key] = "bad"
+let n: number = narrow[key]
+"#,
+    );
+    assert!(error.contains("number | string"), "{error}");
+
+    let error = check_err(
+        "mutable-optional-field-covariance",
+        r#"
+let narrow: { x: number } = { x: 1 }
+let wide: { x?: number } = narrow
+wide.x = null
+let n: number = narrow.x
+"#,
+    );
+    assert!(error.contains("x?: number"), "{error}");
+
+    check_ok(
+        "mutable-object-same-field-alias",
+        "let first: { x: number } = { x: 1 }\nlet second: { x: number } = first\nsecond.x = 2\nlet n: number = first.x\n",
+    );
+    check_ok(
+        "mutable-dictionary-same-value-alias",
+        "let first: {[string]: number} = { x: 1 }\nlet second: {[string]: number} = first\nsecond[\"x\"] = 2\nlet n: number = first[\"x\"]\n",
+    );
+}
+
+#[test]
+fn fresh_literals_take_contextual_types_without_widening_existing_aliases() {
+    check_ok(
+        "fresh-object-literal-field-widening",
+        "let value: { x: number | string } = { x: 1 }\nvalue.x = \"ok\"\n",
+    );
+    check_ok(
+        "fresh-array-literal-element-widening",
+        "let values: [number | string] = [1]\nvalues[0] = \"ok\"\n",
+    );
+    check_ok(
+        "fresh-tuple-literal-element-widening",
+        "let pair: [number | string, number | string] = [1, \"x\"]\npair[0] = \"ok\"\n",
+    );
+    check_ok(
+        "fresh-nested-object-literal-widening",
+        "let value: { child: { x: number | string } } = { child: { x: 1 } }\nvalue.child.x = \"ok\"\n",
+    );
+
+    let error = check_err(
+        "fresh-wrapper-does-not-widen-aliased-object",
+        r#"
+let child: { x: number } = { x: 1 }
+let parent: { child: { x: number | string } } = { child: child }
+parent.child.x = "oops"
+let n: number = child.x
+"#,
+    );
+    assert!(error.contains("expected"), "{error}");
+
+    let error = check_err(
+        "fresh-wrapper-does-not-widen-aliased-array",
+        "let child: [number] = [1]\nlet parent: [[number | string]] = [child]\nparent[0][0] = \"oops\"\nlet n: number = child[0]\n",
+    );
+    assert!(error.contains("expected"), "{error}");
+}
+
+#[test]
 fn a_call_to_another_module_is_checked() {
     let dir = common::temp_dir("module-signature");
     std::fs::write(
