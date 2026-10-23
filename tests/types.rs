@@ -465,6 +465,10 @@ fn generic_function_assignability_sees_recursive_placeholder_variables() {
         "generic-recursive-function-cross-alias-incompatible",
         "type Node<T> = { children: [Node<T>] }\ntype Mirror<T> = { children: [Mirror<T>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet wrong: (Mirror<number>) -> Mirror<string> = identity\n",
     );
+    check_err(
+        "generic-recursive-function-arity-mismatch",
+        "type Node<T> = { children: [Node<T>] }\ntype Pair<A, B> = { children: [Pair<A, B>] }\nfn identity<T>(node: Node<T>) -> Node<T> { return node }\nlet wrong: (Pair<number, string>) -> Pair<string, string> = identity\n",
+    );
 }
 
 #[test]

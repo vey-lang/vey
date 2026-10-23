@@ -708,20 +708,15 @@ pub(crate) fn unify_types(
         return false;
     }
 
-    if let (
-        Type::Recursion(actual_name, actual_args),
-        Type::Recursion(expected_name, expected_args),
-    ) = (actual, expected)
+    if let (Type::Recursion(_, actual_args), Type::Recursion(_, expected_args)) = (actual, expected)
     {
-        if actual_name == expected_name && actual_args.len() != expected_args.len() {
+        if actual_args.len() != expected_args.len() {
             return false;
         }
-        if actual_args.len() == expected_args.len() {
-            return actual_args
-                .iter()
-                .zip(expected_args)
-                .all(|(actual, expected)| unify_types(actual, expected, subst));
-        }
+        return actual_args
+            .iter()
+            .zip(expected_args)
+            .all(|(actual, expected)| unify_types(actual, expected, subst));
     }
 
     if matches!(actual, Type::Any | Type::Recursion(_, _))
