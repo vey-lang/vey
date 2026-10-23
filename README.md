@@ -254,11 +254,11 @@ out = ".dist"
 [lint]
 # The length of a line that is still easy to read.
 maxLine = 100
-
-[build]
-# Whether the site is made smaller.
-minify = false
 ```
+
+> **Note:** `[build].minify` is accepted by the current config parser but is not
+> applied by the build pipeline yet; it is omitted from this example until it
+> has an observable effect.
 
 ## The tools
 

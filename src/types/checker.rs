@@ -10,7 +10,7 @@ use crate::types::core::{
     InterfaceInfo, ResolvedCalls, Type,
 };
 use crate::types::helpers::{block_has_await, name_alias};
-use crate::types::rules::{assignable_with, Opening};
+use crate::types::rules::{assignable_with, substitute_bound, Opening};
 use crate::VeyError;
 
 /// Whether every path through the block leaves the function or the loop.
@@ -79,6 +79,7 @@ fn build_checker<'a>(
         member_narrowings: vec![HashMap::new()],
         in_markup: false,
         type_param_scopes: Vec::new(),
+        type_param_constraints: Vec::new(),
         type_param_bindings: Vec::new(),
         components: HashMap::new(),
         param_scopes: Vec::new(),
@@ -500,6 +501,8 @@ pub(crate) struct TypeChecker<'a> {
     /// not wait for something.
     pub(crate) in_markup: bool,
     pub(crate) type_param_scopes: Vec<HashMap<String, Type>>,
+    /// The declared bounds of the type parameters in each open scope.
+    pub(crate) type_param_constraints: Vec<HashMap<String, Type>>,
     /// The types the type parameters of the current scope were bound to.
     pub(crate) type_param_bindings: Vec<HashMap<String, Type>>,
 
@@ -604,13 +607,18 @@ impl TypeChecker<'_> {
             scope.insert(param.name.clone(), Type::Var(param.name.clone()));
         }
         self.type_param_scopes.push(scope);
+        self.type_param_constraints.push(HashMap::new());
         self.type_param_bindings.push(HashMap::new());
 
         // The constraints are resolved with the parameters in scope, so that
         // a constraint may mention another parameter.
         for param in params {
             if let Some(expr) = &param.constraint {
-                self.resolve_type(expr)?;
+                let constraint = self.resolve_type(expr)?;
+                self.type_param_constraints
+                    .last_mut()
+                    .expect("the scope of the type parameters")
+                    .insert(param.name.clone(), constraint);
             }
         }
         Ok(())
@@ -618,7 +626,15 @@ impl TypeChecker<'_> {
 
     pub(crate) fn pop_type_params(&mut self) {
         self.type_param_scopes.pop();
+        self.type_param_constraints.pop();
         self.type_param_bindings.pop();
+    }
+
+    pub(crate) fn lookup_type_param_constraint(&self, name: &str) -> Option<Type> {
+        self.type_param_constraints
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
     }
 
     pub(crate) fn lookup_type_param(&self, name: &str) -> Option<Type> {
@@ -745,11 +761,29 @@ impl TypeChecker<'_> {
         if matches!(source, Type::Object(_)) && self.has_methods(target) {
             return false;
         }
+        if matches!(target, Type::Any) || matches!(source, Type::Any | Type::Never) {
+            return assignable_with(source, target, &mut Opening::new(&self.alias_types));
+        }
+        let mut bounds = HashMap::new();
+        for scope in &self.type_param_constraints {
+            bounds.extend(scope.clone());
+        }
+        let mut source = source.clone();
+        for _ in 0..=bounds.len() {
+            let expanded = substitute_bound(&source, &bounds);
+            if expanded == source {
+                break;
+            }
+            source = expanded;
+        }
+        if &source == target {
+            return true;
+        }
         // A type that refers to itself is opened where the check reaches
         // it, and not into a copy of itself: a shape of six fields would
         // otherwise become six copies of six copies, six times over.
         let mut opening = Opening::new(&self.alias_types);
-        assignable_with(source, target, &mut opening)
+        assignable_with(&source, target, &mut opening)
     }
 
     /// Whether a type has functions of its own.

@@ -1,0 +1,45 @@
+# Vey yol haritası
+
+**Güncelleme:** 23 Ekim 2026
+**Başlangıç revizyonu:** `1626f550865a9694201e1f6d15cb106f49e7c14e`
+
+Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamamlandı işareti ancak regresyon testi ve ilgili doğrulama sonrası verilir.
+
+## 1. Tip güvenliği ve değer doğruluğu
+
+- [x] Serbest `TypeVar`'ı keyfî tiplere uyumlu sayan kuralı kaldır; deklarasyondaki generic bound'ları kullan.
+- [x] `unknown` değerini `object` olarak kullanmadan önce açıkça daraltmayı zorunlu kıl.
+- [x] Promise olmayan `await` operandının gerçek tipini koru.
+- [ ] Mutable array variance politikasını belirle (varsayılan olarak invariant olması güvenli); mutation sonrası alias'larda soundness regresyonu yaz.
+- [ ] Kısıtlı generic'lerin tüm işlemlerini, özellikle nested/container ve üye erişimlerini, bound-aware şekilde test et.
+
+## 2. Runtime ve routing doğruluğu
+
+- [ ] `mount.update()` node tipi statik ↔ fonksiyon olduğunda reactive effect kurma/sonlandırma lifecycle'ını düzelt; her iki geçiş için DOM ve cleanup testleri ekle.
+- [ ] `{id?}` gibi opsiyonel route parametrelerinde sonraki literal/constraint segmentini tüketmeden önce skip/consume seçeneklerini dene; optional-middle ve wildcard testleri ekle.
+- [ ] Oversized chunked request'lerde bağlantı/stream'i güvenli biçimde drain et veya kapat; keep-alive ve eşzamanlı istek testleri ekle.
+- [ ] Statik dosya symlink/containment denetimini path yarışına dayanıklı açılış/stream stratejisiyle güçlendir.
+- [ ] HTTP caller abort'u retries'den ayır; SSE backpressure için sınırlı tampon veya kapatma politikası ekle.
+
+## 3. LSP doğruluğu ve protokol uyumu
+
+- [ ] Rename'i metinsel ad yerine çözümlenmiş sembol/kapsam kimliğiyle uygula; shadowing testi ekle.
+- [ ] `exit`, bozuk/eksik frame ve bilinmeyen JSON-RPC yöntemi davranışlarını protokole uygun biçimde sonlandır/yanıtla; subprocess entegrasyon testleri ekle.
+- [ ] LSP `position.character` ve `Range` değerlerini UTF-16 birimlerine dönüştür; token ortası cursor ve astral Unicode testleri ekle.
+- [ ] `file://` URI percent-decoding'i UTF-8 byte dizilerini doğru çözecek biçimde düzelt; Unicode dosya adı testi ekle.
+- [ ] Completion'ı cursor ve kapsam-duyarlı hâle getir; bunu mevcut rename/position düzeltmelerinden ayrı özellik işi olarak takip et.
+
+## 4. CLI, build ve yayınlama davranışı
+
+- [ ] `deploy` hedefinde kaynak build'de olmayan stale dosyaların kontrollü ve güvenli temizliğini tanımla; hedefte kullanıcı dosyaları koruma testleri ekle.
+- [ ] `migrate` dry-run exit status sözleşmesini belirle ve CI kullanımına göre test et.
+- [ ] `[build].minify` ayarı için gerçek build davranışı ekle veya config şemasından tamamen çıkar; şu an dokümantasyonda no-op olduğu belirtiliyor.
+- [ ] Lint'in config dosyasını hedef dosyanın proje kökünden çözmesini sağla.
+- [ ] CLI option parser'ında komut-başına geçerli seçenekleri doğrula; etkisiz ve yanlış yazılmış seçeneklerin sessizce yutulmasını önle.
+
+## 5. Doğrulama ve dokümantasyon
+
+- [ ] Server integration testlerinin process-group cleanup sırasında test runner'a SIGTERM göndermediğini doğrula; ardından tam `cargo test --all-targets` çalıştır.
+- [ ] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
+- [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
+- [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

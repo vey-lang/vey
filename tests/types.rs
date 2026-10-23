@@ -494,6 +494,36 @@ fn a_generic_return_takes_the_type_of_the_value() {
 }
 
 #[test]
+fn a_generic_parameter_is_not_a_concrete_return_type() {
+    check_ok(
+        "generic-identity-return",
+        "fn id<T>(value: T) -> T { return value }\nlet n: number = id(1)\n",
+    );
+    check_ok(
+        "bounded-generic-return",
+        "fn as_number<T: number>(value: T) -> number { return value }\nprint(as_number(1))\n",
+    );
+    check_ok(
+        "bounded-generic-operation",
+        "fn add<T: number>(value: T) -> number { return value + 1 }\nprint(add(1))\n",
+    );
+    check_ok(
+        "bounded-generic-list",
+        "fn numbers<T: number>(values: [T]) -> [number] { return values }\nlet values: [number] = numbers([1])\n",
+    );
+    let error = check_err(
+        "unbounded-generic-operation",
+        "fn add<T>(value: T) -> number { return value + 1 }\nprint(add(1))\n",
+    );
+    assert!(error.contains("operator '+'"), "{error}");
+    let error = check_err(
+        "generic-concrete-return",
+        "fn lie<T>(value: T) -> number { return value }\nlet n: number = lie(\"not a number\")\n",
+    );
+    assert!(error.contains("expected number"), "{error}");
+}
+
+#[test]
 fn a_call_to_another_module_is_checked() {
     let dir = common::temp_dir("module-signature");
     std::fs::write(
@@ -774,6 +804,19 @@ let n: string = await load()
 }
 
 #[test]
+fn awaiting_a_non_promise_keeps_its_type() {
+    check_ok(
+        "await-non-promise-valid",
+        "fn load() -> string { return await \"ready\" }\nfn main() { let value: string = await load() }\n",
+    );
+    let error = check_err(
+        "await-non-promise-invalid",
+        "fn load() -> number { return await \"not a number\" }\n",
+    );
+    assert!(error.contains("expected number, found string"), "{error}");
+}
+
+#[test]
 fn the_helpers_that_wait_give_back_a_promise() {
     let error = check_err(
         "async-sleep",
@@ -949,6 +992,19 @@ fn show(text: string) -> bool {
 "#,
     );
     assert!(error.contains("expected number, found string"), "{error}");
+}
+
+#[test]
+fn an_unknown_value_needs_object_narrowing_before_use_as_object() {
+    check_ok(
+        "unknown-object-narrowed",
+        "fn needs_object(value: object) {}\nfn use_value(value: unknown) { if value is object { needs_object(value) } }\n",
+    );
+    let error = check_err(
+        "unknown-object-unchecked",
+        "fn needs_object(value: object) {}\nfn use_value(value: unknown) { needs_object(value) }\n",
+    );
+    assert!(error.contains("expects object, found unknown"), "{error}");
 }
 
 #[test]

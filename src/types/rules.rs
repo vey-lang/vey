@@ -170,9 +170,6 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
     }
 
     match (source, target) {
-        // A type parameter is a name for a type that is not known yet, so it
-        // takes anything and is taken by anything.
-        (Type::Var(_), _) | (_, Type::Var(_)) => true,
         (Type::Array(source), Type::Array(target)) => assignable_in(source, target, opening),
         (Type::Tuple(source), Type::Tuple(target)) => {
             source.len() == target.len()
@@ -227,10 +224,6 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
         (Type::Interface(_, source), Type::Interface(_, target)) => {
             object_assignable_in(source, target, opening)
         }
-        // A value of an unknown shape may be anything that is an object.
-        // A list, a dictionary, an enum, a promise and a function are
-        // objects as well: they are not a number, a text, a bool or nothing.
-        (Type::Unknown, Type::AnyObject) => true,
         (Type::Object(_), Type::AnyObject) => true,
         (Type::Named(_, _), Type::AnyObject) => true,
         (Type::Interface(_, _), Type::AnyObject) => true,

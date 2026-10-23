@@ -1,6 +1,6 @@
 //! The part of the checker that works on expressions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::lexer::Pos;
@@ -467,7 +467,7 @@ impl TypeChecker<'_> {
                             })
                             .collect(),
                     ),
-                    _ => Type::Any,
+                    other => other,
                 })
             }
             Expr::Try(inner, pos) => {
@@ -1137,6 +1137,27 @@ impl TypeChecker<'_> {
         }
     }
 
+    fn is_orderable(&self, ty: &Type) -> bool {
+        self.is_orderable_inner(ty, &mut HashSet::new())
+    }
+
+    fn is_orderable_inner(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Var(name) => {
+                if !seen.insert(name.clone()) {
+                    return false;
+                }
+                let result = self
+                    .lookup_type_param_constraint(name)
+                    .is_some_and(|bound| self.is_orderable_inner(&bound, seen));
+                seen.remove(name);
+                result
+            }
+            Type::Union(items) => items.iter().all(|item| self.is_orderable_inner(item, seen)),
+            _ => orderable(ty),
+        }
+    }
+
     pub(crate) fn binary_result(
         &self,
         op: &str,
@@ -1149,11 +1170,11 @@ impl TypeChecker<'_> {
                 if matches!(left, Type::Any) || matches!(right, Type::Any) {
                     return Ok(Type::Any);
                 }
-                if assignable(left, &Type::Number) && assignable(right, &Type::Number) {
+                if self.fits(left, &Type::Number) && self.fits(right, &Type::Number) {
                     Ok(Type::Number)
-                } else if assignable(left, &Type::String) && assignable(right, &Type::String) {
+                } else if self.fits(left, &Type::String) && self.fits(right, &Type::String) {
                     Ok(Type::String)
-                } else if assignable(left, &Type::String) || assignable(right, &Type::String) {
+                } else if self.fits(left, &Type::String) || self.fits(right, &Type::String) {
                     // A text and a number are put together as a text.
                     Ok(Type::String)
                 } else {
@@ -1171,7 +1192,7 @@ impl TypeChecker<'_> {
                 if matches!(left, Type::Any) || matches!(right, Type::Any) {
                     return Ok(Type::Any);
                 }
-                if assignable(left, &Type::Number) && assignable(right, &Type::Number) {
+                if self.fits(left, &Type::Number) && self.fits(right, &Type::Number) {
                     Ok(Type::Number)
                 } else {
                     Err(self.error(
@@ -1210,7 +1231,7 @@ impl TypeChecker<'_> {
             "<" | "<=" | ">" | ">=" => {
                 // Only numbers have an order. A value that may be nothing is
                 // fine, because it is never greater than another value.
-                if !orderable(left) || !orderable(right) {
+                if !self.is_orderable(left) || !self.is_orderable(right) {
                     return Err(self.error(
                         pos,
                         format!(
@@ -1226,7 +1247,7 @@ impl TypeChecker<'_> {
             "&" | "|" | "^" | "<<" | ">>" => {
                 if matches!(left, Type::Any) || matches!(right, Type::Any) {
                     Ok(Type::Any)
-                } else if assignable(left, &Type::Number) && assignable(right, &Type::Number) {
+                } else if self.fits(left, &Type::Number) && self.fits(right, &Type::Number) {
                     Ok(Type::Number)
                 } else {
                     Err(self.error(

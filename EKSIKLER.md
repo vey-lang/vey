@@ -2,20 +2,21 @@
 
 > **Kapsam:** `src/` (Rust derleyici + JS runtime), `tests/`, `examples/`
 > **Yöntem:** satır satır okuma + derleyiciyi **çalıştırarak doğrulanan** deneyler (`vey check`, `vey build`, sahte DOM harness)
-> **Tarih:** 22 Ekim 2026 · Sürüm: `vey 0.7.0` (Cargo.toml)
+> **Tarih:** 23 Ekim 2026 · Sürüm: `vey 0.7.0` (Cargo.toml)
 
 ---
 
 ## 0. Yönetici özeti
 
-Vey, iyi bir temel üzerine kurulmuş, **derleyici + tip denetleyici + tarayıcı runtime'u + Node runtime'u + CLI** olan bir web dilidir. Mimari temiz, kod okunabilir, hata mesajları iyi, test kapsamı hatırı sayılır düzeydedir. Bu bir "oyun projesi" değil, üzerine inşa edilebilecek bir temeldir.
+Vey, **derleyici + tip denetleyici + tarayıcı/Node runtime + CLI** içeren bir web dilidir. 23 Ekim denetimi, önceki raporun bazı tamamlanmış işleri ve yeni bulguları yansıtmadığını gösterdi; aşağıdaki 22 Ekim kayıtları tarihsel snapshot olarak okunmalıdır.
 
-Ancak bugün haliyle **dilin en kritik iki alanı eksik**:
+**Güncel, doğrulanmış durum (23 Ekim 2026):** üç type-safety açığı bu dalda kapatıldı: sınırsız generic `TypeVar` artık tüm tiplere uymaz; `unknown` daraltılmadan `object` sayılamaz; Promise olmayan `await` gerçek operand tipini korur. Kısıtlı generic'ler ve geçerli number işlemleri regresyon testleriyle korunuyor.
 
-1. **Async/await tip güvenliği yok.** `Promise<T>` tip sisteminde *var* ama bir async fonksiyonun dönüş tipi olarak **kullanılamaz**, runtime'ın neredeyse tüm async yardımcıları `any` dönüyor. Sonuç: `let y: string = await load()` hatasız geçiyor. Ayrıca tip çıkarımı **`any` denizine** dökülmüş: annotation'sız her `let` `any`, callback parametreleri `any`, `unknown` pratikte hiç üretilmiyor.
-2. **Frontend reaktivitesi "yaz-ama" seviyesinde.** Toplama (batching), eşitlik (equality), context, memo, hata sınırı, async bileşen, portal yok. `onDestroy` **hiç çalışmıyor**. SVG **yazılamıyor**.
+**Testler:** değişiklik sonrası temiz klonda `cargo test --test types` → **71/71 geçti**; `cargo test --test cli` → **31/31 geçti**. `cargo test --all-targets --quiet` ise `tests/server.rs` aşamasına gelirken exit **143 (SIGTERM)** ile sonlandı; bu nedenle güncel tam-suite sonucu **doğrulanmış değil**. `cargo fmt --all -- --check` depo genelinde mevcut format farkları nedeniyle temiz geçmiyor.
 
-Backend tarafı ise şaşırtıcı derecede olgun: middleware pipeline, WebSocket, SSE, oturum, statik sunucu, multipart, body limit var. Ama **9 gerçek güvenlik/doğruluk hatası** içeriyor (oturum çerezinin kaybolması, `bodyLimit`'in etkisiz olması, `EADDRINUSE` crash'i, timing attack, IP spoofing, hata sızıntısı, WS frame kırpma, SSE donması, session fixing).
+**Açık yüksek öncelikli riskler:** reactive `mount.update()` mod değişimi, optional route segmenti, oversized chunked request'in drain/destroy edilmemesi, LSP rename kapsamı/protokol/Unicode konumları ve deploy hedefinde eski dosyaların kalması. Ayrıntılar [güncel denetim raporunda](AUDIT_START.md).
+
+**Dokümantasyon notu:** bu dosyanın sonraki bölümlerindeki bazı 22 Ekim durumları güncel değildir; örneğin `TypeVar` evrensel uyumluluğu, LSP rename'in yokluğu, config/lint/build durumu. Güncel durumun özeti yukarıdaki paragraf ve ilgili iş kalemlerinde ayrıca belirtilmiştir.
 
 **Ayrıca 19 adet P0 (yanlış davranış) bulundu** — bunlar özellik değil, hata. En kayda değer üçü:
 
@@ -37,7 +38,7 @@ Backend tarafı ise şaşırtıcı derecede olgun: middleware pipeline, WebSocke
 >
 > Önceki tur: Faz 1'den 5, Faz 2'den 1 kalem kapandı; `cargo test` → **253 test**, hepsi geçiyor. Kapanan kalemler: **B-7/B-15** (`is` ile `unknown`/`never`/`void`/`symbol`/`bigint`), **B-9** (`const` değerin tipini koruyor), **B-12** (interface hedefte fazla alan), **B-18** (bağımlı modülün hatası yutulmuyor), **B-22/B-23** (ölü kod + iki yerde yapılandırma), **C-7** (portal). Ayrıca LSP'nin geçersiz `hint` alanı kaldırıldı ve bağımlı modülün tanısı **kendi dosyasına** yazılıyor.
 
-### Durum tablosu (22 Ekim 2026)
+### Durum tablosu — tarihsel snapshot (22 Ekim 2026)
 
 | Faz | Durum | Yapılan |
 |---|---|---|
@@ -47,7 +48,7 @@ Backend tarafı ise şaşırtıcı derecede olgun: middleware pipeline, WebSocke
 | **Faz 3** — Backend | 🔄 **devam ediyor** | 9 güvenlik/doğruluk hatası (Faz 0'da) |
 | **Faz 4** — Araç zinciri | 🔄 **devam ediyor** | `--force` + manifest, lint/fmt exit code, build uyarıları, LSP panic |
 
-**Test sayısı:** 229 → 241 → 253 → 263 → **266**. `cargo test` → **hepsi geçiyor**.
+**22 Ekim tarihsel test sayıları:** 229 → 241 → 253 → 263 → **266**; bunlar 23 Ekim değişikliklerinin doğrulaması değildir. Güncel test sonucu yönetici özetindedir.
 
 Aşağıdaki bölümler:
 - **Bölüm 2** — test durumu ve kırık testin kök nedeni.
@@ -400,8 +401,9 @@ component App() {
 ### A1 · `Promise<T>` bir async fonksiyonun dönüş tipi olarak **kullanılamıyor** 🔴  ✅ **düzeltildi**
 
 > **Durum (22 Ekim 2026):** düzeltildi. `fn load() -> Promise<number> { await sleep(10); return 1 }` ve `let y: string = await load()` ikisi de artık kontrol ediliyor (ikinci satır "expected string, found number" diyor). `await` dönüş tipini `Promise`'ın içinden okuyor. Aşağıdaki kanıt ilk incelemenin fotoğrafıdır.
+> **Ek düzeltme (23 Ekim 2026):** Promise olmayan `await` artık `any`'e genişlemiyor; operandın tipini koruyor. Yanlış dönüşün `await "text"` ile gizlenmesini engelleyen `tests/types.rs::awaiting_a_non_promise_keeps_its_type` testi eklendi.
 
-**Kanıt (çalıştırıldı):**
+**İlk incelemenin tarihsel kanıtı (22 Ekim; güncel davranış değildir):**
 
 ```vey
 fn load() -> Promise<number> { await sleep(10); return 1 }
@@ -586,22 +588,11 @@ fn use2() -> Result<number, string> {
 ```
 Hata tipi taşınmadığı için `use2` de `Result<number, string>` görünüyor, ama içeride ne olursa olsun hata türü **hiçbir yerde denetlenmiyor**.
 
-### B3 · Tip parametresi **her şeyi kabul ediyor** → variance diye bir şey yok, hatta **güvensiz**
-`src/types/rules.rs:172-175`
+### B3 · Tip parametresi her tipe uyuyordu — **evrensel `TypeVar` kuralı düzeltildi; array variance ayrı açık**
 
-```rust
-// A type parameter is a name for a type that is not known yet, so it
-// takes anything and is taken by anything.
-(Type::Var(_), _) | (_, Type::Var(_)) => true,
-```
-
-Sonuç: `Box<Dog>` → `Box<Animal>` kabul ediliyor, `[Dog]` → `[Animal]` kabul ediliyor (`rules.rs:176` eleman bazında covariant). `assignable` bir kural değil, **"ya hep ya hiç"** kuralı.
-
-**Doğrulama:**
-```vey
-fn f(a: [number], b: [string]) { }
-// ikisi de any sayılıyor → f([1], ["a"]) hata vermiyor
-```
+> **Durum (23 Ekim 2026):** `(Type::Var(_), _) | (_, Type::Var(_)) => true` kuralı kaldırıldı. `TypeChecker::fits` etkin generic scope'lardaki bounds'ları nested tiplerde genişletiyor; number/string operator kontrolleri de aynı yoldan geçiyor. Serbest `T` somut `number` dönüşü veya `T + 1` işlemi için kullanılamıyor; `T: number` geçerli dönüş, aritmetik ve `[T] -> [number]` kullanımını koruyor. Test: `tests/types.rs::a_generic_parameter_is_not_a_concrete_return_type`.
+>
+> **Kalan ayrı risk:** mutable diziler hâlâ eleman bazında covariant kabul ediliyor. Bu nedenle `[Dog] -> [Animal]` gibi atamalar için variance/invariance ayrıca tasarlanmalı; bu değişiklik onu çözmüş sayılmaz.
 
 ### B4 · Jenerik fonksiyon **monomorfize** ediliyor → açık tip argümanı düşürülüyor 🔴  ✅ **düzeltildi**
 
@@ -1158,7 +1149,10 @@ documentSymbol, definition, references, rename, publishDiagnostics
 - **`textDocumentSync: 1`** (tam metin) → incremental sync yok; her tuş vuruşunda dosyanın tamamı taşınıyor.
 - ~~**LSP tanı modeli geçersiz alan kullanıyor:** `hint`~~ ✅ kaldırıldı: ipucu mesajın içinde (`hint: ...`), tanıya `code` alanı eklendi. Tanılar artık **ait oldukları dosyanın** URI'si altında yayınlanıyor (bağımlı modülün hatası kendi dosyasında görünüyor).
 - **Bilinmeyen istekler `null` ile yanıtlanıyor** (`lsp.rs` `_ => Some(answer(id, Value::Null))`) → "özellik desteklenmiyor" yerine bozuk cevap.
+- **`exit` döngüyü sonlandırmıyor;** bozuk/eksik frame de EOF gibi sessiz kapanış sayılabiliyor (`src/cli/lsp.rs:39-73, 93-98`).
+- **Rename kapsamı metinsel ada göre:** aynı adlı shadowed yerel değişkenler tek `WorkspaceEdit` içinde karışabilir (`src/cli/lsp.rs:317-365`). Sembol kimliği/kapsam çözümü ve regresyon testi gerekli.
 - **Sütunlar UTF-16 değil** (`src/cli/lsp.rs:152-153`, `src/lexer/mod.rs:189` karakter sayıyor) → Türkçe/emoji içeren dosyalarda kayma.
+- **URI percent-decoding UTF-8'i byte düzeyinde geri birleştirmiyor** (`src/cli/lsp.rs:924-950`); Unicode dosya adları mojibake olabilir. Definition/references/rename cursor'ı da token başlangıcını şart koşuyor (`lsp.rs:787-800`).
 - **`read_message` `Content-Length`'a güveniyor** (`src/cli/lsp.rs:70`) → bozuk/çok büyük header bellek patlaması.
 
 ### E2 · Derleyici hattı
@@ -1250,8 +1244,10 @@ no entry file found in . (looked for main.vey)
 
 Eksik bayraklar: `--verbose/--quiet`, `--json`, `--color/--no-color`, `--config`, `--cwd`, `--profile`, `--log-level`, `--` ayırıcı, `--flag=value`.
 
-### E7 · Config dosyası **hiç yok** 🔄 **kısmen var**
-- ✅ `src/cli/config.rs` `vey.toml`'u okuyor (`port`, `host`, `title` …) ve `build`/`dev`/`run`/`lint` onu kullanıyor. **Dikkat:** bu dosya git'e eklenmemiş (`git status`: `?? src/cli/config.rs`) — temiz bir klonda derleme kırılır.
+### E7 · Config dosyası var; ayarların tüketimi **kısmi**
+- `src/cli/config.rs` izlenen kaynak dosyasıdır; `vey.toml` `port`, `host`, `title` gibi ayarları okur. Dosyanın temiz klonda eksik olduğu yönündeki eski not yanlıştır.
+- `[build].minify` config'ten parse ediliyor ama build akışında okunmuyor (`src/cli/build.rs:46-55`) → ayar sessizce etkisiz.
+- Lint, config'i lint edilen dosyanın proje kökü yerine çalışma dizininden arayabiliyor (`src/cli/lint.rs:55-58`).
 - Env var desteği: `grep "env::var" src/` → hâlâ **0 sonuç** (`VEY_PORT`, `NODE_ENV`, `VEY_OUT_DIR` yok)
 - `package.json` yalnızca **yazılıyor** (`src/cli/scaffold.rs`) ve `src/cli/add.rs` tarafından okunuyor; derleyici hâlâ okumuyor.
 
@@ -1285,21 +1281,21 @@ Eksik bayraklar: `--verbose/--quiet`, `--json`, `--color/--no-color`, `--config`
   ... f n   a ( )   { }  \n  \n   f n   b ( )   { }  \n     ← 3 boş satır → 1
   ```
 - **Sütun genişliği yok** — `MAX_LINE = 100` yalnızca *linter'da* (`lint.rs:21`). Formatter satır bölmez, boşluk normalizasyonu yapmaz (`fn  foo ( a , b )` → aynen kalır).
-- **`--check` / `--diff` modu yok** (`fmt.rs:73-77`) → `--write` olmadan **tüm dosya içeriği** stdout'a basılıyor (diff değil). CI'da "biçimlendirilmiş mi?" sorusu cevaplanamıyor.
-- **Formatter idempotency kapsamı sınırlı:** `tests/cli.rs::formatter_ignores_braces_inside_multiline_block_comments` aynı dosyayı iki kez formatlayıp çıktının değişmediğini doğruluyor; formatter'ın tüm sözdizimleri için property testi yok.
+ - **`--check` / `--diff` modu yok** (`fmt.rs:73-77`) → `--write` olmadan **tüm dosya içeriği** stdout'a basılıyor (diff değil). CI'da "biçimlendirilmiş mi?" sorusu cevaplanamıyor.
+ - **Formatter idempotency kapsamı sınırlı:** `tests/cli.rs::formatter_ignores_braces_inside_multiline_block_comments` aynı dosyayı iki kez formatlayıp çıktının değişmediğini doğruluyor; formatter'ın tüm sözdizimleri için property testi yok.
 
-### E10 · Linter — 3 kural, hep exit 0, `check`'in uyarılarını üretmiyor
+### E10 · Linter — 3 kural; bazı uyarı/konfigürasyon açıkları sürüyor
 `src/cli/lint.rs`
 
 Kurallar: uzun satır (`MAX_LINE = 100`), derin iç içe (`MAX_DEPTH = 4`), yakın isimler (`MIN_DISTANCE = 2`), boş `catch`.
 
-- **Her zaman exit 0** (P0-16) → CI'da işe yaramaz.
+- ~~**Her zaman exit 0** (P0-16)~~ ✅ artık bulgu olduğunda exit 1 (`src/cli/lint.rs:108-115`). Eski CI iddiası güncel değil.
 - **Bulgular stdout'a**, diğer tüm komutlar hatayı stderr'a koyuyor (`src/cli/output.rs:165`) → boru uyumsuzluğu.
 - **Parse hatası tüm komutu bitiriyor** (`lint.rs:79-92`) ve **kaynak çerçevesi gösterilmiyor** (`output.rs::report` kullanılmıyor).
 - **Derinlik kuralı yanlış yere raporluyor** (`lint.rs:154-163` → `body.first()`, yani derinliğin olduğu yer değil en dış bloktaki ilk ifade).
 - **Yakın isim kuralı çok gürültülü** (`lint.rs:224-239` → `edit_distance < 2` → `a`/`b`, `x`/`y` gibi her çift uyarı üretir).
-- **`check::check`'in ürettiği 4 uyarı tipi `lint`'te yok** (`src/check/mod.rs:63-116`): gölgeleme, runtime helper'ını gizleme, kullanılmayan isim, "bu koddan sonrası asla çalışmaz" → **iki ayrı uyarı sistemi**.
-- Yapılandırma yok, `// lint-ignore` yok, `--fix` yok.
+ - **`check::check`'in ürettiği 4 uyarı tipi `lint`'te yok** (`src/check/mod.rs:63-116`): gölgeleme, runtime helper'ını gizleme, kullanılmayan isim, "bu koddan sonrası asla çalışmaz" → **iki ayrı uyarı sistemi**.
+- `// lint-ignore` ve `--fix` yok; lint config'inin proje köküne göre çözülmesi E7'deki açık olarak kalıyor.
 
 ### E11 · `vey explain` kapsamı dar
 `src/cli/explain.rs` + `src/types/explain.rs`
@@ -1324,6 +1320,7 @@ Kurallar: uzun satır (`MAX_LINE = 100`), derin iç içe (`MAX_DEPTH = 4`), yak�
 
 - Yalnızca `// vey: <sürüm>` yorumunu yeniden yazıyor (`migrate.rs:111-136`). 0.6 → 0.7 arasındaki dil değişiklikleri (CHANGELOG.md) için **hiçbir** dönüşüm kuralı yok.
 - ~~**Daha yeni sürüm kontrolü yok**~~ ✅ düzeltildi: sürüm bileşenleri sayısal olarak karşılaştırılıyor; daha yeni veya karşılaştırılamayan beyan hata verir ve dosya değiştirilmez. Testler: `tests/cli.rs::migrate_refuses_to_downgrade_a_newer_file_version`, `tests/cli.rs::migrate_updates_an_older_version_and_is_idempotent`.
+- **Dry-run exit status:** eski sürüm bulunduğunda `--write` olmadan değişiklik önerisi yazdırıyor ama exit 0 döndürüyor (`migrate.rs:124-128`); CI sözleşmesi belirlenip test edilmeli.
 - `--from`/`--to` yok, geri alma yok, CRLF normalizasyonu bozuk (`migrate.rs:118-130`), rapor yok.
 
 ### E14 · `vey deploy` ve `vey add` — stub düzeyinde
@@ -1798,15 +1795,15 @@ tests/
 ### Araç zinciri
 | Bulgu | Konum |
 |---|---|
-| **LSP char-boundary panic** | `src/cli/json.rs:235` |
+| ~~LSP JSON parser char-boundary panic~~ ✅ güncel parser karakter sınırında ilerliyor; bozuk escape hata olarak dönüyor | `src/cli/json.rs:235-264` |
 | LSP metot listesi | `src/cli/lsp.rs:99-162` |
 | ~~LSP `hint` alanı geçersiz~~ ✅ ipucu mesajın içinde, `code` eklendi | `src/cli/lsp.rs::problem` |
-| LSP `didClose` yok | `src/cli/lsp.rs:94-145` |
+| ~~LSP `didClose` yok~~ ✅ `didClose` dosyayı iç durumdan kaldırıyor | `src/cli/lsp.rs:165-173` |
 | LSP completion konumu yok sayıyor | `src/cli/lsp.rs:139-141,239-264` |
-| LSP import env'si kurulmuyor | `src/types/checker.rs:563` |
-| **`-o` hedef klasörü siliyor** | `src/cli/site.rs:94-98` |
-| **Lint her zaman exit 0** | `src/cli/lint.rs:107` |
-| **Fmt her zaman exit 0** | `src/cli/fmt.rs:77` |
+| ~~LSP import env'si kurulmuyor~~ ✅ hover/import denetimi modül ortamını kuruyor | `src/compiler/mod.rs`, `src/cli/lsp.rs` |
+| ~~`-o` hedef klasörü siliyor~~ ✅ hedefteki kullanıcı dosyalarını koruyor; regresyon testi var | `tests/cli.rs:29-69, 774-806` |
+| ~~Lint her zaman exit 0~~ ✅ bulgu olduğunda non-zero döndürüyor | `src/cli/lint.rs:108-115` |
+| ~~Fmt her zaman exit 0~~ ✅ değişiklik yazılmamışsa non-zero döndürüyor | `src/cli/fmt.rs:73-80` |
 | Lint bulguları stdout'da | `src/cli/lint.rs:68,139` |
 | Lint `check` uyarılarını üretmiyor | `src/cli/lint.rs` ↔ `src/check/mod.rs:63-116` |
 | ~~Formatter blok yorumları saymıyor~~ ✅ `tests/cli.rs::formatter_ignores_braces_inside_multiline_block_comments` | `src/cli/fmt.rs::braces` |
@@ -1825,19 +1822,21 @@ tests/
 | Harita inline `<script>` içinde | `src/cli/output.rs:24-35,37-40` |
 | UTF-16 sütun hatası | `src/lexer/mod.rs:182-192` ↔ `src/sourcemap/mod.rs:70-73` |
 | Paylaşılan argüman parser'ı | `src/cli/args.rs:43-98` |
-| Config dosyası yok | `grep "vey.toml" src/` → 0 |
+| Config dosyası mevcut, ayar kapsamı kısmi (`build.minify` etkisiz) | `src/cli/config.rs`, `src/cli/build.rs:46-55` |
 | Env var desteği yok | `grep "env::var" src/` → 0 |
 | `vey migrate` codemod yok | `src/cli/migrate.rs:111-136` |
 | ~~`vey add` JSON'u string ile düzenliyor~~ ✅ `tests/cli.rs::add_writes_a_package_name_that_already_appears_in_a_string_value` | `src/cli/add.rs::add_dependency` |
 | ~~`vey add` npm hatasını yutuyor~~ ✅ `tests/cli.rs::add_fails_when_npm_cannot_install_the_package` | `src/cli/add.rs::cmd_add` |
-| **Bozuk Dockerfile** | `src/cli/scaffold.rs:421-436` |
-| CI şablonu test dosyası üretmiyor | `src/cli/scaffold.rs:456` |
+| ~~Bozuk Dockerfile~~ ✅ şablonların ürettiği komutlar testli | `tests/cli.rs:1019-1069` |
+| ~~CI şablonu test dosyası üretmiyor~~ ✅ şablon test dosyası/komutu üretiyor | `tests/cli.rs::the_templates_of_a_new_project_build_what_they_run` |
 | Test koşucusu | `src/cli/run.rs` · `src/runtime/core.js:181-253` |
 | Bundle tek dosya, 187 KB | `src/runtime.rs:10-41` · `src/cli/output.rs:13-14` |
 
 ---
 
-## 13. Sonuç
+## 13. Sonuç — tarihsel snapshot (22 Ekim 2026)
+
+> Bu bölüm önceki denetimin fotoğrafıdır; bazı satırlar 23 Ekim'de tamamlanmış işleri veya yeni bulguları yansıtmaz. Güncel durum için bu dosyanın başındaki yönetici özetini ve `AUDIT_START.md` raporunu kullanın.
 
 Vey'in **çekirdek taşıyıcıları sağlam**: derleyici mimarisi, modül sistemi, kaynak haritaları, önbellek, paralel üretim, tree-shaking, iyi hata mesajları, README'yi test eden testler, 16 komutlu CLI, olgun bir Node runtime'ı ve şaşırtıcı derecede yetkin bir sunucu. Rust tarafında **hiç bağımlılık yok** — her şey elle yazılmış ve bu, hem övgü hem de bakım riski.
 
@@ -2049,13 +2048,13 @@ Bu altı madde, dili "deneyebilir bir şey" olmaktan "güvenilir bir şey" olmay
 - `src/runtime/middleware.js` — logger/cors/compress/errorHandler/bodyLimit/security/rateLimit/csrf.
 - `src/runtime/node.js` — fs/path/crypto/zlib/process/env (çoğu senkron).
 - `src/runtime/http.js` — fetch; put/patch/delete yok.
-- `src/types/builtins.rs` — runtime helper imzaları; Promise<T> async dönüş tipi eksik.
+- `src/types/builtins.rs` — runtime helper imzaları; async helper türleri case-by-case doğrulanmalı.
 - `src/types/checker.rs`, `src/types/exprs.rs` — tip çıkarımı; `any` şeffaflığı.
-- `src/cli/lsp.rs` — LSP implementasyonu; go-to-def/rename eksik.
+- `src/cli/lsp.rs` — definition/references/rename mevcut; kapsam, Unicode konumu ve protokol doğruluğu açık.
 - `src/cli/fmt.rs`, `src/cli/lint.rs` — formatter/linter.
 - `src/cli/dev.rs` — polling watcher.
 
-### 14.7 Sonuç (bu tur)
+### 14.7 Sonuç — tarihsel snapshot (22 Ekim 2026)
 
 Vey 0.7.0 itibarıyla **"deneyebilir" bir temelden "güvenilir" bir temele** geçti: 19 P0 kapatıldı, 266 test geçiyor, frontend reaktivitesi temel seviyede çalışıyor, backend production'a yakın. Bu turun tespit ettiği eksikler **derinlik ve genişlik** eksikleri: batching/memo/Suspense/hydration (frontend), HTTPS/streaming/async IO/session store (backend), async tip güvenliği ve modern tip özellikleri (tip sistemi), LSP/formatter/linter/test runner (araç zinciri).
 
