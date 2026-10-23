@@ -267,6 +267,21 @@ console.log(JSON.stringify(runtime.regex("\\d+").split("a1b22c")));
 }
 
 #[test]
+fn regex_supports_named_groups_and_function_replacements() {
+    let text = run_runtime(
+        "regex-named-groups",
+        r#"
+const re = runtime.regex("(?<first>\\w+)-(?<second>\\w+)");
+const found = re.match("one-two");
+console.log(JSON.stringify(found.groups));
+console.log(re.replace("one-two", (whole, first, second, offset, input, named) => named.second + ":" + named.first));
+"#,
+    );
+    assert!(text.contains(r#"{"first":"one","second":"two"}"#), "{text}");
+    assert!(text.contains("two:one"), "{text}");
+}
+
+#[test]
 fn the_intl_writes_a_number_and_a_date() {
     let text = run_runtime(
         "intl",

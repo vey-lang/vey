@@ -1112,8 +1112,8 @@ Ayrıca `fetch(url, { signal, timeout: 100 })` → kullanıcı `signal` verdiği
 ### D19 · `path` 🟡 **yardımcılar eklendi**
 `relative`, `normalize`, `isAbsolute`, `parse` ve `sep` artık mevcut; browser runtime'ında `path.sep` Node modülü yüklemeden güvenli fallback kullanıyor. Platforma özel `win32`/`posix` namespace'leri hâlâ eksik. Test: `tests/runtime.rs::path_helpers_cover_normalization_and_parsing`.
 
-### D20 · Regex'te named group ve fonksiyon replacement yok
-`src/runtime/regex.js:19-25, 63-73` — `(?<name>...)` kullanılamıyor; replacement fonksiyon kabul etmiyor.
+### D20 · Regex 🟡 **named group ve callback replacement eklendi**
+`match()` ve `matchAll()` sonuçları named groups'ı `.groups` alanında taşıyor; `replace()`/`replaceAll()` native callback replacement fonksiyonlarını kabul ediyor. Test: `tests/runtime.rs::regex_supports_named_groups_and_function_replacements`.
 
 ### D21 · `date`/`intl` timezone ve DST güvenli değil
 `src/runtime/date.js:43-70` — `format` yalnızca 6 token, timezone yok; `daysBetween` `Math.round` kullanıyor (DST'te bir gün kayar); `addDays` sabit 24 saat ekliyor (DST'te yanlış).

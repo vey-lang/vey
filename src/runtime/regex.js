@@ -21,6 +21,9 @@ function veyRegex(ctx) {
     for (var i = 0; i < found.length; i++) {
       out.push(found[i] === undefined ? null : found[i]);
     }
+    // Keep the historical array shape while exposing JavaScript named groups
+    // through the standard `groups` property.
+    out.groups = found.groups || null;
     return out;
   }
 
