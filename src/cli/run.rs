@@ -12,6 +12,8 @@ use crate::cli::config::Config;
 use crate::cli::dev::{serve, DEFAULT_PORT};
 use crate::cli::entry::{collect_tool_files, collect_vey_files, default_title, entry_from, project_root};
 use crate::cli::output::{node_script, print_command_help, report, report_warnings, temp_file};
+use crate::cli::program;
+use crate::cli::project::{self, Kind};
 
 pub(crate) fn cmd_run(args: &[String]) -> i32 {
     let parsed = match parse_args("run", args) {
@@ -44,15 +46,70 @@ pub(crate) fn cmd_run(args: &[String]) -> i32 {
         .or_else(|| config.host.clone())
         .unwrap_or_else(|| "127.0.0.1".to_string());
     let port = parsed.port.or(config.port).unwrap_or(DEFAULT_PORT);
-    let title = parsed
-        .title
-        .clone()
-        .or_else(|| config.title.clone())
-        .unwrap_or_else(|| default_title(&entry));
+    let kind = match project::detect(&entry, &config) {
+        Ok(kind) => kind,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
 
-    // The site is served the way a host would serve it: without the watcher
-    // and without the reload.
-    serve(&entry, &title, &host, port, false)
+    match kind {
+        Kind::Lib => {
+            eprintln!("this project is a library: there is no program to run");
+            eprintln!("run `vey test` to try it");
+            1
+        }
+        // A server is run as the program it is: built once, run, and left
+        // to answer for as long as it runs.
+        Kind::Server => {
+            if parsed.title.is_some() {
+                eprintln!("--title does nothing for a server project: its pages name themselves");
+                return 1;
+            }
+            run_program(&entry, &host, port)
+        }
+        Kind::Page => {
+            let title = parsed
+                .title
+                .clone()
+                .or_else(|| config.title.clone())
+                .unwrap_or_else(|| default_title(&entry));
+            // The site is served the way a host would serve it: without the
+            // watcher and without the reload.
+            serve(&entry, &title, &host, port, false)
+        }
+    }
+}
+
+/// Build a program of a server and run it, the way a host would.
+fn run_program(entry: &Path, host: &str, port: u16) -> i32 {
+    let script = temp_file("vey-run", "cjs");
+    if let Err(err) = program::build(entry, &script) {
+        eprintln!("{}", err);
+        let _ = fs::remove_file(&script);
+        return 1;
+    }
+    let root = project_root(entry);
+    let mut child = match program::start(&script, &root, host, port, false) {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!("cannot start node: {}", err);
+            eprintln!("node is required to run a server");
+            let _ = fs::remove_file(&script);
+            return 1;
+        }
+    };
+    let status = child.wait();
+    let _ = fs::remove_file(&script);
+    match status {
+        Ok(status) if status.success() => 0,
+        Ok(status) => status.code().unwrap_or(1),
+        Err(err) => {
+            eprintln!("the program ended: {}", err);
+            1
+        }
+    }
 }
 
 pub(crate) fn cmd_test(args: &[String]) -> i32 {

@@ -13,10 +13,65 @@ function veyServer(ctx) {
   var hostSetTimeout = ctx.hostSetTimeout;
   var hostSetInterval = ctx.hostSetInterval;
   var hostClearInterval = ctx.hostClearInterval;
+  var escapeText = ctx.escapeHtml;
 
   // The cookies of a request are read by the reader that the pages use, so
   // that one head gives the same answer on both sides.
   var parseCookies = ctx.cookie.parse;
+
+  // The page of the development server.
+  //
+  // A page that is served while a server is worked on listens to the
+  // program, and writes itself again when the program is built again. A
+  // program that runs for a host carries none of this.
+  var DEV_CLIENT =
+    "(function () {\n" +
+    "  if (!window.EventSource || !document.body) return;\n" +
+    "  var version = null;\n" +
+    "  var banner = null;\n" +
+    "  function show(text) {\n" +
+    "    banner = document.createElement('div');\n" +
+    "    banner.setAttribute('role', 'status');\n" +
+    "    banner.textContent = text;\n" +
+    "    banner.style.cssText = 'position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);' +\n" +
+    "      'z-index:2147483647;padding:.5rem .75rem;border-radius:6px;background:#0b0b0b;color:#fff;' +\n" +
+    "      'border:1px solid rgba(255,255,255,.24);font:13px ui-monospace,SFMono-Regular,Menlo,monospace;' +\n" +
+    "      'opacity:.94';\n" +
+    "    document.body.appendChild(banner);\n" +
+    "  }\n" +
+    "  function hide() {\n" +
+    "    if (!banner) return;\n" +
+    "    if (banner.parentNode) banner.parentNode.removeChild(banner);\n" +
+    "    banner = null;\n" +
+    "  }\n" +
+    "  var source = new EventSource('/__vey/dev/events');\n" +
+    "  source.onopen = hide;\n" +
+    "  source.onmessage = function (event) {\n" +
+    "    if (version === null) { version = event.data; return; }\n" +
+    "    if (event.data !== version) { version = event.data; location.reload(); }\n" +
+    "  };\n" +
+    "  source.onerror = function () { if (!banner) show('The server is starting again…'); };\n" +
+    "})();\n";
+
+  // The kind of a body, from the headers of an answer.
+  function contentTypeOf(headers) {
+    if (!headers) return "";
+    for (var key in headers) {
+      if (Object.prototype.hasOwnProperty.call(headers, key) && key.toLowerCase() === "content-type") {
+        return String(headers[key]);
+      }
+    }
+    return "";
+  }
+
+  // The page, with the listener of the development server in it.
+  function injectDevClient(html) {
+    if (html.indexOf("/__vey/dev/client.js") !== -1) return html;
+    var tag = '<script src="/__vey/dev/client.js" defer></script>';
+    var index = html.lastIndexOf("</body>");
+    if (index === -1) return html + tag;
+    return html.slice(0, index) + tag + html.slice(index);
+  }
 
   var MIME = Object.assign(Object.create(null), {
     ".html": "text/html; charset=utf-8",
@@ -160,6 +215,9 @@ function veyServer(ctx) {
     var staticIndex = "index.html";
     var notFoundHandler = null;
     var actualPort = port === undefined ? 3000 : port;
+    // The address the server listens on. Without one, Node listens on every
+    // address of the machine.
+    var bindHost = opts.host === undefined || opts.host === null ? null : String(opts.host);
     // The body of a request is read into the memory, so it has a limit.
     var limit = opts.bodyLimit === undefined ? 10 * 1024 * 1024 : Number(opts.bodyLimit);
     // The time that a request may take, before it is refused.
@@ -183,6 +241,18 @@ function veyServer(ctx) {
     var processModule = null;
     if (isNode) {
       try { processModule = ctx.nodeModule("node:process"); } catch (ignored) { }
+    }
+    // Whether this program is served by `vey dev`. A program that runs for
+    // a host answers without the client of the development server, and the
+    // routes of it are not there at all.
+    var devMode = false;
+    var devVersion = "";
+    if (isNode && processModule) {
+      try {
+        var environment = processModule.env || {};
+        devMode = String(environment.VEY_DEV || "") === "1";
+        devVersion = String(environment.VEY_DEV_VERSION || "");
+      } catch (ignored) { }
     }
 
     function installSignals() {
@@ -231,6 +301,53 @@ function veyServer(ctx) {
       });
     }
 
+    // The development server of a program.
+    //
+    // It is only there when `vey dev` runs the program. The page listens
+    // to the program through `/__vey/dev/events`, and it writes itself
+    // again when the program is built again, which is a new version.
+    if (devMode) {
+      add("GET", "/__vey/dev/client.js", function (info, res) {
+        res.set("Content-Type", "text/javascript; charset=utf-8");
+        res.set("Cache-Control", "no-store");
+        res.send(DEV_CLIENT);
+      });
+      add("SSE", "/__vey/dev/events", function (info, stream) {
+        stream.heartbeat(20000);
+        // A page comes back quickly after the program is built again, so
+        // that the change is seen without a wait.
+        stream.retry(500);
+        stream.send(devVersion);
+      });
+      // A page of the program is answered with the listener in it. A body
+      // that is not a page is left as it is, and a response of the program
+      // keeps its own status and headers.
+      middlewares.push({
+        path: null,
+        fn: function (request, res, next) {
+          var send = res.send;
+          res.send = function (body) {
+            if (body && body.__veyResponse && typeof body.body === "string") {
+              var kind = contentTypeOf(body.headers);
+              if (kind === "" || kind.indexOf("text/html") === 0) {
+                var copied = {};
+                for (var key in body) copied[key] = body[key];
+                copied.body = injectDevClient(body.body);
+                body = copied;
+              }
+            } else if (typeof body === "string" && body !== "") {
+              var current = String(res.get("Content-Type") || "");
+              if (current === "" || current.indexOf("text/html") === 0) {
+                body = injectDevClient(body);
+              }
+            }
+            return send.call(res, body);
+          };
+          next();
+        }
+      });
+    }
+
     // The route of a path, when there is one.
     //
     // The routes are looked at in the order they were written, so that the
@@ -245,19 +362,30 @@ function veyServer(ctx) {
       return null;
     }
 
-    // The methods of a path, for the answer of an OPTIONS.
-    function allowedMethods(pathname) {
+    // The methods that a path takes, for the answer of an OPTIONS and the
+    // `Allow` of a 405.
+    //
+    // The answer is the list of the methods in the order they are written,
+    // without the socket routes, which are not HTTP methods.
+    function allowedMethodsOf(pathname) {
       var found = {};
+      var order = [];
       for (var i = 0; i < routes.length; i++) {
         var route = routes[i];
+        if (route.method === "WS") continue;
         if (!matchRoute(route.pattern, pathname)) continue;
+        if (!found[route.method]) order.push(route.method);
         found[route.method] = true;
       }
-      found.OPTIONS = true;
-      if (found.GET) found.HEAD = true;
-      var out = [];
-      for (var method in found) out.push(method);
-      return out.join(", ");
+      if (found.GET && !found.HEAD) order.push("HEAD");
+      if (order.indexOf("SSE") !== -1) order.splice(order.indexOf("SSE"), 1);
+      order.push("OPTIONS");
+      return order;
+    }
+
+    // The `Allow` of a path, written as one line.
+    function allowedMethods(pathname) {
+      return allowedMethodsOf(pathname).join(", ");
     }
 
     // Whether a middle piece of a path fits another path.
@@ -377,36 +505,31 @@ function veyServer(ctx) {
         var root = fs.realpathSync(staticDir);
         var file = pathModule.resolve(root, relative);
         if (!isWithinStaticRoot(root, file)) {
-          res.status(403);
-          res.send("Forbidden");
+          sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
           return true;
         }
         file = fs.realpathSync(file);
         if (!isWithinStaticRoot(root, file)) {
-          res.status(403);
-          res.send("Forbidden");
+          sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
           return true;
         }
         var stat = fs.statSync(file);
         if (stat.isDirectory()) {
           file = pathModule.resolve(file, staticIndex);
           if (!isWithinStaticRoot(root, file)) {
-            res.status(403);
-            res.send("Forbidden");
+            sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
             return true;
           }
           if (!fs.existsSync(file)) return false;
           file = fs.realpathSync(file);
           if (!isWithinStaticRoot(root, file)) {
-            res.status(403);
-            res.send("Forbidden");
+            sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
             return true;
           }
         }
         var checkedInfo = fs.statSync(file);
         if (!checkedInfo.isFile()) {
-          res.status(404);
-          res.send("Not found");
+          sendError(request, res, 404, "Nothing here.", "The link may be broken, or the page may have moved.", null, true);
           return true;
         }
         var flags = "r";
@@ -420,16 +543,14 @@ function veyServer(ctx) {
         var info = fs.fstatSync(opened);
         if (!info.isFile()) {
           closeOpened();
-          res.status(404);
-          res.send("Not found");
+          sendError(request, res, 404, "Nothing here.", "The link may be broken, or the page may have moved.", null, true);
           return true;
         }
         var openedPath = staticDescriptorPath(opened);
         if (openedPath !== null) {
           if (!isWithinStaticRoot(root, openedPath)) {
             closeOpened();
-            res.status(403);
-            res.send("Forbidden");
+            sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
             return true;
           }
         } else {
@@ -442,15 +563,13 @@ function veyServer(ctx) {
             !sameStaticFile(info, pathInfo)
           ) {
             closeOpened();
-            res.status(403);
-            res.send("Forbidden");
+            sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
             return true;
           }
         }
         if (!sameStaticFile(checkedInfo, info)) {
           closeOpened();
-          res.status(403);
-          res.send("Forbidden");
+          sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
           return true;
         }
         var ext = pathModule.extname(file).toLowerCase();
@@ -527,13 +646,11 @@ function veyServer(ctx) {
       } catch (err) {
         closeOpened();
         if (err && err.code === "ELOOP") {
-          res.status(403);
-          res.send("Forbidden");
+          sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
           return true;
         }
         if (err && (err.code === "EACCES" || err.code === "EPERM")) {
-          res.status(500);
-          res.send("Cannot read file");
+          sendError(request, res, 500, "The file could not be read.", "The server could not read this file.", null, false);
           return true;
         }
         return false;
@@ -622,16 +739,123 @@ function veyServer(ctx) {
       };
     }
 
+    // Whether the visitor asked for a page, rather than for data.
+    //
+    // A browser says that it takes HTML. A program that asks for data says
+    // that it takes JSON, and gets a line of text instead of a page.
+    function wantsHtml(request) {
+      var accept = "";
+      try {
+        accept = String((request && request.headers && request.headers.accept) || "");
+      } catch (ignored) { }
+      if (!accept) return true;
+      return accept.indexOf("text/html") !== -1 || accept.indexOf("*/*") !== -1;
+    }
+
+    // The page of a mistake, in the colours of Vey.
+    //
+    // One page is used for every default mistake, so that a 404, a 405 and
+    // a 500 look like the pages of the same server.
+    function errorPage(status, title, message, detail, home) {
+      var extra = "";
+      if (detail) {
+        extra = "<p class=\"detail\">" + escapeText(detail) + "</p>";
+      }
+      var back = home
+        ? "<hr><p><a href=\"/\">Go back home</a></p>"
+        : "<hr><p class=\"hint\">" + escapeText(message) + "</p>";
+      return "<!doctype html>\n" +
+        "<html lang=\"en\">\n" +
+        "<head>\n" +
+        "<meta charset=\"utf-8\">\n" +
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+        "<title>" + status + " \u00b7 Vey</title>\n" +
+        "<style>\n" +
+        "  :root { color-scheme: light dark; --bg: #ffffff; --fg: #0b0b0b; --muted: #6e6e6e; --line: #e3e3e3; }\n" +
+        "  @media (prefers-color-scheme: dark) { :root { --bg: #0b0b0b; --fg: #f4f4f4; --muted: #8d8d8d; --line: #262626; } }\n" +
+        "  * { box-sizing: border-box; }\n" +
+        "  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.65; -webkit-font-smoothing: antialiased; }\n" +
+        "  main { max-width: 32rem; padding: 3rem 1.5rem; }\n" +
+        "  .code { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8125rem; letter-spacing: 0.16em; color: var(--muted); }\n" +
+        "  h1 { margin: 1.25rem 0 0; font-family: ui-serif, Georgia, Cambria, 'Times New Roman', serif; font-size: clamp(2rem, 7vw, 2.75rem); font-weight: 400; line-height: 1.12; letter-spacing: -0.02em; }\n" +
+        "  p { margin: 1.25rem 0 0; color: var(--muted); }\n" +
+        "  .detail { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8125rem; white-space: pre-wrap; }\n" +
+        "  hr { margin: 2.5rem 0; border: 0; border-top: 1px solid var(--line); }\n" +
+        "  a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }\n" +
+        "  a:hover { border-bottom-color: var(--fg); }\n" +
+        "</style>\n" +
+        "</head>\n" +
+        "<body>\n" +
+        "<main>\n" +
+        "  <p class=\"code\">" + status + "</p>\n" +
+        "  <h1>" + escapeText(title) + "</h1>\n" +
+        "  <p>" + escapeText(message) + "</p>\n" +
+        extra +
+        back +
+        "</main>\n" +
+        "</body>\n" +
+        "</html>\n";
+    }
+
+    // The answer of a mistake.
+    //
+    // A visitor with a browser gets a page, and a program gets a line of
+    // text. The reason is only in the page when the program said that it
+    // may be, because a reason may name a file or a password.
+    function sendError(request, res, status, title, message, detail, home) {
+      if (res.isFinished()) return res;
+      res.status(status);
+      if (wantsHtml(request)) {
+        res.set("Content-Type", "text/html; charset=utf-8");
+        res.send(errorPage(status, title, message, detail, home));
+      } else {
+        res.set("Content-Type", "text/plain; charset=utf-8");
+        var lines = [String(status) + " " + title, message];
+        if (detail) lines.push(detail);
+        res.send(lines.join("\n"));
+      }
+      return res;
+    }
+
+    // A method that the path does not take, with the methods it does take.
+    function methodNotAllowed(request, res, allow) {
+      res.set("Allow", allow);
+      sendError(
+        request,
+        res,
+        405,
+        "That method is not taken here.",
+        "This address takes " + allow + ".",
+        null,
+        false
+      );
+    }
+
     // A mistake is answered.
     function fail(info, res, err) {
+      if (res.isFinished()) return;
       if (err && err.badRequest) {
-        res.status(400);
-        res.send("Invalid JSON request body.");
+        sendError(
+          info,
+          res,
+          400,
+          "That request could not be read.",
+          "The body of the request is not valid JSON.",
+          null,
+          false
+        );
         return;
       }
       if (err && err.tooLarge) {
-        res.status(413);
-        res.send("The request is too large.");
+        sendError(
+          info,
+          res,
+          413,
+          "That was too large.",
+          "The body of the request is bigger than this server takes.",
+          null,
+          false
+        );
         return;
       }
       var catchers = errorHandlers.slice();
@@ -640,16 +864,23 @@ function veyServer(ctx) {
         if (catcher) catchers.push(catcher);
       }
       function fallback(error) {
+        // The reason of the mistake is always said in the log of the
+        // server, and only in the answer when the program says that it may
+        // be, because it may name a file or a password.
         log.error(error);
-        res.status(500);
-        // The reason of the mistake is only told to the visitor when the
-        // program says that it may, because it may tell something about the
-        // machine of the server.
+        var detail = null;
         if (exposeErrors) {
-          res.send("Server error: " + (error && error.message ? error.message : error));
-        } else {
-          res.send("Server error");
+          detail = error && error.message ? String(error.message) : String(error);
         }
+        sendError(
+          info,
+          res,
+          500,
+          "Something went wrong.",
+          "The server could not answer this request.",
+          detail,
+          false
+        );
       }
       function dispatch(index, error) {
         if (index >= catchers.length) {
@@ -704,21 +935,47 @@ function veyServer(ctx) {
     }
 
     // The answer of a request that no route fits.
-    function notFound(request, info, res) {
-      if (staticDir && serveStatic(request, res, info.path)) return;
-      if (staticDir && serveStatic(request, res, "/404.html", 404)) return;
+    //
+    // A page of its own may be put in the folder of the static files, as
+    // `404.html`, and a handler of the program may answer instead. Without
+    // either, the shared page of a 404 is written.
+    function notFound(request, info, res, method) {
+      if (
+        staticDir &&
+        wantsHtml(request) &&
+        (method === "GET" || method === "HEAD") &&
+        serveStatic(request, res, "/404.html", 404)
+      ) {
+        return;
+      }
       if (notFoundHandler) {
         Promise.resolve(notFoundHandler(info)).then(function (result) {
           if (res.isFinished()) return;
+          // A handler may answer with a whole response of its own, so that
+          // it chooses the status and the headers.
+          if (result && result.__veyResponse) {
+            res.send(result);
+            return;
+          }
           res.status(404);
+          if (typeof result === "string" && !wantsHtml(request)) {
+            res.set("Content-Type", "text/plain; charset=utf-8");
+          }
           res.send(result);
         }).catch(function (err) {
           fail(info, res, err);
         });
         return;
       }
-      res.status(404);
-      res.send("Not found");
+      sendError(
+        request,
+        res,
+        404,
+        "Nothing here.",
+        "The link may be broken, or the page may have moved.",
+        null,
+        true
+      );
     }
 
     // The socket of a visitor, which stays open.
@@ -1014,8 +1271,10 @@ function veyServer(ctx) {
       } catch (err) {
         log.error(err);
         try {
+          // The reason is in the log, not in the answer: it may name a
+          // file or a password of the machine.
           response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-          response.end("Server error: " + (err && err.message ? err.message : err));
+          response.end("Server error");
         } catch (ignored) {
           response.end();
         }
@@ -1121,22 +1380,19 @@ function veyServer(ctx) {
         fs.stat(filename, function (err, checkedInfo) {
           if (err) {
             if (!res.isFinished()) {
-              res.status(err.code === "ENOENT" ? 404 : 500);
-              res.send(err.code === "ENOENT" ? "Not found" : "Cannot read file");
+              sendError(request, res, err.code === "ENOENT" ? 404 : 500, err.code === "ENOENT" ? "Nothing here." : "The file could not be read.", err.code === "ENOENT" ? "The link may be broken, or the page may have moved." : "The server could not read this file.", null, err.code === "ENOENT");
             }
             return;
           }
           if (res.isFinished()) return;
           if (!checkedInfo.isFile()) {
-            res.status(404);
-            res.send("Not found");
+            sendError(request, res, 404, "Nothing here.", "The link may be broken, or the page may have moved.", null, true);
             return;
           }
           fs.open(filename, openFlags, function (openError, opened) {
             if (openError) {
               if (!res.isFinished()) {
-                res.status(openError.code === "ENOENT" ? 404 : 500);
-                res.send(openError.code === "ENOENT" ? "Not found" : "Cannot read file");
+                sendError(request, res, openError.code === "ENOENT" ? 404 : 500, openError.code === "ENOENT" ? "Nothing here." : "The file could not be read.", openError.code === "ENOENT" ? "The link may be broken, or the page may have moved." : "The server could not read this file.", null, openError.code === "ENOENT");
               }
               return;
             }
@@ -1154,24 +1410,21 @@ function veyServer(ctx) {
               if (statError) {
                 closeOpened();
                 if (!res.isFinished()) {
-                  res.status(500);
-                  res.send("Cannot read file");
+                  sendError(request, res, 500, "The file could not be read.", "The server could not read this file.", null, false);
                 }
                 return;
               }
               if (!info.isFile()) {
                 closeOpened();
                 if (!res.isFinished()) {
-                  res.status(404);
-                  res.send("Not found");
+                  sendError(request, res, 404, "Nothing here.", "The link may be broken, or the page may have moved.", null, true);
                 }
                 return;
               }
               if (!sameStaticFile(checkedInfo, info)) {
                 closeOpened();
                 if (!res.isFinished()) {
-                  res.status(403);
-                  res.send("Forbidden");
+                  sendError(request, res, 403, "That file is not served.", "This path is outside the folder of the files.", null, false);
                 }
                 return;
               }
@@ -1199,8 +1452,7 @@ function veyServer(ctx) {
               } catch (streamError) {
                 closeOpened();
                 if (!res.isFinished()) {
-                  res.status(500);
-                  res.send("Cannot read file");
+                  sendError(request, res, 500, "The file could not be read.", "The server could not read this file.", null, false);
                 }
                 return;
               }
@@ -1318,10 +1570,17 @@ function veyServer(ctx) {
         }, requestTimeout);
         res.onFinish(function () { hostClearTimeout(timer); });
       }
-      // The files of the folder of the server are served before the
-      // routes, so that a program may put a file of its own in front of
-      // them.
-      if (staticDir && serveStatic(request, res, url.pathname)) return;
+      // The files of the folder of the server are served when no route
+      // takes the path, so that a route always wins against a file of the
+      // same name. Only a read asks for a file.
+      if (
+        !found &&
+        (method === "GET" || method === "HEAD") &&
+        staticDir &&
+        serveStatic(request, res, url.pathname)
+      ) {
+        return;
+      }
       // The limit of the body of this request.
       var max = limit;
       if (found && found.route.limit !== undefined) {
@@ -1358,14 +1617,29 @@ function veyServer(ctx) {
           runChain(pieces, 0, info, res, function () {
             if (res.isFinished()) return;
             // The question of the methods of an address is answered.
-            if (method === "OPTIONS" && !found) {
-              res.set("Allow", allowedMethods(url.pathname));
-              res.status(204);
-              res.end();
-              return;
-            }
+            // A path that another method takes is a 405, with the methods
+            // that it does take. A path that no method takes is a 404.
             if (!found) {
-              notFound(request, info, res);
+              var allowed = allowedMethodsOf(url.pathname);
+              var taken = [];
+              for (var a = 0; a < allowed.length; a++) {
+                if (allowed[a] !== "OPTIONS") taken.push(allowed[a]);
+              }
+              if (method === "OPTIONS") {
+                if (taken.length) {
+                  res.set("Allow", allowed.join(", "));
+                  res.status(204);
+                  res.end();
+                  return;
+                }
+                notFound(request, info, res, method);
+                return;
+              }
+              if (taken.length) {
+                methodNotAllowed(request, res, allowed.join(", "));
+                return;
+              }
+              notFound(request, info, res, method);
               return;
             }
             // The events of the server keep the answer open.
@@ -1467,7 +1741,7 @@ function veyServer(ctx) {
         return this;
       },
       start: function (callback) {
-        serverInstance.listen(actualPort, function () {
+        var listening = function () {
           installSignals();
           var address = serverInstance.address();
           var port = address && address.port ? address.port : actualPort;
@@ -1479,7 +1753,11 @@ function veyServer(ctx) {
           if (host === "::" || host === "0.0.0.0") host = "localhost";
           print("Vey server listening on " + (tls ? "https" : "http") + "://" + host + ":" + port);
           if (callback) callback();
-        });
+        };
+        // A server may listen on one address of the machine, so that it is
+        // not reached from the network when it is only for this machine.
+        if (bindHost !== null) serverInstance.listen(actualPort, bindHost, listening);
+        else serverInstance.listen(actualPort, listening);
         return this;
       },
       onShutdown: function (fn) {

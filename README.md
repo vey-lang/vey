@@ -37,19 +37,31 @@ to run it and how it is built.
 ## Commands
 
 ```sh
-vey run                          # serve the site
-vey dev                          # serve the site with a live reload
+vey dev                          # build, serve, and build again on a change
+vey run                          # build and serve the way a host does
 vey test                         # run .vey files under tests/
-vey build                        # static site in .dist/
+vey build                        # the site in .dist/, or the program of a server
 vey build app.vey --node -o app.cjs  # standalone node script
 vey new myapp                    # project scaffold
 vey check                        # check the whole project
 ```
 
-`vey run` serves the site the way a host would: it is built once and then
-served, without a watcher and without the reload. `vey dev` is the same
-server for the work: it watches the files of the project, rebuilds when one
-of them changes and reloads the page in the browser.
+`vey dev` is the command for the work: it watches the files of the project
+and builds it again when one of them changes. A project of pages is served
+with a reload of the page in the browser. A project of a server is built, run,
+and built and started again; the pages it serves carry a small listener that
+writes them again when the build changes, and a note in the corner while the
+server is starting again. A build that does not pass stops the server, so an
+answer never comes from code that the files no longer say, and the reason is
+printed in the terminal.
+
+`vey run` is the same project the way a host has it: a site is built once and
+served, and a server is built and run as the program it is. Neither a watcher
+nor a reload is in either.
+
+The kind of a project is `kind` in `vey.toml`: `page`, `server` or `lib`. A
+project that does not write the line is read from its entry: a program that
+starts a server is a server, and everything else is a site of pages.
 
 A program that is not a page — a script — is built and run with node:
 
@@ -133,22 +145,21 @@ it, Vey writes a page of its own.
 `npm run dev`, `npm run build` and `npm test` call the same commands as
 `vey dev`, `vey build` and `vey test`.
 
-## Servers
+## Development
 
 ```sh
-vey run
-vey run --port 3000 --host 0.0.0.0
 vey dev
+vey dev --port 3000 --host 0.0.0.0
 ```
 
-`vey run` serves the built site the way a host does. `vey dev` is the same
-server for the work: it rebuilds the site when the entry, any imported `.vey`
-or `.css` file (including modules in other folders) or a `public/` file
-changes, and reloads the browser. A page that is added or taken away is noticed
-as well. Other files in the project are left alone, so
-a note or a log file does not cause a reload. A change of the content is
-noticed even when the time and the size of the file stay the same. Unknown
-paths serve `404.html` with a `404` status.
+`vey dev` watches the project and builds it again when a file changes: the
+entry, every `.vey` file it imports (including modules in other folders),
+`.css` files, and the files of `public/`. A page that is added or taken away is
+noticed as well. Other files in the project are left alone, so a note or a log
+file does not cause a build. A change of the content is noticed even when the
+time and the size of the file stay the same.
+
+A project of pages is served with a reload of the page in the browser.
 Compile errors open a styled page with the file, the source line, a caret under
 the failing column, and a hint when Vey can guess the fix (for example
 `use "../style.css"` for a stylesheet in the parent folder). The page
@@ -158,6 +169,47 @@ iterating. The same diagnostic is printed by `vey build` in the terminal.
 While the work is going on, any `.vey` file of the project can be previewed by
 visiting its path, for example `http://localhost:4000/about.vey`. The release
 server serves the site that was built and nothing else.
+
+## Servers
+
+A project whose entry starts a server is a server. It is built into one
+program of Node and run:
+
+```sh
+vey dev        # build, run, and start again when a file changes
+vey run        # build and run, the way a host has it
+vey build      # -> .dist/server.cjs
+node --enable-source-maps .dist/server.cjs
+```
+
+`vey dev` builds the program into `.vey/dev/server.cjs`, runs it with Node, and
+watches the project. When a file changes the program is stopped, built again
+and started again. A program that does not build leaves the server stopped,
+and the mistake is printed in the terminal, so an answer never comes from code
+that the files no longer say. The build only restarts when the build is done,
+and a tool that saves a file twice does not start two servers.
+
+The pages of a program that is worked on carry `/__vey/dev/client.js`. It
+listens to `/__vey/dev/events` and writes the page again when the build
+changes, and a small note says that the server is starting again while it is.
+The listener and the two routes of it are only in the program that `vey dev`
+runs: a program built or run for a host has neither, and `vey run` serves the
+same HTML without them.
+
+The program listens where its own `server()` call says. The port and the host
+of the settings are given to it as `PORT` and `HOST`, so a program that reads
+them follows the command line:
+
+```vey
+let port = int(env("PORT", "4000"))
+let host = env("HOST", "127.0.0.1")
+
+let app = server(port, { host: host })
+```
+
+```sh
+vey dev --port 4100 --host 0.0.0.0
+```
 
 ## Styles
 
@@ -1339,14 +1391,33 @@ app.start()
 ```
 <!-- check -->
 
-Unknown routes automatically try `public/404.html` and return it with status
-404. A custom handler takes priority:
+Routes are looked at before the files of a folder, so a route wins against a
+file of the same name: only a request that no route takes is served from
+`public/` (and only a `GET` or a `HEAD` asks for a file).
+
+Unknown addresses try `public/404.html` first and return it with status 404.
+A custom handler takes priority over the page of Vey:
 
 ```vey
 app.notFound(fn(req) {
   return response("<h1>Nothing at {req.path}</h1>", 404)
 })
 ```
+
+Without either, Vey writes a page of its own for a browser and a line of text
+for a program, which is what the `Accept` header says. The same is true of
+the other mistakes:
+
+| The answer | When |
+| --- | --- |
+| `400` | the body says it is JSON and is not |
+| `405` | the path is a route of another method; `Allow` names the methods it takes |
+| `413` | the body is bigger than `bodyLimit` (or the limit of a route) |
+| `500` | a handler throws, or a file of the server cannot be read |
+
+The reason of a `500` is written in the log of the server, not in the page,
+because it may name a file or a password. `server(port, { exposeErrors: true })`
+puts it in the page as well, for the machine where the program is worked on.
 
 Route patterns may end with `*` to capture the rest of the path in
 `req.params.splat`:

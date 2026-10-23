@@ -21,6 +21,8 @@ pub mod lint;
 pub mod lsp;
 pub mod migrate;
 pub mod output;
+pub mod program;
+pub mod project;
 pub mod repl;
 pub mod run;
 pub mod scaffold;

@@ -1836,12 +1836,31 @@ fn the_templates_of_a_new_project_build_what_they_run() {
         String::from_utf8_lossy(&output.stderr)
     );
     let docker = fs::read_to_string(server.join("Dockerfile")).unwrap();
-    assert!(docker.contains("RUN vey build --node -o server.cjs"), "{docker}");
-    assert!(docker.contains("\"server.cjs\""), "{docker}");
-    assert!(!docker.contains(".dist/server.cjs"), "{docker}");
-    // The server starts when the program runs, so the container answers.
+    // The container builds the program the way `npm run build` does, and
+    // runs the file that build writes.
+    assert!(docker.contains("RUN vey build"), "{docker}");
+    assert!(docker.contains(".dist/server.cjs"), "{docker}");
+    // The server of a container is reached from outside of it.
+    assert!(docker.contains("HOST=0.0.0.0"), "{docker}");
+    // The server starts when the program runs, so the container answers,
+    // and it listens where the settings of the machine say.
     let source = fs::read_to_string(server.join("src/main.vey")).unwrap();
     assert!(source.contains("app.start()"), "{source}");
+    assert!(source.contains("env(\"PORT\""), "{source}");
+    assert!(source.contains("server(port"), "{source}");
+    // A project says what it is instead of leaving it to a guess.
+    let config = fs::read_to_string(server.join("vey.toml")).unwrap();
+    assert!(config.contains("kind = \"server\""), "{config}");
+    let page_config = fs::read_to_string(page.join("vey.toml")).unwrap();
+    assert!(page_config.contains("kind = \"page\""), "{page_config}");
+    // The development command of either project is the same command.
+    for project in [&page, &server] {
+        let package = fs::read_to_string(project.join("package.json")).unwrap();
+        assert!(package.contains("\"dev\": \"vey dev\""), "{package}");
+    }
+    let server_package = fs::read_to_string(server.join("package.json")).unwrap();
+    assert!(server_package.contains("\"start\": \"vey run\""), "{server_package}");
+    assert!(server_package.contains("\"build\": \"vey build\""), "{server_package}");
 
     for project in [&page, &server] {
         for command in ["check", "test"] {
@@ -1857,6 +1876,23 @@ fn the_templates_of_a_new_project_build_what_they_run() {
             );
         }
     }
+
+    // The build of either project writes what its container runs.
+    let output = vey().arg("build").current_dir(&page).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(page.join(".dist/index.html").is_file());
+    let output = vey().arg("build").current_dir(&server).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let built = fs::read_to_string(server.join(".dist/server.cjs")).unwrap();
+    assert!(built.contains("createVeyRuntime"), "the program is not built");
 
     // The library: it has no page to serve and no server to run, so it has no
     // container, and its continuous integration names the file it has.
@@ -1876,6 +1912,17 @@ fn the_templates_of_a_new_project_build_what_they_run() {
     assert!(!lib.join("Dockerfile").exists());
     let workflow = fs::read_to_string(lib.join(".github/workflows/ci.yml")).unwrap();
     assert!(workflow.contains("- run: vey check src/lib.vey"), "{workflow}");
+    // A library has nothing to serve, and `vey dev` says so instead of
+    // building a page that is not there.
+    let output = vey()
+        .arg("dev")
+        .arg("src/lib.vey")
+        .current_dir(&lib)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("library"), "{message}");
     for command in ["check", "test"] {
         let output = if command == "check" {
             vey()

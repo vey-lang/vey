@@ -15,6 +15,8 @@ use crate::cli::config::Config;
 use crate::cli::entry::{collect_files, collect_folders, default_title, entry_from, project_root};
 use crate::cli::error::BuildError;
 use crate::cli::output::{html_document, print_command_help};
+use crate::cli::program;
+use crate::cli::project::{self, Kind};
 use crate::cli::site::{default_404_page, site_files};
 
 /// The folder the pages of a project live in.
@@ -89,13 +91,203 @@ pub(crate) fn cmd_dev(args: &[String]) -> i32 {
         .or_else(|| config.host.clone())
         .unwrap_or_else(|| "127.0.0.1".to_string());
     let port = parsed.port.or(config.port).unwrap_or(DEFAULT_PORT);
-    let title = parsed
-        .title
-        .clone()
-        .or_else(|| config.title.clone())
-        .unwrap_or_else(|| default_title(&entry));
+    let kind = match project::detect(&entry, &config) {
+        Ok(kind) => kind,
+        Err(err) => {
+            eprintln!("{}", err);
+            return 1;
+        }
+    };
 
-    serve(&entry, &title, &host, port, true)
+    match kind {
+        // A library has nothing to serve, and saying so is better than
+        // building a page that is not there.
+        Kind::Lib => {
+            eprintln!("this project is a library: there is nothing to serve");
+            eprintln!("run `vey test` to try it, or `vey check src/lib.vey` to check it");
+            1
+        }
+        // A server is one program of Node: it is built, run, and started
+        // again when a file it reads changes.
+        Kind::Server => {
+            if parsed.title.is_some() {
+                eprintln!("--title does nothing for a server project: its pages name themselves");
+                return 1;
+            }
+            serve_program(&entry, &host, port)
+        }
+        Kind::Page => {
+            let title = parsed
+                .title
+                .clone()
+                .or_else(|| config.title.clone())
+                .unwrap_or_else(|| default_title(&entry));
+            serve(&entry, &title, &host, port, true)
+        }
+    }
+}
+
+/// The file that a program of a server is built into while it is worked on.
+///
+/// It sits in `.vey/`, which a project of Vey does not keep in its
+/// repository and does not read as a source.
+fn dev_script(root: &Path) -> PathBuf {
+    let folder = root.join(".vey").join("dev");
+    if fs::create_dir_all(&folder).is_ok() {
+        return folder.join("server.cjs");
+    }
+    crate::cli::output::temp_file("vey-dev", "cjs")
+}
+
+/// The state of a program that is worked on.
+struct DevServer {
+    entry: PathBuf,
+    root: PathBuf,
+    script: PathBuf,
+    host: String,
+    port: u16,
+    /// The program that is running now, when it is running.
+    child: Option<std::process::Child>,
+    /// The files the build read: the modules and the styles of the program.
+    watched: Vec<PathBuf>,
+}
+
+impl DevServer {
+    fn new(entry: &Path, host: &str, port: u16) -> DevServer {
+        let root = project_root(entry);
+        let script = dev_script(&root);
+        DevServer {
+            entry: entry.to_path_buf(),
+            root,
+            script,
+            host: host.to_string(),
+            port,
+            child: None,
+            watched: vec![entry.to_path_buf()],
+        }
+    }
+
+    /// The files that are watched: the sources of the project, the files
+    /// the build read, and the styles.
+    fn snapshot(&self) -> Vec<FileState> {
+        let mut paths = vec![self.entry.clone()];
+        let mut found = Vec::new();
+        collect_sources(&self.root, &mut found);
+        for path in found {
+            paths.push(path);
+        }
+        for path in &self.watched {
+            paths.push(path.clone());
+        }
+        let public = self.root.join("public");
+        if public.is_dir() {
+            let mut files = Vec::new();
+            collect_files(&public, &mut files);
+            paths.extend(files);
+        }
+        paths.sort_by(|left, right| left.cmp(right));
+        paths.dedup();
+        let mut out: Vec<FileState> = paths.iter().map(|path| file_state(path)).collect();
+        out.sort_by(|left, right| left.path.cmp(&right.path));
+        out
+    }
+
+    /// Stop the program, build it again, and start it.
+    ///
+    /// The program is stopped before the build, so that an answer never
+    /// comes from a program that the sources no longer say. A build that
+    /// fails leaves it stopped, and the mistake is said in the terminal.
+    fn reload(&mut self) -> Result<(), BuildError> {
+        self.stop();
+        self.watched = program::build(&self.entry, &self.script)?;
+        match program::start(&self.script, &self.root, &self.host, self.port, true) {
+            Ok(child) => {
+                self.child = Some(child);
+                Ok(())
+            }
+            Err(err) => {
+                eprintln!("cannot start node: {}", err);
+                eprintln!("node is required to run a server");
+                Ok(())
+            }
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            program::stop(&mut child);
+        }
+    }
+}
+
+/// Serve a project of a server: the program is built and run, and it is
+/// built and started again when one of the files it reads changes.
+fn serve_program(entry: &Path, host: &str, port: u16) -> i32 {
+    println!("Vey dev server for a node program");
+    println!("entry: {}", entry.display());
+    println!("the program listens where its server() call says; PORT and HOST are set for it");
+
+    let mut server = DevServer::new(entry, host, port);
+    match server.reload() {
+        Ok(()) => {}
+        Err(err) => eprintln!("{}", err),
+    }
+    println!("watching for changes, press Ctrl+C to stop");
+
+    let mut previous = server.snapshot();
+    loop {
+        thread::sleep(Duration::from_millis(100));
+        let current = server.snapshot();
+        if current == previous {
+            continue;
+        }
+        // A file may be written more than once by a tool that saves it, so
+        // the short pause lets the writing end before the build begins.
+        thread::sleep(Duration::from_millis(50));
+        let current = server.snapshot();
+        let started = Instant::now();
+        match server.reload() {
+            Ok(()) => println!(
+                "restarted the server in {} ms",
+                started.elapsed().as_millis()
+            ),
+            Err(err) => {
+                eprintln!("{}", err);
+                eprintln!("the server is stopped until the program builds");
+            }
+        }
+        previous = current;
+    }
+}
+
+/// The sources of a project: the files of the language, and the styles.
+///
+/// A folder that the tools of the project write, and a folder of tests,
+/// are not watched: they do not change the program of the server.
+fn collect_sources(directory: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || crate::cli::entry::is_build_dir(&name) || name == "tests" {
+                continue;
+            }
+            collect_sources(&path, files);
+        } else if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "vey" | "css"))
+        {
+            files.push(path);
+        }
+    }
 }
 
 /// Serve a project.
@@ -153,12 +345,12 @@ pub(crate) fn serve(entry: &Path, title: &str, host: &str, port: u16, live: bool
         thread::spawn(move || {
             let mut previous = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
             loop {
-                thread::sleep(Duration::from_millis(300));
+                thread::sleep(Duration::from_millis(100));
                 let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
                 if current == previous {
                     continue;
                 }
-                thread::sleep(Duration::from_millis(80));
+                thread::sleep(Duration::from_millis(50));
                 let current = dev_snapshot(&watcher_root, &watcher_entry, &watcher_state);
                 let started = Instant::now();
                 match refresh_dev(&watcher_entry, &watcher_title, &watcher_state) {

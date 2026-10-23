@@ -21,6 +21,8 @@ pub(crate) struct Config {
     pub(crate) title: Option<String>,
     /// The folder the site is written to.
     pub(crate) out: Option<String>,
+    /// The shape of the project: page, server or lib.
+    pub(crate) kind: Option<String>,
     /// The length of a line that is still easy to read.
     pub(crate) max_line: Option<usize>,
     /// Whether an unsupported minify=true setting was requested.
@@ -101,6 +103,7 @@ impl Config {
             "host" => self.host = Some(value.to_string()),
             "title" => self.title = Some(value.to_string()),
             "out" => self.out = Some(value.to_string()),
+            "kind" | "project.kind" => self.kind = Some(value.to_ascii_lowercase()),
             "lint.maxLine" | "maxLine" => self.max_line = value.parse().ok(),
             "build.minify" | "minify" => self.unsupported_minify = value == "true",
             _ => {}

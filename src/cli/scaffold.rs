@@ -96,11 +96,9 @@ pub(crate) fn cmd_new(args: &[String]) -> i32 {
     println!("  cd {}", name);
     match template {
         Template::Page => println!("  vey dev"),
-        // A server is a program of Node, so it is built and then run.
-        Template::Server => {
-            println!("  vey build --node -o server.cjs");
-            println!("  node server.cjs");
-        }
+        // A server is a program of Node: the same command builds it, runs
+        // it, and starts it again when a file changes.
+        Template::Server => println!("  vey dev"),
         // A library has no page, so the file of it is named.
         Template::Lib => println!("  vey check src/lib.vey"),
     }
@@ -144,7 +142,12 @@ fn page_files(project: &str) -> Vec<(&'static str, String)> {
             PROJECT_PACKAGE.replace("{name}", &package_name(project)),
         ),
         ("README.md", PROJECT_README.replace("{name}", project)),
-        ("vey.toml", CONFIG.replace("{name}", project).to_string()),
+        (
+            "vey.toml",
+            CONFIG
+                .replace("{name}", project)
+                .replace("{kind}", "page"),
+        ),
         (".gitignore", GITIGNORE.to_string()),
         ("Dockerfile", PAGE_DOCKERFILE.to_string()),
         (".github/workflows/ci.yml", ci_workflow("vey check")),
@@ -164,6 +167,11 @@ fn server_files(project: &str) -> Vec<(&'static str, String)> {
             }
             "README.md" => file.1 = SERVER_README.replace("{name}", project),
             "Dockerfile" => file.1 = SERVER_DOCKERFILE.to_string(),
+            "vey.toml" => {
+                file.1 = CONFIG
+                    .replace("{name}", project)
+                    .replace("{kind}", "server")
+            }
             _ => {}
         }
     }
@@ -216,6 +224,14 @@ const CONFIG: &str = r#"# The settings of the project.
 #
 # The options of the command line are stronger than these.
 
+# The shape of the project: page, server or lib.
+#
+# A page is built into a site, a server is built into a program of Node,
+# and a library is only checked and tested. Without this line, a project is
+# read from its entry: a program that starts a server is a server, and
+# everything else is a site of pages.
+kind = "{kind}"
+
 # The port that the server listens on.
 port = 4000
 
@@ -234,6 +250,9 @@ maxLine = 100
 "#;
 
 const PROJECT_MAIN: &str = r##"// The entry of the site: the page is put on the screen.
+//
+// `vey dev` serves the site and reloads it when a file changes.
+// `vey build` writes it into `.dist/`, which a host may serve.
 //
 // The parts of the page live in `src/site.vey`, so that a test may use them
 // without putting anything on a screen.
@@ -364,13 +383,17 @@ const ROBOTS: &str = "User-agent: *\nAllow: /\n";
 /// A project with a server.
 const SERVER_MAIN: &str = r##"// A server that answers with a page.
 //
-// The server is built into one program of Node with `npm start` (or
-// `vey build --node -o server.cjs` and `node server.cjs`), and the page is
-// at http://localhost:4000.
+// `vey dev` builds the program, runs it and starts it again when a file
+// changes. `vey build` writes `.dist/server.cjs`, which a host runs.
 
 use "./site.vey" as site
 
-let app = server(4000)
+// Where the server listens is a setting of the machine, so that the same
+// program runs on this machine, in a container and on a host.
+let port = int(env("PORT", "4000"))
+let host = env("HOST", "127.0.0.1")
+
+let app = server(port, { host: host })
 
 app.get("/", fn(req) {
   print(req.path)
@@ -417,21 +440,32 @@ const SERVER_README: &str = r##"# {name}
 
 A server written with [Vey](https://vey-lang.dev).
 
-## Run
+## Development
 
 ```sh
-npm start
+npm run dev     # or: vey dev
 ```
 
-The server is built into one program of Node (`server.cjs`) and started, and
-the page is at http://localhost:4000. `npm run build` only builds it, and
-`npm run dev` does what `npm start` does.
+The program is built, run, and built and started again when a file it
+reads changes. The page is at http://127.0.0.1:4000. A program that does
+not build leaves the server stopped, so an answer never comes from code
+that the files no longer say; the mistake is printed in the terminal.
 
-The same work by hand:
+`PORT` and `HOST` are given to the program, so `vey dev --port 4100` moves
+it. A program chooses its own address with its `server()` call.
+
+## Build and run
 
 ```sh
-vey build --node -o server.cjs
-node --enable-source-maps server.cjs
+npm run build   # or: vey build          -> .dist/server.cjs
+npm start       # or: vey run            -> build and run the program
+```
+
+The program is one file of Node, so a host only needs node:
+
+```sh
+vey build
+node --enable-source-maps .dist/server.cjs
 ```
 
 ## Check and test
@@ -450,6 +484,7 @@ npm test        # or: vey test
 | `src/styles/site.css` | the styles of the page |
 | `public/` | the files that are served as they are |
 | `tests/site.vey` | the tests of the page |
+| `vey.toml` | the settings: the kind of the project, the port and the host |
 "##;
 
 /// The scripts of the package of a server.
@@ -459,9 +494,9 @@ const SERVER_PACKAGE: &str = r##"{
   "private": true,
   "description": "A server written with Vey.",
   "scripts": {
-    "dev": "npm start",
-    "start": "vey build --node -o server.cjs && node --enable-source-maps server.cjs",
-    "build": "vey build --node -o server.cjs",
+    "dev": "vey dev",
+    "start": "vey run",
+    "build": "vey build",
     "test": "vey test",
     "check": "vey check"
   }
@@ -562,10 +597,14 @@ RUN npm install -g vey
 COPY . .
 
 # The server is built into one file, so that the container only runs it.
-RUN vey build --node -o server.cjs
+RUN vey build
+
+# The server of a container is reached from outside of it.
+ENV HOST=0.0.0.0
+ENV PORT=4000
 
 EXPOSE 4000
-CMD ["node", "--enable-source-maps", "server.cjs"]
+CMD ["node", "--enable-source-maps", ".dist/server.cjs"]
 "##;
 
 /// The recipe of the continuous integration.
