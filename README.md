@@ -613,6 +613,12 @@ Type forms:
 - `(...number) -> number` rest parameters
 - `Signal<T>` / `Store<T>` the state of a page (see [A page that lives](#a-page-that-lives))
 
+Computed access follows the declared shape: lists accept numeric indices and
+dictionaries accept keys of their declared key type. Fixed objects and tuples
+require literal property names and literal, in-range tuple indices; an `unknown`
+value must be narrowed before computed access. Use a dictionary or list when
+the key or index is only known at runtime.
+
 The fields of an object may be written one under the other, with or without a
 comma. The same goes for the fields of an object value.
 
@@ -931,6 +937,8 @@ print(math.area(2))
 ```
 
 Imports are resolved at compile time. The compiler bundles every module into one output file. Circular imports are reported as errors.
+
+A checked Vey module is a namespace of known exports, not a dynamic dictionary. A computed module member must use a string literal, such as `math["area"]`; a nonliteral key is rejected because its export signature cannot be checked. For dynamic keys, export a dictionary and index that value instead.
 
 ### Packages of npm
 

@@ -8,7 +8,7 @@
 
 ## Kısa sonuç
 
-İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi. Son `cargo test --all-targets` **393 geçti, 0 başarısız**. Dinamik computed key'in `any` davranışı açık politika riski; performans ölçülmedi.
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi; checked module namespace'leri, fixed object/tuple şekilleri ve `unknown` üzerinde statik olmayan computed erişimlerin örtük `any`'e düşmesi engellendi. Son `cargo test --all-targets` **396 geçti, 0 başarısız**. `any` ve unchecked npm import'larının açık dinamik davranışı korunuyor; performans ölçülmedi.
 
 ## A. Doğrulanmış bulgular
 
@@ -175,7 +175,7 @@ print(m.area())
 
 Düzeltme öncesi `textDocument/references`, `math.vey` içindeki `area` konumunda (line 0, character 13; `includeDeclaration: true`) yalnızca tanımı döndürüyor; `main.vey` içindeki `m.area` kullanımı eksikti. `textDocument/rename` (`newName: "measure"`) da yalnızca `math.vey` için edit üretiyordu.
 
-**Düzeltme:** `Names` imported aliases, lexical receiver binding identity, exported top-level names ve static module-member uses topluyor. Bu kayıtlar artık `m.area` ve plain string-literal `m["area"]` expression'larının yanında README'de belgelenen `m.Card` markup tag'lerini, `m.Box<T>` generic type'larını ve `m.Color` qualified enum/type adlarını da kapsıyor. Type walker annotations, declarations, signatures, constraints, casts/type tests ve explicit generic type arguments içinden qualified names topluyor. LSP import yolunu canonical URI'ye çözüyor; sembolü URI, ad ve declaration konumuyla tanımlayıp aynı adlı başka modül veya shadowed alias'ın yanlış eşleşmesini önlüyor. `definition`, `references` ve per-file WorkspaceEdit rename bu ortak çözümlemeyi kullanıyor.
+**Düzeltme:** `Names` imported aliases, lexical receiver binding identity, exported top-level names ve static module-member uses topluyor. Bu kayıtlar artık `m.area` ve plain/escaped string-literal `m["area"]` / `m["ar\x65a"]` expression'larının yanında README'de belgelenen `m.Card` markup tag'lerini, `m.Box<T>` generic type'larını ve `m.Color` qualified enum/type adlarını da kapsıyor. Type walker annotations, declarations, signatures, constraints, casts/type tests ve explicit generic type arguments içinden qualified names topluyor. LSP import yolunu canonical URI'ye çözüyor; sembolü URI, ad ve declaration konumuyla tanımlayıp aynı adlı başka modül veya shadowed alias'ın yanlış eşleşmesini önlüyor. `definition`, `references` ve per-file WorkspaceEdit rename bu ortak çözümlemeyi kullanıyor.
 
 `the_language_server_resolves_cross_file_members_and_local_type_symbols` dört açık dosyada aynı adları export eden iki modül ile shadowed `m` decoy'larını kullanıyor. Function member `area`, markup component `Card`, generic alias `Box<T>`, enum type `Color` ve variant `Color.Red` için definition/references/rename sınanıyor. Test ayrıca `Shape.Red` adlı aynı isimli, farklı enum variant'ının yanlışlıkla `Color.Red` sonuçlarına karışmadığını; yerel type-name kullanımlarını, match pattern'larını ve astral Unicode öncesindeki UTF-16 konumlarını doğruluyor. Yalnızca hedef modül/gerçek kullanımlar edit'leniyor. Mevcut single-file LSP testi shadowed local binding regresyonunu koruyor.
 
@@ -186,8 +186,8 @@ Düzeltme öncesi `textDocument/references`, `math.vey` içindeki `area` konumun
 - `cargo test --test cli an_unknown_new_project_template_does_not_create_the_target -- --exact`: **1 geçti**.
 - `cargo test --test dev dev_reloads_the_title_when_project_config_changes -- --exact`: **1 geçti**.
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**; ayrıca var olan single-file LSP shadowing test **1 geçti**.
-- Son `cargo test --all-targets`: **393 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 87.
-- `git diff --check`: temiz. İlk audit commit'i `0e46312` ve sonraki LSP follow-up'ları `565b3cf`, `cf15808`, `a3ca135` push edildi; scope/escaped-key follow-up'ları ve bu rapor güncellemesi mevcut continuation commit/push'unda yer alıyor.
+- Son `cargo test --all-targets`: **396 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 90.
+- `git diff --check`: temiz. İlk audit commit'i `0e46312` ve sonraki follow-up'lar `565b3cf`, `cf15808`, `a3ca135`, `93d8559` push edildi; checked-module dynamic-key düzeltmesi, README ve bu rapor güncellemesi mevcut continuation commit/push'unda yer alıyor.
 
 Bu audit performans ölçümü içermez. Canlı config yenileme kapsamı sayfa title'ıdır; dinleyen soketin host/port ayarını çalışan süreçte yeniden bind etme davranışı bu değişiklikle kapsama alınmadı.
 
@@ -198,14 +198,14 @@ Enum variant tanımları ve kullanımları artık ebeveyn enum sembolüyle iliş
 Yerel type alias'lar ve generic type parameter'lar için value namespace'inden ayrı symbol map eklendi. Type-name occurrences scoped binding identity ile tutulduğu için aynı yazımlı değer adıyla karışmaz; references/rename type bağlamlarında doğru sembole uygulanır. Regresyon testi enum type/variant tanımları ve kullanımları, pattern'lar, type parameter scope'ları ve ayrı enum'larda tekrarlanan variant adlarını kapsar.
 
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**.
-- Son kaynak/test durumu üzerinde `cargo test --all-targets`: **393 geçti, 0 başarısız**; CLI 50, type 87, runtime 101 ve diğer hedefler de geçti.
-- `git diff --check`: geçti. `m["area"]` için static computed navigation ve type-checking sonraki audit continuation'da eklendi; `m[key]` dynamic kaldı.
+- Son kaynak/test durumu üzerinde `cargo test --all-targets`: **396 geçti, 0 başarısız**; CLI 50, type 90, runtime 101 ve diğer hedefler de geçti.
+- `git diff --check`: geçti. `m["area"]` ve escaped statik key'ler için navigation/type-checking eklendi; checked Vey module alias'ında `m[key]` type-check aşamasında reddedilir.
 
 ### Literal computed module key bulgusu ve düzeltmesi
 
 Hedefli bir probe, `m["area"]("not a number")` çağrısının ve `m["noSuchExport"]` erişiminin `vey check` tarafından kabul edildiğini gösterdi. AST, computed key'i `MemberProp::Computed` olarak temsil ediyordu; import alias'ı normal expression değeri olarak `any`'e düştüğü için modülün export imza/varlık doğrulaması atlanıyordu. Bu doğrulanmış bir type-safety kaçamağıydı.
 
-Plain ve escaped statik string key, shadowed olmayan imported module alias üzerinde direct named-member checker'a yönlendirildi. Böylece export varlığı, private üyeler, fonksiyon argümanları ve dönüş tipi nokta erişimiyle aynı kuralları izliyor. Dynamic `m[key]` için bu düzeltme uygulanmadı. LSP, literal'in çözülen adıyla birlikte ham kaynak aralığını izleyerek `m["area"]` ve `m["ar\x65a"]` için definition/references/rename sağlıyor; rename string içeriğinin tamamını değiştirip quote'ları koruyor.
+Plain ve escaped statik string key, shadowed olmayan imported module alias üzerinde direct named-member checker'a yönlendirildi. Böylece export varlığı, private üyeler, fonksiyon argümanları ve dönüş tipi nokta erişimiyle aynı kuralları izliyor. Checked Vey module namespace'inde `m[key]` gibi statik olmayan computed erişimler artık açıklayıcı hata verir; unchecked npm package import'ları README'deki `any` sınırında kalır. LSP, literal'in çözülen adıyla birlikte ham kaynak aralığını izleyerek `m["area"]` ve `m["ar\x65a"]` için definition/references/rename sağlıyor; rename string içeriğinin tamamını değiştirip quote'ları koruyor.
 
 - `cargo test --test types literal_computed -- --nocapture`: **2 geçti** (valid call, yanlış argüman ve olmayan export kontrolleri).
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**; computed `m["area"]` için definition, references ve rename doğrulandı.
@@ -219,6 +219,22 @@ Bağımsız LSP incelemesi, AST'nin escape dizilerini çözdüğü (`"ar\x65a"` 
 - `cargo test --test types a_local_import_shadow_only_hides_the_module_inside_its_scope -- --exact`: **1 geçti**; nested scope içindeki local dot/computed access ve scope sonrasındaki direct/computed import çağrılarının imza kontrolü kapsandı.
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**; `m["ar\x65a"]` için definition, references ve ham range genişliğiyle rename doğrulandı.
 - Ek Node bundle smoke testinde `m["area"](41)` derlenip `41` yazdı.
-- Güncel `cargo test --all-targets`: **393 geçti, 0 başarısız**; `git diff --check` temiz.
+- Güncel `cargo test --all-targets`: **396 geçti, 0 başarısız**; `git diff --check` temiz.
 
-**Açık politika riski:** `m[key]` gibi statik olmayan computed erişimler hâlâ checker'ın genel dynamic-member `any` fallback'ına iner ve imza kontrolünü atlayabilir. Aynı fallback sıradan nesnelerin dinamik key erişimlerinde de var; dilin bu durumda reddetme, export türlerinin union'ı ya da bilinçli `any` davranışı seçmesi ayrıca belirlenmeli. Bu continuation'da semantiği varsayımla değiştirmedim.
+### Checked module dynamic-key kaçışının kapatılması
+
+Hedefli probe, `let key: string = "add"; lib[key]("wrong")` ifadesinin checked Vey module export imzasını atlayıp `any` üzerinden kabul edildiğini gösterdi. Checked module alias'ı runtime dictionary değil, derleme zamanında bilinen export namespace'i olduğundan, computed access string literal değilse checker artık `module 'lib' requires a static string key for computed access` hatası veriyor. Literal key direct export checker'ına yönlenmeye devam eder. Unchecked npm imports, README'de belirtildiği gibi bilinmeyen üyeler için `any` davranışını korur. README Modules bölümü statik-key sözleşmesini ve dinamik key gereken durumda export edilen dictionary kullanmayı açıklar.
+
+- `cargo test --test types a_dynamic_computed_module_access_is_rejected -- --exact`: **1 geçti**.
+- `cargo test --test types a_literal_computed_call_to_another_module_is_checked -- --exact`: **1 geçti**; statik computed call hâlâ imza denetimine tabi.
+- Güncel `cargo test --all-targets`: **396 geçti, 0 başarısız**; README 4, types 90 ve diğer tüm hedefler geçti.
+
+### Fixed-shape, tuple ve unknown computed-index kaçışlarının kapatılması
+
+Probe, bilinen `{ x: number }` shape'inin dinamik string anahtarla okunmasının `any` ürettiğini; tuple'ın dinamik numeric index ve sabit boyut dışındaki literal index'inin de `any`'e düştüğünü gösterdi. `unknown` parametre üstünde computed access de narrowing olmadan aynı fallback'a ulaşıyordu. Artık object/named/interface şekillerinde literal string key dışında computed access reddediliyor; dictionary türü kendi key/value sözleşmesiyle dinamik erişimi koruyor. Tuple erişimi literal, aralık içi numeric index ister; `unknown` ise önce uygun bir tipe daraltılmalıdır. README Type bölümüne bu kurallar eklendi.
+
+- `cargo test --test types a_dynamic_key_on_a_typed_object_needs_a_dictionary_type -- --exact`: **1 geçti**; inline object, named alias ve interface dynamic key'leri reddedildi, dictionary dynamic key'i typed kaldı.
+- `cargo test --test types a_tuple_needs_a_literal_in_range_index -- --exact`: **1 geçti**; dinamik ve aralık dışı tuple index'leri reddedildi.
+- `an_unknown_value_needs_object_narrowing_before_use_as_object`: computed unknown access da narrowing hatası verdi.
+- `cargo test --test types`: **90 geçti**; `cargo test --test readme`: **4 geçti**.
+- Son `cargo test --all-targets`: **396 geçti, 0 başarısız**.

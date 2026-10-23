@@ -1499,14 +1499,25 @@ impl TypeChecker<'_> {
         pos: Pos,
     ) -> Result<Type, VeyError> {
         if let (MemberProp::Computed(index), Expr::Ident(alias, _)) = (prop, object) {
-            if !self.is_shadowed(alias) && self.imports.contains_key(alias) {
-                if let Some(name) = literal_string(index) {
-                    return self.member_type(
-                        object,
-                        &MemberProp::Name(name.to_string()),
-                        optional,
-                        pos,
-                    );
+            if !self.is_shadowed(alias) {
+                if let Some(env) = self.imports.get(alias) {
+                    if let Some(name) = literal_string(index) {
+                        return self.member_type(
+                            object,
+                            &MemberProp::Name(name.to_string()),
+                            optional,
+                            pos,
+                        );
+                    }
+                    if !env.unchecked {
+                        return Err(self.error(
+                            index.pos(),
+                            format!(
+                                "module '{}' requires a static string key for computed access",
+                                alias
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -1706,9 +1717,11 @@ impl TypeChecker<'_> {
                 if !self.fits(index_ty, &Type::Number) {
                     return Err(self.type_error(pos, index_ty, &Type::Number));
                 }
-                Ok(match literal_number(index) {
-                    Some(index) => items.get(index).cloned().unwrap_or(Type::Any),
-                    None => Type::Any,
+                let Some(index) = literal_number(index) else {
+                    return Err(self.error(pos, "a tuple requires a literal index"));
+                };
+                items.get(index).cloned().ok_or_else(|| {
+                    self.error(pos, format!("tuple index {} is out of range", index))
                 })
             }
             // Every key of a dictionary has the same type of value, and the
@@ -1722,13 +1735,14 @@ impl TypeChecker<'_> {
             Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => {
                 if let Some(name) = literal_string(index) {
                     self.lookup_member(ty, name, pos)
-                } else if constrained {
+                } else {
                     Err(self.error(
                         pos,
-                        format!("type {} cannot be indexed with a dynamic key", ty.display()),
+                        format!(
+                            "type {} cannot be indexed with a dynamic key; use a dictionary type",
+                            ty.display()
+                        ),
                     ))
-                } else {
-                    Ok(Type::Any)
                 }
             }
             Type::Union(items) => {
@@ -1754,7 +1768,10 @@ impl TypeChecker<'_> {
                 }
             }
             Type::Any => Ok(Type::Any),
-            Type::Unknown if !constrained => Ok(Type::Any),
+            Type::Unknown => Err(self.error(
+                pos,
+                "an unknown value must be narrowed before computed access",
+            )),
             Type::Never => Ok(Type::Never),
             _ if constrained => {
                 Err(self.error(pos, format!("type {} cannot be indexed", ty.display())))

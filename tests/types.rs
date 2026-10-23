@@ -1036,6 +1036,28 @@ fn a_missing_literal_computed_export_is_rejected() {
 }
 
 #[test]
+fn a_dynamic_computed_module_access_is_rejected() {
+    let dir = common::temp_dir("module-dynamic-member");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(value: number) -> number { return value }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./lib.vey\" as lib\nlet key: string = \"add\"\nlib[key](\"wrong\")\n",
+    )
+    .unwrap();
+    let output = common::check_file(&dir.join("app.vey"));
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(
+        error.contains("module 'lib' requires a static string key"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_local_import_shadow_only_hides_the_module_inside_its_scope() {
     let dir = common::temp_dir("module-shadow-scope");
     std::fs::write(
@@ -1434,8 +1456,8 @@ fn a_dictionary_gives_the_type_of_its_values() {
     check_ok(
         "dict-member",
         r#"
-fn f(d: {[string]: number}) -> number {
-  return d["a"] + d.b
+fn f(d: {[string]: number}, key: string) -> number {
+  return d["a"] + d.b + d[key]
 }
 "#,
     );
@@ -1449,6 +1471,60 @@ fn f(d: {[string]: number}) -> number {
 "#,
     );
     assert!(error.contains("expected string, found bool"), "{error}");
+}
+
+#[test]
+fn a_dynamic_key_on_a_typed_object_needs_a_dictionary_type() {
+    let error = check_err(
+        "dynamic-object-index",
+        "fn get(shape: { x: number }, key: string) -> number { return shape[key] }\n",
+    );
+    assert!(
+        error.contains("cannot be indexed with a dynamic key"),
+        "{error}"
+    );
+    for (name, source) in [
+        (
+            "dynamic-named-object-index",
+            "type Shape = { x: number }\nfn get(shape: Shape, key: string) -> number { return shape[key] }\n",
+        ),
+        (
+            "dynamic-interface-index",
+            "interface Shape { x: number }\nfn get(shape: Shape, key: string) -> number { return shape[key] }\n",
+        ),
+    ] {
+        let error = check_err(name, source);
+        assert!(error.contains("cannot be indexed with a dynamic key"), "{error}");
+    }
+    check_ok(
+        "dynamic-object-index-as-dictionary",
+        "fn get(shape: {[string]: number}, key: string) -> number { return shape[key] }\n",
+    );
+    check_ok(
+        "dynamic-object-index-as-named-dictionary",
+        "type Values = {[string]: number}\nfn get(values: Values, key: string) -> number { return values[key] }\n",
+    );
+}
+
+#[test]
+fn a_tuple_needs_a_literal_in_range_index() {
+    let dynamic = check_err(
+        "dynamic-tuple-index",
+        "fn get(pair: [number, string], index: number) { let value = pair[index] }\n",
+    );
+    assert!(
+        dynamic.contains("tuple requires a literal index"),
+        "{dynamic}"
+    );
+
+    let out_of_range = check_err(
+        "tuple-index-out-of-range",
+        "let pair: [number, string] = [1, \"two\"]\nlet value = pair[2]\n",
+    );
+    assert!(
+        out_of_range.contains("tuple index 2 is out of range"),
+        "{out_of_range}"
+    );
 }
 
 #[test]
@@ -1488,6 +1564,15 @@ fn an_unknown_value_needs_object_narrowing_before_use_as_object() {
         "fn needs_object(value: object) {}\nfn use_value(value: unknown) { needs_object(value) }\n",
     );
     assert!(error.contains("expects object, found unknown"), "{error}");
+
+    let computed = check_err(
+        "unknown-computed-access",
+        "fn get(value: unknown, key: string) { let item = value[key] }\n",
+    );
+    assert!(
+        computed.contains("unknown value must be narrowed before computed access"),
+        "{computed}"
+    );
 }
 
 #[test]
