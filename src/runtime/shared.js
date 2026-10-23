@@ -556,17 +556,31 @@ function veyShared(ctx) {
   function matchRoute(pattern, pathname) {
     var patternParts = String(pattern).split("/").filter(Boolean);
     var pathParts = String(pathname).split("/").filter(Boolean);
-    var params = {};
-    var i = 0;
-    var j = 0;
-    while (i < patternParts.length) {
+    // Optional parts try to consume first, preserving the existing greedy
+    // behavior when the rest of the route still fits. Failed suffixes are
+    // remembered so ambiguous routes do not repeatedly search the same path.
+    var failed = Object.create(null);
+
+    function matchFrom(i, j, params) {
+      var key = i + ":" + j;
+      if (failed[key]) return null;
+      if (i === patternParts.length) {
+        if (j === pathParts.length) return params;
+        failed[key] = true;
+        return null;
+      }
+
       var part = patternParts[i];
       if (part === "*") {
         // A wildcard of "/*" only matches when there is something after the
         // slash, so that it does not swallow the root path.
-        if (patternParts.length === 1 && pathParts.length === 0) return null;
-        params.splat = safeDecode(pathParts.slice(j).join("/"));
-        return params;
+        if (patternParts.length === 1 && pathParts.length === 0) {
+          failed[key] = true;
+          return null;
+        }
+        var wildcardParams = Object.assign({}, params);
+        wildcardParams.splat = safeDecode(pathParts.slice(j).join("/"));
+        return wildcardParams;
       }
       if (part.charAt(0) === "{" && part.charAt(part.length - 1) === "}") {
         var name = part.slice(1, -1);
@@ -581,25 +595,34 @@ function veyShared(ctx) {
           optional = true;
           name = name.slice(0, -1);
         }
-        if (j >= pathParts.length) {
-          if (!optional) return null;
-          i += 1;
-          continue;
+
+        if (j < pathParts.length) {
+          var value = safeDecode(pathParts[j]);
+          if (!constraint || matchesConstraint(value, constraint)) {
+            var consumedParams = Object.assign({}, params);
+            consumedParams[name] = value;
+            var consumed = matchFrom(i + 1, j + 1, consumedParams);
+            if (consumed) return consumed;
+          }
         }
-        var value = safeDecode(pathParts[j]);
-        if (constraint && !matchesConstraint(value, constraint)) return null;
-        params[name] = value;
-        i += 1;
-        j += 1;
-        continue;
+
+        if (optional) {
+          var skipped = matchFrom(i + 1, j, params);
+          if (skipped) return skipped;
+        }
+        failed[key] = true;
+        return null;
       }
-      if (j >= pathParts.length) return null;
-      if (part !== pathParts[j]) return null;
-      i += 1;
-      j += 1;
+
+      if (j < pathParts.length && part === pathParts[j]) {
+        var matched = matchFrom(i + 1, j + 1, params);
+        if (matched) return matched;
+      }
+      failed[key] = true;
+      return null;
     }
-    if (j !== pathParts.length) return null;
-    return params;
+
+    return matchFrom(0, 0, {});
   }
 
   ctx.flatten = flatten;

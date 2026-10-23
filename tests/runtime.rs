@@ -829,6 +829,82 @@ console.log(browser.routeParams().id, browser.currentRoute().path);
 }
 
 #[test]
+fn optional_route_parameters_backtrack_before_literals_required_parameters_and_wildcards() {
+    let text = run_browser(
+        "optional-middle-routes",
+        r##"
+browser.route("/users/{id?:int}/posts/{slug:word}", (params) => {
+  return browser.__h("p", {}, [
+    (params.id === undefined ? "no id" : "id " + params.id) + " slug " + params.slug
+  ]);
+});
+browser.route("/assets/{version?:int}/static/*", (params) => {
+  return browser.__h("p", {}, [
+    (params.version === undefined ? "no version" : "version " + params.version) + " files " + params.splat
+  ]);
+});
+browser.route("/events/{id?}/{postId}", (params) => {
+  return browser.__h("p", {}, [
+    (params.id === undefined ? "no id" : "id " + params.id) + " post " + params.postId
+  ]);
+});
+browser.route("/logs/{version?:int}/*", (params) => {
+  return browser.__h("p", {}, [
+    (params.version === undefined ? "no version" : "version " + params.version) + " files " + params.splat
+  ]);
+});
+browser.mount("#app", browser.__h("p", {}, ["start"]));
+
+browser.navigate("/users/posts/hello");
+console.log("user-skip", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/users/7/posts/hello");
+console.log("user-consume", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/assets/static/css/app.css");
+console.log("wildcard-skip", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/assets/2/static/js/app.js");
+console.log("wildcard-consume", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/events/42");
+console.log("required-parameter", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/events/1/42");
+console.log("optional-and-required", JSON.stringify(browser.routeParams()), dom.root.textContent);
+browser.navigate("/logs/2/js/app.js");
+console.log("wildcard-greedy", JSON.stringify(browser.routeParams()), dom.root.textContent);
+"##,
+    );
+
+    assert!(
+        text.contains("user-skip {\"slug\":\"hello\"} no id slug hello"),
+        "{text}"
+    );
+    assert!(
+        text.contains("user-consume {\"id\":\"7\",\"slug\":\"hello\"} id 7 slug hello"),
+        "{text}"
+    );
+    assert!(
+        text.contains("wildcard-skip {\"splat\":\"css/app.css\"} no version files css/app.css"),
+        "{text}"
+    );
+    assert!(
+        text.contains("wildcard-consume {\"version\":\"2\",\"splat\":\"js/app.js\"} version 2 files js/app.js"),
+        "{text}"
+    );
+    assert!(
+        text.contains("required-parameter {\"postId\":\"42\"} no id post 42"),
+        "{text}"
+    );
+    assert!(
+        text.contains("optional-and-required {\"id\":\"1\",\"postId\":\"42\"} id 1 post 42"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "wildcard-greedy {\"version\":\"2\",\"splat\":\"js/app.js\"} version 2 files js/app.js"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_notes_of_the_browser_are_kept() {
     let text = run_browser(
         "storage",
@@ -914,6 +990,38 @@ app.start(() => {
 "#,
     );
     assert!(text.contains(r#"[[200,"yes",null],[200,null,"yes"]]"#), "{text}");
+}
+
+#[test]
+fn optional_middle_parameters_match_in_server_routes() {
+    let text = run_runtime(
+        "optional-server-route",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.get("/users/{id?:int}/posts/{slug:word}", req => {
+  return (req.params.id === undefined ? "none" : req.params.id) + ":" + req.params.slug;
+});
+app.start(() => {
+  const get = path => new Promise(resolve => {
+    http.get("http://127.0.0.1:" + app.port() + path, res => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => resolve([res.statusCode, body]));
+    });
+  });
+  Promise.all([get("/users/posts/hello"), get("/users/7/posts/hello")]).then(async answers => {
+    console.log(JSON.stringify(answers));
+    await app.stop();
+    process.exit(0);
+  });
+});
+"#,
+    );
+    assert!(
+        text.contains(r#"[[200,"none:hello"],[200,"7:hello"]]"#),
+        "{text}"
+    );
 }
 
 #[test]
