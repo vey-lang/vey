@@ -15,7 +15,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 2. Runtime ve routing doğruluğu
 
-- [ ] `mount.update()` node tipi statik ↔ fonksiyon olduğunda reactive effect kurma/sonlandırma lifecycle'ını düzelt; her iki geçiş için DOM ve cleanup testleri ekle.
+- [x] `mount.update()` statik ↔ fonksiyon geçişlerinde effect'i durdurup yeniden kur; fonksiyon→fonksiyon bağımlılık yenilemesini, cleanup'ı ve DOM davranışını mock DOM ile Chromium'da test et.
 - [ ] `{id?}` gibi opsiyonel route parametrelerinde sonraki literal/constraint segmentini tüketmeden önce skip/consume seçeneklerini dene; optional-middle ve wildcard testleri ekle.
 - [ ] Oversized chunked request'lerde bağlantı/stream'i güvenli biçimde drain et veya kapat; keep-alive ve eşzamanlı istek testleri ekle.
 - [ ] Statik dosya symlink/containment denetimini path yarışına dayanıklı açılış/stream stratejisiyle güçlendir.

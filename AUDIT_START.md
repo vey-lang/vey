@@ -2,7 +2,7 @@
 
 **Tarih:** 23 Ekim 2026
 **İncelenen upstream başlangıç revizyonu:** `1626f550865a9694201e1f6d15cb106f49e7c14e` (`origin/main`)
-**Çalışma dalı:** `manus/type-safety-audit-2026-10-23`
+**Çalışma dalı:** `main`
 **Kapsam:** Rust tip denetleyicisi, JavaScript runtime/server, CLI/LSP, regresyon testleri ve mevcut dokümantasyon. Bu rapor denetim bulgularını özetler; tüm eksiklerin kapandığı anlamına gelmez.
 
 ## Bu değişiklikte doğrulanıp düzeltilenler
@@ -11,26 +11,27 @@
 2. **`unknown`, daraltma olmadan `object` kabul ediliyordu.** `Unknown -> AnyObject` istisnası kaldırıldı. `is object` ile daraltılmış kullanım geçerli; daraltılmamış kullanım artık tip hatası.
 3. **Promise olmayan `await` sonucu `any` oluyordu.** `await` Promise içini açıyor; Promise olmayan operandın tipini koruyor. Yanlış dönüş tipinin bu yoldan saklanması önlendi.
 4. **Mutable alias covariance tip güvenliğini bozuyordu.** Array/tuple elemanları, dictionary key/value türleri ve yazılabilir object/named/interface alanları invariant kontrol ediliyor; bilinmeyen uzunlukta array→tuple dönüşümü reddediliyor. Fresh array/tuple/object literal'ları bağlamsal olarak hedef tipi alırken mevcut nested alias'lar genişletilemiyor.
+5. **`mount.update()` node türü geçişinde effect lifecycle'ı hatalıydı.** Statik→fonksiyon geçişinde effect başlatılmıyor; fonksiyon→fonksiyon geçişinde eski bağımlılık seti yenilenmiyor; fonksiyon→statik geçişinde effect abonelikleri bırakılmıyordu. Update artık eski effect'i durdurup yeni node fonksiyonu için yeniden kuruyor.
 
-Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; array/tuple/object/dictionary alias ihlalleri reddedilir ve fresh literal'lar doğrulanır.
+Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; array/tuple/object/dictionary alias ihlalleri reddedilir ve fresh literal'lar doğrulanır; `mount.update()` statik↔reaktif ve fonksiyon→fonksiyon geçişlerinde DOM, güncel bağımlılıklar ve cleanup doğrulanır.
 
 ## Test ve doğrulama durumu
 
 | Komut | Sonuç |
 |---|---|
-| `cargo test --test types --test cli --test readme --test runtime --quiet` | **187 geçti, 0 kaldı:** types 74, CLI 31, README 4, runtime 78. |
+| `cargo test --test runtime --test dom --test types --test cli --test readme --quiet` | **204 geçti, 0 kaldı:** CLI 31, DOM 15, README 4, runtime 80, types 74. Runtime hedefindeki gerçek-browser testi Chromium 154 ile çalıştı. |
+| `mount_update_transitions_work_in_headless_chromium_when_available` | Geçti: Vey'in birleştirilmiş runtime kaynağı gerçek Chromium DOM'unda çalıştırıldı; tarayıcı yoksa test açıkça skip eder. |
 | `cargo test --test server -- --nocapture --test-threads=1` | **Tamamlanmadı:** `a_malformed_path_does_not_take_the_server_down` başlarken test süreci `SIGTERM` aldı; exit status `143`. |
 | `cargo test --all-targets --quiet` | **Tam-suite sonucu doğrulanmadı:** server hedefindeki tekrarlanabilir exit 143 çözülmeden başarı iddia edilemez. |
 | `git diff --check` | Geçti. |
 | `cargo fmt --all -- --check` | Repo genelinde çok sayıda biçim farkı gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. Denetim sırasında ilgisiz dosyaları topluca yeniden formatlamadım. |
 
-Kod/test commitleri `5fa2002` ve `800c332`, `manus/type-safety-audit-2026-10-23` dalına pushlandı. Server hedefi kaynak kodu kendi alt sürecini process group üzerinden kapatıyor; SIGTERM’in test çalıştırıcısına ulaşma sebebi ayrıca araştırılmalı.
+Önceki tip-güvenliği commitleri `5fa2002` ve `800c332`, `main` dalındadır; runtime lifecycle düzeltmesi `f3d9967` ile `main`'e pushlandı. Server hedefi kaynak kodu kendi alt sürecini process group üzerinden kapatıyor; SIGTERM’in test çalıştırıcısına ulaşma sebebi ayrıca araştırılmalı.
 
 ## Henüz düzeltilmemiş, doğrulanmış yüksek öncelikli bulgular
 
 ### Runtime/server
 
-- `mount.update()` fonksiyon düğümüne geçişte reactive effect kurmuyor, fonksiyon düğümünden statik değere geçişte eski effect'i durdurmuyor (`src/runtime/mount.js:489-516`). DOM güncellenmeyebilir veya gereksiz yeniden çizilebilir.
 - Ortadaki opsiyonel route parametresi sonraki literal segmenti yutabiliyor (`src/runtime/shared.js:584-593`); `/users/{id?}/posts` ve `/users/posts` eşleşmesinde.
 - Büyük chunked request reddedilince request pause ediliyor fakat okunmayan veri drain/destroy edilmiyor (`src/runtime/server.js:272-284, 510-518`); bağlantı/kaynak tüketimi riski.
 - Statik dosyada containment kontrolüyle `sendFile`'ın dosyayı açması arasında symlink swap TOCTOU penceresi var (`src/runtime/server.js:333-355, 415, 941-970`).
@@ -48,15 +49,16 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 
 ## Dokümantasyon durumu
 
-`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance maddesi kapandı; kısıtlı generic üye erişimi, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
+`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance ve `mount.update()` effect lifecycle maddeleri kapandı. Kısıtlı generic üye erişimi, optional route matching, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
 
 ## Öncelikli sonraki işler
 
-1. `mount.update()` için statik ↔ reactive geçişlerde effect lifecycle'ını düzeltip iki yönlü DOM regresyon testi eklemek.
-2. LSP rename'i ad metni yerine sembol/kapsam kimliğiyle çözmek; shadowing testi eklemek.
-3. LSP UTF-16 position/URI çözümleme ve `exit`/bozuk frame protokol davranışını düzeltmek.
-4. Oversized request için açık drain/destroy politikası belirlemek; keep-alive ve eşzamanlı bağlantı testleri eklemek.
-5. Optional route matching'i tüket/atla dallarıyla çözmek; optional-middle/literal testleri eklemek.
-6. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
-7. Server integration testindeki process-group cleanup kök nedenini bulup ardından tam `cargo test --all-targets` çalıştırmak.
-8. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
+1. Optional route matching'i tüket/atla dallarıyla çözmek; optional-middle/literal testleri eklemek.
+2. Oversized request için açık drain/destroy politikası belirlemek; keep-alive ve eşzamanlı bağlantı testleri eklemek.
+3. Statik dosya symlink/containment denetimini path-yarışı dayanıklı stratejiyle güçlendirmek.
+4. LSP rename'i ad metni yerine sembol/kapsam kimliğiyle çözmek; shadowing testi eklemek.
+5. LSP UTF-16 position/URI çözümleme ve `exit`/bozuk frame protokol davranışını düzeltmek.
+6. HTTP caller abort'unu retries'den ayırıp SSE backpressure politikası belirlemek.
+7. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
+8. Server integration testindeki process-group cleanup kök nedenini bulup ardından tam `cargo test --all-targets` çalıştırmak.
+9. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
