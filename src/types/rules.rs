@@ -76,25 +76,39 @@ pub(crate) fn orderable(ty: &Type) -> bool {
 pub(crate) struct Opening<'a> {
     /// The shape of every alias of the program, when they may be opened.
     aliases: Option<&'a HashMap<String, Type>>,
+    /// The declared parameter names of generic aliases.
+    type_params: Option<&'a HashMap<String, Vec<String>>>,
     /// The pairs of types that the check is inside of.
     assumed: Vec<(Type, Type)>,
 }
 
 impl<'a> Opening<'a> {
     /// An opening that may use the shapes of the aliases of the program.
-    pub(crate) fn new(aliases: &'a HashMap<String, Type>) -> Self {
+    pub(crate) fn new(
+        aliases: &'a HashMap<String, Type>,
+        type_params: &'a HashMap<String, Vec<String>>,
+    ) -> Self {
         Self {
             aliases: Some(aliases),
+            type_params: Some(type_params),
             assumed: Vec::new(),
         }
     }
 
     /// The shape of an alias, when it is one that may be opened.
-    fn shape(&self, ty: &Type) -> Option<&'a Type> {
-        let Type::Recursion(name, _) = ty else {
+    fn shape(&self, ty: &Type) -> Option<Type> {
+        let Type::Recursion(name, args) = ty else {
             return None;
         };
-        self.aliases?.get(name)
+        let shape = self.aliases?.get(name)?;
+        let Some(params) = self.type_params?.get(name) else {
+            return Some(shape.clone());
+        };
+        if params.len() != args.len() {
+            return Some(shape.clone());
+        }
+        let subst = params.iter().cloned().zip(args.iter().cloned()).collect();
+        Some(substitute(shape, &subst))
     }
 }
 
@@ -132,8 +146,8 @@ fn assignable_in(source: &Type, target: &Type, opening: &mut Opening) -> bool {
         }
         opening.assumed.push(pair);
         let result = assignable_in(
-            open_source.unwrap_or(source),
-            open_target.unwrap_or(target),
+            open_source.as_ref().unwrap_or(source),
+            open_target.as_ref().unwrap_or(target),
             opening,
         );
         opening.assumed.pop();

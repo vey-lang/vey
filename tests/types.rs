@@ -352,7 +352,7 @@ fn an_imported_recursive_alias_checks_fields_after_recursive_edges() {
     .unwrap();
     std::fs::write(
         dir.join("valid.vey"),
-        "use \"./types.vey\" as t\nlet good: t.Tree = { value: 1, children: [{ value: 2, children: [] }] }\nfn child_value(tree: t.GenericTree<number>) -> number { return tree.children[0]?.value ?? 0 }\n",
+        "use \"./types.vey\" as t\nlet good: t.Tree = { value: 1, children: [{ value: 2, children: [] }] }\nlet good_generic: t.GenericTree<number> = { value: 1, children: [{ value: 2, children: [] }] }\nfn child_value(tree: t.GenericTree<number>) -> number { return tree.children[0]?.value ?? 0 }\n",
     )
     .unwrap();
     let valid = common::check_file(&dir.join("valid.vey"));
@@ -371,6 +371,23 @@ fn an_imported_recursive_alias_checks_fields_after_recursive_edges() {
     assert!(common::stderr(&generic_invalid).contains("expected string"));
 
     std::fs::write(
+        dir.join("generic-value-invalid.vey"),
+        "use \"./types.vey\" as t\nlet bad: t.GenericTree<number> = { value: 1, children: [{ value: \"wrong\", children: [] }] }\n",
+    )
+    .unwrap();
+    let generic_value_invalid = common::check_file(&dir.join("generic-value-invalid.vey"));
+    assert!(
+        !generic_value_invalid.status.success(),
+        "a wrong nested generic value was accepted"
+    );
+    let generic_value_error = common::stderr(&generic_value_invalid);
+    assert!(
+        generic_value_error.contains("expected number")
+            || generic_value_error.contains("expected t.GenericTree"),
+        "{generic_value_error}"
+    );
+
+    std::fs::write(
         dir.join("app.vey"),
         r#"
 use "./types.vey" as t
@@ -381,6 +398,19 @@ let bad: t.Tree = { value: 1, children: [{ value: 2, children: [{ value: 3, chil
     let invalid = common::check_file(&dir.join("app.vey"));
     assert!(!invalid.status.success(), "invalid nested value was accepted");
     assert!(common::stderr(&invalid).contains("expected t.Tree"));
+}
+
+#[test]
+fn local_recursive_generic_aliases_check_nested_values() {
+    check_ok(
+        "local-recursive-generic-value",
+        "type Tree<T> = { value: T, children: [Tree<T>] }\nlet good: Tree<number> = { value: 1, children: [{ value: 2, children: [] }] }\n",
+    );
+    let invalid = check_err(
+        "local-recursive-generic-value-invalid",
+        "type Tree<T> = { value: T, children: [Tree<T>] }\nlet bad: Tree<number> = { value: 1, children: [{ value: \"wrong\", children: [] }] }\n",
+    );
+    assert!(invalid.contains("value: string"), "{invalid}");
 }
 
 #[test]

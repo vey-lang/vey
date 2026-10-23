@@ -72,18 +72,24 @@ fn build_checker<'a>(
     let interfaces = collect_interfaces(program, file, &enums, &aliases)?;
     let impls = collect_impls(program, file, &aliases)?;
     let mut alias_types = HashMap::new();
+    let mut alias_type_params = HashMap::new();
     for (module, env) in imports {
         for (name, shape) in &env.alias_shapes {
+            let qualified_name = format!("{}.{}", module, name);
             alias_types.insert(
-                format!("{}.{}", module, name),
+                qualified_name.clone(),
                 qualified_type(module, shape.clone()),
             );
+            if let Some(alias) = env.generic_aliases.get(name) {
+                alias_type_params.insert(qualified_name, alias.params.clone());
+            }
         }
     }
-    Ok(TypeChecker {
+    let mut checker = TypeChecker {
         file,
         aliases,
         alias_types,
+        alias_type_params,
         enums,
         interfaces,
         impls,
@@ -102,7 +108,38 @@ fn build_checker<'a>(
         expected_returns: Vec::new(),
         collected_returns: Vec::new(),
         yielded: Vec::new(),
-    })
+    };
+    let local_aliases: Vec<_> = checker
+        .aliases
+        .iter()
+        .map(|(name, alias)| (name.clone(), alias.clone()))
+        .collect();
+    for (name, alias) in local_aliases {
+        let vars: HashMap<String, Type> = alias
+            .params
+            .iter()
+            .map(|param| (param.name.clone(), Type::Var(param.name.clone())))
+            .collect();
+        if !alias.params.is_empty() {
+            checker.alias_type_params.insert(
+                name.clone(),
+                alias
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+            );
+        }
+        let mut stack = vec![name.clone()];
+        let shape = checker.resolve_type_with(&alias.body, &mut stack, &vars)?;
+        let shape = if alias.params.is_empty() {
+            name_alias(&name, shape)
+        } else {
+            shape
+        };
+        checker.alias_types.insert(name, shape);
+    }
+    Ok(checker)
 }
 
 fn exported_type_params(
@@ -553,6 +590,8 @@ pub(crate) struct TypeChecker<'a> {
     pub(crate) aliases: HashMap<String, Alias>,
     /// The resolved body of every type alias.
     pub(crate) alias_types: HashMap<String, Type>,
+    /// The parameter names used to specialize recursive generic alias shapes.
+    pub(crate) alias_type_params: HashMap<String, Vec<String>>,
     pub(crate) enums: HashMap<String, EnumInfo>,
     /// The interfaces of the program.
     pub(crate) interfaces: HashMap<String, InterfaceInfo>,
@@ -835,7 +874,11 @@ impl TypeChecker<'_> {
             return false;
         }
         if matches!(target, Type::Any) || matches!(source, Type::Any | Type::Never) {
-            return assignable_with(source, target, &mut Opening::new(&self.alias_types));
+            return assignable_with(
+                source,
+                target,
+                &mut Opening::new(&self.alias_types, &self.alias_type_params),
+            );
         }
         let mut bounds = HashMap::new();
         for scope in &self.type_param_constraints {
@@ -855,7 +898,7 @@ impl TypeChecker<'_> {
         // A type that refers to itself is opened where the check reaches
         // it, and not into a copy of itself: a shape of six fields would
         // otherwise become six copies of six copies, six times over.
-        let mut opening = Opening::new(&self.alias_types);
+        let mut opening = Opening::new(&self.alias_types, &self.alias_type_params);
         assignable_with(&source, target, &mut opening)
     }
 

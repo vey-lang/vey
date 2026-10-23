@@ -262,3 +262,14 @@ Ayrıca `unknown.field` ve desteklenmeyen ordinary member türleri genel fallbac
 - Node-backed lang regression, nullish optional named/computed/call zincirlerinin runtime'da `undefined` döndürdüğünü doğruluyor; `accepts_gradual_types` fixture'ında callback ile değişebilen değere optional access kullanılıyor.
 - Recursive alias runtime fixture'ı olası null `next` alanını `?.` ile okuyor; negative type regression `number` alanının `string` dönüşüne `any` üzerinden kaçmasını yakalıyor.
 - Son tam doğrulama: `cargo test --all-targets` **402 geçti, 0 başarısız**; `git diff --check` temiz.
+
+
+### Generic recursive alias assignability — ek doğrulanmış hata ve düzeltme
+
+Önceki bölümde recursive generic placeholder argümanlarının member lookup ve type utility'lerinde korunması doğrulanmıştı; ek atama probe'u başka bir kenar durumu gösterdi: iç içe değer olarak verilen geçerli bir `GenericTree<number>` için recursive placeholder açılırken alias'ın genel `T` şekli gerçek `number` argümanıyla uzmanlaştırılmıyordu. Böylece geçerli imported generic recursive değer reddediliyordu. Aynı mekanizma yerel recursive alias şekillerinin atanabilirlik kontrolünde de tutarlı biçimde açılmamasına yol açabiliyordu.
+
+`Opening` artık alias adına göre generic parametre adlarını saklıyor; `Type::Recursion(name, args)` açılırken alias şekline gerçek argümanları uyguluyor. Checker, yerel alias şekillerini ve generic parametre sırasını hazırlıyor, imported şekillerde de `ModuleTypeEnv.generic_aliases` parametrelerini taşıyor. Regresyonlar geçerli ve geçersiz nested imported `GenericTree<number>` literal'larını, ayrıca yerel `Tree<number>` recursive collection literal'larını denetliyor.
+
+- Önce genişletilmiş `an_imported_recursive_alias_checks_fields_after_recursive_edges` testinde geçerli nested generic değer düzeltme öncesi reddedildi; uzmanlaştırılmış recursion shape sonrasında test geçti ve yanlış türde nested `value` reddedildi.
+- `local_recursive_generic_aliases_check_nested_values`: **1 geçti**; yerel generic recursive collection için geçerli nested değer kabul, string `value` reddedildi.
+- Son `cargo test --all-targets`: **403 geçti, 0 başarısız**; `git diff --check` temiz.
