@@ -125,26 +125,58 @@ function veyShared(ctx) {
     var i = 0;
     while (i < list.length) {
       var byte = list[i] & 0xff;
-      var code = 0;
-      var size = 1;
       if (byte < 0x80) {
-        code = byte;
-      } else if (byte < 0xc0) {
-        code = 0xfffd;
-      } else if (byte < 0xe0) {
-        code = ((byte & 0x1f) << 6) | ((list[i + 1] || 0) & 0x3f);
+        out += String.fromCharCode(byte);
+        i += 1;
+        continue;
+      }
+
+      var size = 0;
+      var code = 0;
+      var secondMin = 0x80;
+      var secondMax = 0xbf;
+      if (byte >= 0xc2 && byte <= 0xdf) {
         size = 2;
-      } else if (byte < 0xf0) {
-        code = ((byte & 0x0f) << 12) |
-          (((list[i + 1] || 0) & 0x3f) << 6) |
-          ((list[i + 2] || 0) & 0x3f);
+        code = byte & 0x1f;
+      } else if (byte >= 0xe0 && byte <= 0xef) {
         size = 3;
-      } else {
-        code = ((byte & 0x07) << 18) |
-          (((list[i + 1] || 0) & 0x3f) << 12) |
-          (((list[i + 2] || 0) & 0x3f) << 6) |
-          ((list[i + 3] || 0) & 0x3f);
+        code = byte & 0x0f;
+        if (byte === 0xe0) secondMin = 0xa0;
+        if (byte === 0xed) secondMax = 0x9f;
+      } else if (byte >= 0xf0 && byte <= 0xf4) {
         size = 4;
+        code = byte & 0x07;
+        if (byte === 0xf0) secondMin = 0x90;
+        if (byte === 0xf4) secondMax = 0x8f;
+      } else {
+        out += "\ufffd";
+        i += 1;
+        continue;
+      }
+
+      var consumed = 1;
+      var valid = true;
+      while (consumed < size) {
+        if (i + consumed >= list.length) {
+          valid = false;
+          break;
+        }
+        var next = list[i + consumed] & 0xff;
+        var minimum = consumed === 1 ? secondMin : 0x80;
+        var maximum = consumed === 1 ? secondMax : 0xbf;
+        if (next < minimum || next > maximum) {
+          valid = false;
+          break;
+        }
+        code = (code << 6) | (next & 0x3f);
+        consumed += 1;
+      }
+      if (!valid) {
+        out += "\ufffd";
+        // Consume the valid prefix, but leave a non-continuation byte to be
+        // decoded on its own. This preserves valid text after a bad sequence.
+        i += consumed;
+        continue;
       }
       i += size;
       if (code > 0xffff) {

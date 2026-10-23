@@ -24,6 +24,22 @@ use crate::types::helpers::expr_has_yield;
 use crate::parser::exprs::NAMED_MARKER;
 use crate::suggest::did_you_mean;
 
+fn spread_element_type(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Array(element) => Some((**element).clone()),
+        Type::Tuple(items) => Some(union(items.clone())),
+        Type::String => Some(Type::String),
+        Type::Any => Some(Type::Any),
+        Type::Union(items) => Some(union(
+            items
+                .iter()
+                .map(spread_element_type)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        _ => None,
+    }
+}
+
 fn collect_object_shape_candidates(
     ty: &Type,
     aliases: &HashMap<String, Type>,
@@ -728,18 +744,83 @@ impl TypeChecker<'_> {
         let mut types = Vec::new();
         let mut inferred = HashMap::new();
         let mut has_spread = false;
-        for (index, arg) in args.iter().enumerate() {
+        for (arg_position, arg) in args.iter().enumerate() {
             let Some(arg) = arg else {
                 // A parameter that is not given has no argument to check.
                 types.push(Type::Any);
                 continue;
             };
             match arg {
-                Expr::Spread(inner, _) => {
+                Expr::Spread(inner, spread_pos) => {
+                    let spread_ty = self.infer_expr(inner)?;
+                    if let Type::Tuple(items) = spread_ty {
+                        for item in items {
+                            if let Some(param) = expected.get(types.len()) {
+                                let param = substitute_bound(param, &inferred);
+                                unify_types(&item, &param, &mut inferred);
+                            }
+                            types.push(item);
+                        }
+                        continue;
+                    }
+                    if matches!(&spread_ty, Type::Unknown) {
+                        return Err(self.error(
+                            *spread_pos,
+                            "an unknown value must be narrowed before it is spread",
+                        ));
+                    }
+                    let Some(element) = spread_element_type(&spread_ty) else {
+                        return Err(self.error(
+                            *spread_pos,
+                            format!("cannot spread a {}", spread_ty.display()),
+                        ));
+                    };
+                    if has_spread {
+                        return Err(self.error(
+                            *spread_pos,
+                            "a call may contain only one dynamically sized spread argument",
+                        ));
+                    }
+                    let index = types.len();
+                    if arg_position + 1 != args.len() {
+                        return Err(self.error(
+                            *spread_pos,
+                            "a dynamically sized spread argument must be last",
+                        ));
+                    }
+                    if !matches!(callee, Type::Any | Type::Function(_)) {
+                        return Err(self.error(
+                            *spread_pos,
+                            "a spread call requires a directly known function type",
+                        ));
+                    }
+                    if let Type::Function(function) = callee {
+                        if function.checked {
+                            if index < function.required {
+                                return Err(self.error(
+                                    *spread_pos,
+                                    format!(
+                                        "provide the {} required {} before a dynamic spread",
+                                        function.required,
+                                        argument_label(function.required)
+                                    ),
+                                ));
+                            }
+                            for param in function.params.iter().skip(index) {
+                                let param = substitute_bound(param, &inferred);
+                                unify_types(&element, &param, &mut inferred);
+                                let param = substitute_bound(&param, &inferred);
+                                if !self.fits(&element, &param) {
+                                    return Err(self.type_error(*spread_pos, &element, &param));
+                                }
+                            }
+                        }
+                    }
                     has_spread = true;
-                    types.push(self.infer_expr(inner)?);
+                    types.push(element);
                 }
                 other => {
+                    let index = types.len();
                     let want = expected
                         .get(index)
                         .map(|ty| substitute_bound(ty, &inferred));
@@ -1165,7 +1246,7 @@ impl TypeChecker<'_> {
 
                 // The types of the arguments are only checked when they are
                 // known.
-                if has_spread || !function.checked {
+        if !function.checked {
                     return Ok(substitute(&function.ret, &HashMap::new()));
                 }
 

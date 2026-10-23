@@ -31,6 +31,42 @@ let t = total(1, 2, 3)
 }
 
 #[test]
+fn checked_spread_calls_validate_elements_and_required_arguments() {
+    check_err(
+        "spread-element-type",
+        r#"
+fn take(value: number = 0) -> number { return value }
+let values: [string] = ["wrong"]
+let answer = take(...values)
+"#,
+    );
+    check_err(
+        "spread-required-argument",
+        r#"
+fn take(value: number) -> number { return value }
+let values: [string] = ["wrong"]
+let answer = take(...values)
+"#,
+    );
+    check_err(
+        "spread-mixed-arguments",
+        r#"
+fn take(value: number, extra: number = 0) -> number { return value }
+let values: [number] = [1]
+let answer = take("wrong", ...values)
+"#,
+    );
+    check_ok(
+        "spread-rest-arguments",
+        r#"
+fn total(...values: [number]) -> number { return 0 }
+let values: [number] = [1, 2]
+let answer = total(...values)
+"#,
+    );
+}
+
+#[test]
 fn a_generic_type_is_not_bound_by_a_nullable_argument() {
     check_ok(
         "generic-union",

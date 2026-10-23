@@ -311,3 +311,40 @@ Workspace kökü değişiklikleri için sunucu capability'leri ilan ediyor ve `w
 
 - `the_language_server_navigates_to_unopened_imported_modules`: **1 geçti**; target ve ikinci tüketici kapalıyken definition doğru export/range'i verdi, references `includeDeclaration` true/false değerlerine uydu, rename üç dosyada edit üretti; local `area` referansları ile aynı adlı exported type/function rename kapsamları ve workspace kökü değişikliği doğru işlendi.
 - Son tam doğrulama: `cargo test --all-targets` **407 geçti, 0 başarısız**; `git diff --check` temiz.
+
+
+## Takip denetimi — 24 Ekim 2026, 00:30 (+03:00)
+
+Bu devam, `main` üzerindeki `3e74404` (`Validate LSP rename identifiers`) tabanında yapıldı. Önceki salt-okunur denetim ajanlarının raporları yeniden incelendi; bulgular güncel derleyici/runtime üzerinde tekrar üretildi ve aşağıdaki üç hata kapatıldı.
+
+### LSP tanı aralıklarında UTF-16 sütunları
+
+`problem()` ve `warning_problem()` compiler sütununu doğrudan LSP `character` alanına yazıyordu. Vey sütunları Unicode scalar/karakter sayarken LSP UTF-16 code unit saydığından, tanıdan önceki her astral karakter (ör. emoji) aralığı bir code unit kısa gösteriyordu. Artık tanı aralığı ilgili kaynak satırından hesaplanıyor ve her iki uç da UTF-16 birimine çevriliyor. Kaynak seçimi açık editör tamponunu öncelikli kullanıyor; başka modüldeki hata/uyarı için açık dosya tamponu veya disk kaynağı kullanılıyor.
+
+`diagnostic_ranges_use_utf16_code_units` regresyonu `a😀b` satırında hem hata hem uyarı aralığının başlangıcını 1, bitişini 3 olarak doğruluyor; emoji iki UTF-16 birim kaplıyor. Test, yardımcı sütun dönüşümünü ve iki diagnostic kurucusunu doğrudan kapsıyor.
+
+### Runtime UTF-8 decoder doğrulaması
+
+`src/runtime/shared.js::utf8Decode`, devam baytlarının varlığını ve geçerliliğini varsayıyor, eksik baytları sıfır gibi okuyordu; geçersiz lead-byte aralıkları, overlong kodlamalar, surrogate kod noktaları ve Unicode üst sınırı dışındaki diziler de doğrulanmıyordu. Decoder artık 2/3/4 bayt dizilerinin uzunluğunu, devam baytlarını ve scalar sınırlarını doğruluyor; kesik/geçersiz alt diziler için U+FFFD üretiyor ve geçerli sonraki baytları yeniden işlemeye bırakarak kurtarıyor.
+
+`utf8_decoder_replaces_malformed_sequences_and_recovers` regresyonu kesik 3/4 bayt dizilerini, geçersiz continuation'ı, overlong, surrogate ve U+10FFFF üstü dizileri, bozuk alt dizi sonrasındaki ASCII metni ve geçerli emoji round-trip'ini doğruluyor.
+
+### Spread çağrılarında tip denetimi
+
+Bağımsız type-soundness ajanı, `check_call_named` içindeki spread erken dönüşünün yalnız spread operandını değil, aynı çağrının bütün argümanlarını kontrol dışı bıraktığını doğruladı. Örneğin `fn take(value: number) -> number` için `let values: [string] = ["wrong"]; take(...values)` önce başarılı sayılıyordu. Artık spread operandının iterable türü ve eleman türü belirleniyor; sabit uzunluklu tuple spread'leri bağımsız argümanlara açılıyor. Dinamik uzunluklu spread tek ve son argüman olarak kabul ediliyor; checked fonksiyonda spread öncesinde gerekli parametreler sağlanmalı ve olası kalan parametrelerin tümü eleman türüyle uyumlu olmalı. Böylece aynı çağrıdaki sıradan argümanlar da standart parametre denetiminden geçiyor. `any` hâlâ dilin açık dinamik kaçış kapısıdır; doğrudan bilinmeyen/union callee üzerindeki dinamik spread konservatif biçimde reddedilir.
+
+`checked_spread_calls_validate_elements_and_required_arguments` negatif regresyonları opsiyonel number parametresine string spread'i, required parametreyi dinamik spread'e bırakmayı ve yanlış sıradan argümanı olan karışık çağrıyı reddediyor; pozitif rest-array spread'i kabul ediyor.
+
+### Önceki ajan bulgularının güncel HEAD'de triage edilmesi
+
+- `job_V06sGAYe` spread bypass'ını bağımsız olarak aynı minimal örnekle doğrulamıştı; bu bulgu yukarıdaki değişiklik ve regresyonlarla kapatıldı.
+- Eski type-checker raporundaki scoped import shadowing örneği (`job_GicsDoA9`) güncel `main` üzerinde yeniden denendi; dış kapsamdaki imported `lib.add("wrong")` çağrısı artık `argument 1 expects number, found string` ile reddediliyor.
+- Generic callback contextual-inference (`job_PjkcI8WB`) ve `finally` dönüş akışı (`job_Y30DvCSU`) örnekleri de güncel compiler ile tekrarlandı; ikisi de `vey check` tarafından kabul edildi. Bu raporlar eski HEAD'e ait açık bulgular değil.
+- LSP UTF-16 raporu (`job_k6AH63Oz`) bu devamın ilk maddesindeki tanı aralığı hatasını doğrulamıştı; runtime ajanı (`job_yrJXvjKf`) decoder bulgusunu bağımsız biçimde doğrulamıştı.
+
+### Doğrulama kanıtı
+
+- `cargo test --all-targets --quiet`: **410 geçti, 0 başarısız**. Hedef grupları: library 2, binary 9, CLI 51, dev 10, DOM 15, lang 65, README 4, regressions 43, runtime 102, server 10, types 99.
+- Hedefli regresyonlar: `diagnostic_ranges_use_utf16_code_units` **1/1**; `checked_spread_calls_validate_elements_and_required_arguments` **1/1**; `utf8_decoder_replaces_malformed_sequences_and_recovers` **1/1**.
+- `git diff --check`: geçti.
+- Çalışma değişiklikleri uygulama, regresyon testleri ve bu rapor güncellemesiyle birlikte toplam altı dosyayla sınırlı.

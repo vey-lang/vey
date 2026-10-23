@@ -136,6 +136,29 @@ console.log(runtime.url.decode("%"));
 }
 
 #[test]
+fn utf8_decoder_replaces_malformed_sequences_and_recovers() {
+    let text = run_runtime(
+        "malformed-utf8",
+        r#"
+console.log(JSON.stringify([
+  runtime.bytes.text([0xe2, 0x82]),
+  runtime.bytes.text([0xe2, 0x82, 0x41]),
+  runtime.bytes.text([0xe2, 0x28, 0xa1]),
+  runtime.bytes.text([0xc0, 0xaf]),
+  runtime.bytes.text([0xed, 0xa0, 0x80]),
+  runtime.bytes.text([0xf4, 0x90, 0x80, 0x80]),
+  runtime.bytes.text([0xf0, 0x9f, 0x98]),
+  runtime.bytes.text([0xf0, 0x9f, 0x98, 0x80])
+]));
+"#,
+    );
+    assert_eq!(
+        text.trim(),
+        r#"["�","�A","�(�","��","���","����","�","😀"]"#
+    );
+}
+
+#[test]
 fn node_only_helpers_report_a_clear_error_in_the_browser() {
     let text = run_runtime(
         "browser-guard",

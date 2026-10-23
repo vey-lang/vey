@@ -426,12 +426,21 @@ impl Server {
             }
             Some(file.to_string())
         };
+        let diagnostic_source = |file: Option<&str>| -> String {
+            match file {
+                Some(file) => match file_uri_of(file) {
+                    Some(file) => self.source(&file_uri(&file)).unwrap_or_else(|| text.clone()),
+                    None => text.clone(),
+                },
+                None => text.clone(),
+            }
+        };
         let mut parser = match Parser::new(text, &label) {
             Ok(parser) => parser,
-            Err(err) => return vec![(None, problem(&err, 1, 1))],
+            Err(err) => return vec![(None, problem(&err, 1, 1, text))],
         };
         if let Err(err) = parser.parse_program() {
-            return vec![(None, problem(&err, err.line, err.col))];
+            return vec![(None, problem(&err, err.line, err.col, text))];
         }
 
         // The file is checked with the modules it uses, so that the
@@ -440,13 +449,27 @@ impl Server {
         match vey::compiler::check_file(&path, Some(text)) {
             Ok(problems) => {
                 for warning in &problems.warnings {
-                    out.push((file_uri_of(&warning.file), warning_problem(warning)));
+                    let source = diagnostic_source(Some(&warning.file));
+                    out.push((
+                        file_uri_of(&warning.file),
+                        warning_problem(warning, &source),
+                    ));
                 }
                 for err in &problems.errors {
-                    out.push((file_uri_of(&err.file), problem(err, err.line, err.col)));
+                    let source = diagnostic_source(Some(&err.file));
+                    out.push((
+                        file_uri_of(&err.file),
+                        problem(err, err.line, err.col, &source),
+                    ));
                 }
             }
-            Err(err) => out.push((file_uri_of(&err.file), problem(&err, err.line, err.col))),
+            Err(err) => {
+                let source = diagnostic_source(Some(&err.file));
+                out.push((
+                    file_uri_of(&err.file),
+                    problem(&err, err.line, err.col, &source),
+                ));
+            }
         }
         out
     }
@@ -2243,8 +2266,22 @@ fn location_with_width(uri: &str, source: &str, pos: &vey::lexer::Pos, width: us
     ])
 }
 
+/// A character column of the compiler in the UTF-16 units of the protocol.
+fn utf16_column(source: &str, line: usize, character_column: usize) -> usize {
+    source
+        .lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or("")
+        .chars()
+        .take(character_column)
+        .map(char::len_utf16)
+        .sum()
+}
+
 /// A mistake, in the shape the protocol wants.
-fn problem(err: &vey::VeyError, line: usize, col: usize) -> Value {
+fn problem(err: &vey::VeyError, line: usize, col: usize, source: &str) -> Value {
+    let start_col = utf16_column(source, line, col.max(1) - 1);
+    let end_col = utf16_column(source, line, col.max(1));
     let mut items = vec![
         (
             "range",
@@ -2253,14 +2290,14 @@ fn problem(err: &vey::VeyError, line: usize, col: usize) -> Value {
                     "start",
                     json::object(vec![
                         ("line", json::number((line.max(1) - 1) as f64)),
-                        ("character", json::number((col.max(1) - 1) as f64)),
+                        ("character", json::number(start_col as f64)),
                     ]),
                 ),
                 (
                     "end",
                     json::object(vec![
                         ("line", json::number((line.max(1) - 1) as f64)),
-                        ("character", json::number(col.max(1) as f64)),
+                        ("character", json::number(end_col as f64)),
                     ]),
                 ),
             ]),
@@ -2277,7 +2314,9 @@ fn problem(err: &vey::VeyError, line: usize, col: usize) -> Value {
 }
 
 /// A warning of the compiler, as the protocol wants it.
-fn warning_problem(warning: &vey::warn::Warning) -> Value {
+fn warning_problem(warning: &vey::warn::Warning, source: &str) -> Value {
+    let start_col = utf16_column(source, warning.line, warning.col.max(1) - 1);
+    let end_col = utf16_column(source, warning.line, warning.col.max(1));
     let items = vec![
         (
             "range",
@@ -2286,14 +2325,14 @@ fn warning_problem(warning: &vey::warn::Warning) -> Value {
                     "start",
                     json::object(vec![
                         ("line", json::number((warning.line.max(1) - 1) as f64)),
-                        ("character", json::number((warning.col.max(1) - 1) as f64)),
+                        ("character", json::number(start_col as f64)),
                     ]),
                 ),
                 (
                     "end",
                     json::object(vec![
                         ("line", json::number((warning.line.max(1) - 1) as f64)),
-                        ("character", json::number(warning.col.max(1) as f64)),
+                        ("character", json::number(end_col as f64)),
                     ]),
                 ),
             ]),
@@ -2556,5 +2595,30 @@ mod protocol_tests {
             response.get("error").and_then(|error| error.number("code")),
             Some(-32600.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_position_tests {
+    use super::{problem, utf16_column, warning_problem};
+    use vey::{warn::Warning, VeyError};
+
+    #[test]
+    fn diagnostic_ranges_use_utf16_code_units() {
+        let source = "a😀b";
+        assert_eq!(utf16_column(source, 1, 1), 1);
+        assert_eq!(utf16_column(source, 1, 2), 3);
+
+        let error = VeyError::new("bad value", "main.vey", 1, 2);
+        let diagnostic = problem(&error, 1, 2, source);
+        let range = diagnostic.get("range").unwrap();
+        assert_eq!(range.get("start").unwrap().number("character"), Some(1.0));
+        assert_eq!(range.get("end").unwrap().number("character"), Some(3.0));
+
+        let warning = Warning::new("unused", "main.vey", 1, 2);
+        let diagnostic = warning_problem(&warning, source);
+        let range = diagnostic.get("range").unwrap();
+        assert_eq!(range.get("start").unwrap().number("character"), Some(1.0));
+        assert_eq!(range.get("end").unwrap().number("character"), Some(3.0));
     }
 }
