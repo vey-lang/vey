@@ -8,7 +8,7 @@
 
 ## Kısa sonuç
 
-İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi; checked module namespace'leri, fixed object/tuple şekilleri ve `unknown` üzerinde statik olmayan computed erişimlerin örtük `any`'e düşmesi engellendi. Son `cargo test --all-targets` **396 geçti, 0 başarısız**. `any` ve unchecked npm import'larının açık dinamik davranışı korunuyor; performans ölçülmedi.
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi; checked module namespace'leri, fixed object/tuple şekilleri ve `unknown` üzerinde statik olmayan computed erişimlerin örtük `any`'e düşmesi engellendi. Son `cargo test --all-targets` **396 geçti, 0 başarısız**. `any` ve unchecked npm import'larının açık dinamik davranışı korunuyor; list/dictionary'de bulunmayan anahtarın `void` olarak modellenmesi ayrıca açık uyumluluk kararı; performans ölçülmedi.
 
 ## A. Doğrulanmış bulgular
 
@@ -238,3 +238,9 @@ Probe, bilinen `{ x: number }` shape'inin dinamik string anahtarla okunmasının
 - `an_unknown_value_needs_object_narrowing_before_use_as_object`: computed unknown access da narrowing hatası verdi.
 - `cargo test --test types`: **90 geçti**; `cargo test --test readme`: **4 geçti**.
 - Son `cargo test --all-targets`: **396 geçti, 0 başarısız**.
+
+### Açık uyumluluk kararı: list/dictionary indeksinde bulunmayan değer
+
+Son sınır probe'unda `let values: [number] = []; let first: number = values[0]` ve boş `{[string]: number}` dictionary'den olmayan bir anahtarı `number` değişkenine atama `vey check` tarafından kabul edildi. Runtime JavaScript'te list out-of-range ve dictionary missing-key erişimleri `undefined` döndürebilir; mevcut `Type::Array`/`Type::Dict` checker yolu sırasıyla `T`/value türünü verir, `void` olasılığını modellemez. Bu, modül namespace'inden ve sabit shape'lerden ayrı kalan bir type-safety sınırıdır.
+
+Tam düzeltme için list/dictionary read türünü `T | void` yapmak veya checked lookup/guard API'si tasarlamak gerekir; ilki mevcut kullanımları kaynak açısından kırabilir. Bu nedenle bu turda davranışı varsayımla değiştirmedim; güvenli düzeltmenin uyumluluk etkisi kararlaştırılmalı.
