@@ -1090,8 +1090,8 @@ Statik servis route handler'lardan önce çalışıyor ve dosya yoksa route'a d�
 ### D13 · Sunucu tarafı KV/cache deposu 🟡 **Node memory store eklendi**
 `runtime.storage` ve `runtime.sessionStorage` artık Node'da bellek tabanlı `get/set/remove/clear/keys` API'si sağlıyor. `storage.configure({ ttl })` ile değer bazlı TTL ve otomatik erişim temizliği kullanılabiliyor. Harici Redis/SQLite adapter'ı ve dağıtık persistence hâlâ eksik. Test: `tests/runtime.rs::node_storage_provides_a_ttl_key_value_store`.
 
-### D14 · Şema doğrulama / içerik doğrulama yok
-Body, query, params için şema yok. `req.body` `any`.
+### D14 · Şema doğrulama / içerik doğrulama 🟡 **opt-in middleware eklendi**
+`runtime.validate({ body, query, params })` artık `required`, `type`, `enum`, `min`, `max`, `pattern` ve nested `fields` kurallarıyla isteği doğruluyor; geçersiz istekler 400 dönüyor. Otomatik tip üretimi, ayrıntılı schema standardı ve response validation hâlâ eksik. Test: `tests/runtime.rs::request_validation_checks_body_query_and_params`.
 
 ### D15 · `http` istemcisinde `put`/`patch`/`delete`/`head` ✅ **eklendi**
 `src/runtime/http.js` — HTTP yardımcıları artık `get`/`post` yanında `put`/`patch`/`delete`/`head` de sunuyor.

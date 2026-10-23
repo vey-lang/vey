@@ -1117,6 +1117,41 @@ setTimeout(() => {
 }
 
 #[test]
+fn request_validation_checks_body_query_and_params() {
+    let text = run_runtime(
+        "request-validation",
+        r#"
+const http = require("node:http");
+const app = runtime.server(0);
+app.post("/users/{id}", req => ({ name: req.body.name, id: req.params.id }), runtime.validate({
+  body: { type: "object", fields: { name: { type: "string", required: true, min: 2 } } },
+  query: { fields: { active: { enum: ["yes", "no"] } } },
+  params: { fields: { id: { type: "string", pattern: "^[0-9]+$" } } }
+}));
+function request(body, path) {
+  return new Promise(resolve => {
+    const data = JSON.stringify(body);
+    const req = http.request({ hostname: "127.0.0.1", port: app.port(), path, method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
+      let text = "";
+      res.on("data", chunk => text += chunk);
+      res.on("end", () => resolve([res.statusCode, text]));
+    });
+    req.end(data);
+  });
+}
+app.start(async () => {
+  const valid = await request({ name: "Ada" }, "/users/7?active=yes");
+  const invalid = await request({ name: "A" }, "/users/no?active=maybe");
+  console.log(JSON.stringify([valid[0], invalid[0], valid[1].includes("Ada"), invalid[1]]));
+  await app.stop();
+  process.exit(0);
+});
+"#,
+    );
+    assert!(text.contains(r#"[200,400,true,"#), "{text}");
+}
+
+#[test]
 fn a_body_that_is_too_large_is_refused_before_it_is_read() {
     let text = run_runtime(
         "body-limit",

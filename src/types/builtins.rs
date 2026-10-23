@@ -613,7 +613,7 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
             ("inflate", builtin_function(vec![any()], string())),
         ])),
         "logger" | "cors" | "compress" | "errorHandler" | "security"
-        | "rateLimit" | "csrf" => Some(builtin_optional(vec![any()], 0, any())),
+        | "rateLimit" | "csrf" | "validate" => Some(builtin_optional(vec![any()], 0, any())),
         "bodyLimit" => Some(builtin_function(vec![number()], any())),
         "session" => Some(builtin_object(vec![
             ("start", builtin_function(vec![], string())),

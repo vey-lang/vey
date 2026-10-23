@@ -4,6 +4,7 @@ function veyMiddleware(ctx) {
   var log = ctx.log;
   var isNode = ctx.isNode;
   var nodeModule = ctx.nodeModule;
+  var veyError = ctx.veyError;
 
   // The log of the requests.
   //
@@ -216,11 +217,59 @@ function veyMiddleware(ctx) {
     return piece;
   }
 
+  function validationError(path, message) {
+    var error = veyError("Invalid " + path + ": " + message);
+    error.badRequest = true;
+    error.validation = true;
+    return error;
+  }
+
+  function matchesRule(value, rule, path) {
+    if (typeof rule === "string") rule = { type: rule };
+    if (!rule || typeof rule !== "object") return null;
+    if ((value === undefined || value === null) && rule.required !== false) {
+      return validationError(path, "is required");
+    }
+    if (value === undefined || value === null) return null;
+    var type = rule.type;
+    if (type === "array" && !Array.isArray(value)) return validationError(path, "must be an array");
+    if (type === "object" && (typeof value !== "object" || Array.isArray(value))) return validationError(path, "must be an object");
+    if (type === "string" && typeof value !== "string") return validationError(path, "must be a string");
+    if (type === "number" && (typeof value !== "number" || !isFinite(value))) return validationError(path, "must be a number");
+    if (type === "boolean" && typeof value !== "boolean") return validationError(path, "must be a boolean");
+    if (rule.enum && rule.enum.indexOf(value) === -1) return validationError(path, "has an invalid value");
+    if (rule.min !== undefined && value.length !== undefined && value.length < rule.min) return validationError(path, "is too short");
+    if (rule.max !== undefined && value.length !== undefined && value.length > rule.max) return validationError(path, "is too long");
+    if (rule.pattern && typeof value === "string" && !(new RegExp(rule.pattern).test(value))) return validationError(path, "has an invalid format");
+    if (rule.fields && typeof value === "object" && !Array.isArray(value)) {
+      for (var key in rule.fields) {
+        var nested = matchesRule(value[key], rule.fields[key], path + "." + key);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  }
+
+  function validate(schema) {
+    var definition = schema || {};
+    return function (req, res, next) {
+      var sources = ["body", "query", "params"];
+      for (var sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+        var source = sources[sourceIndex];
+        if (!definition[source]) continue;
+        var error = matchesRule(req[source], definition[source], source);
+        if (error) return next(error);
+      }
+      next();
+    };
+  }
+
   ctx.logger = logger;
   ctx.cors = cors;
   ctx.compress = compress;
   ctx.errorHandler = errorHandler;
   ctx.bodyLimit = bodyLimit;
+  ctx.validate = validate;
   ctx.security = security;
   ctx.rateLimit = rateLimit;
   ctx.csrf = csrf;
@@ -231,6 +280,7 @@ function veyMiddleware(ctx) {
     compress: compress,
     errorHandler: errorHandler,
     bodyLimit: bodyLimit,
+    validate: validate,
     security: security,
     rateLimit: rateLimit,
     csrf: csrf,
