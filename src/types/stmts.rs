@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::lexer::Pos;
 use crate::types::core::{
-    element_type, project_field, rest_element_type, union, FunctionType, Type,
+    element_type, project_field, rest_element_type, union, without_empty, FunctionType, Type,
 };
 use crate::types::rules::{assignable, has_type_var, substitute_bound, unify_types};
 use crate::suggest::did_you_mean;
@@ -441,10 +441,17 @@ impl TypeChecker<'_> {
             }
             Stmt::LetElse(decl) => {
                 let value_ty = self.infer_expr(&decl.value)?;
-                // The name is bound in the scope around it, the way the name
-                // of a `let` is.
+                self.check_block(&decl.otherwise)?;
+                if !block_always_exits(&decl.otherwise) {
+                    return Err(
+                        self.error(decl.pos, "the else block of a let-else statement must exit")
+                    );
+                }
+                // The name is in scope only after the else branch. Reaching
+                // this point means it did not run, so the value is not empty.
+                let value_ty = without_empty(&value_ty);
                 self.declare_pattern_typed(&decl.pattern, &value_ty);
-                self.check_block(&decl.otherwise)
+                Ok(())
             }
             Stmt::Defer(decl) => {
                 self.infer_expr(&decl.value)?;
@@ -1240,7 +1247,7 @@ impl TypeChecker<'_> {
         if let Some(path) = place_path(&decl.target) {
             self.forget_member(&path);
         }
-        let target_ty = self.target_type(&decl.target)?;
+        let target_ty = self.target_type(&decl.target, decl.op == "=")?;
         let value_ty = self.infer_expr_as(&decl.value, target_ty.as_ref())?;
 
         if let Some(target_ty) = target_ty {
@@ -1258,14 +1265,18 @@ impl TypeChecker<'_> {
         Ok(())
     }
 
-    pub(crate) fn target_type(&mut self, target: &Expr) -> Result<Option<Type>, VeyError> {
+    pub(crate) fn target_type(
+        &mut self,
+        target: &Expr,
+        for_write: bool,
+    ) -> Result<Option<Type>, VeyError> {
         match target {
             Expr::Ident(name, _) => Ok(self.lookup(name)),
             Expr::Member(object, prop, optional, pos) => {
                 if *optional {
                     return Ok(Some(Type::Any));
                 }
-                let ty = self.member_type(object, prop, false, *pos)?;
+                let ty = self.member_type(object, prop, false, *pos, for_write)?;
                 Ok(Some(ty))
             }
             _ => Ok(None),

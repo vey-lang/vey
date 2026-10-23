@@ -601,7 +601,7 @@ print(add(2, 3))
 ```
 <!-- check -->
 
-Built-in types are `any`, `number`, `string`, `bool`, `null`, `void` and `never`.
+Built-in types are `any`, `number`, `string`, `bool`, `null`, `undefined`, `void` and `never`.
 
 Type forms:
 
@@ -614,10 +614,13 @@ Type forms:
 - `Signal<T>` / `Store<T>` the state of a page (see [A page that lives](#a-page-that-lives))
 
 Computed access follows the declared shape: lists accept numeric indices and
-dictionaries accept keys of their declared key type. Fixed objects and tuples
-require literal property names and literal, in-range tuple indices; an `unknown`
-value must be narrowed before computed access. Use a dictionary or list when
-the key or index is only known at runtime.
+dictionaries accept keys of their declared key type. Reading a list, string or
+dictionary index may produce `undefined` when the index or key is absent; use
+`??` or a check before treating it as present. Writing an index is checked
+against the list element or dictionary value type. Fixed objects and tuples
+require literal property names and literal, in-range tuple indices; an
+`unknown` value must be narrowed before computed access. Use a dictionary or
+list when the key or index is only known at runtime.
 
 The fields of an object may be written one under the other, with or without a
 comma. The same goes for the fields of an object value.

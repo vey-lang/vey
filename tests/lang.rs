@@ -960,7 +960,7 @@ fn first<T>(items: [T]) -> T? {
   if len(items) == 0 {
     return null
   }
-  return items[0]
+  return items[0] ?? null
 }
 
 fn pair<A, B>(left: A, right: B) -> { left: A, right: B } {

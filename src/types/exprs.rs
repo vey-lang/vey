@@ -241,7 +241,7 @@ impl TypeChecker<'_> {
                 self.infer_call(callee, args, *optional, *pos, None, Some(&explicit))
             }
             Expr::Member(object, prop, optional, pos) => {
-                self.member_type(object, prop, *optional, *pos)
+                self.member_type(object, prop, *optional, *pos, false)
             }
             Expr::Fn(params, body, ret_ann, pos) => {
                 let (ret, param_types) =
@@ -1497,6 +1497,7 @@ impl TypeChecker<'_> {
         prop: &MemberProp,
         optional: bool,
         pos: Pos,
+        for_write: bool,
     ) -> Result<Type, VeyError> {
         if let (MemberProp::Computed(index), Expr::Ident(alias, _)) = (prop, object) {
             if !self.is_shadowed(alias) {
@@ -1507,6 +1508,7 @@ impl TypeChecker<'_> {
                             &MemberProp::Name(name.to_string()),
                             optional,
                             pos,
+                            for_write,
                         );
                     }
                     if !env.unchecked {
@@ -1541,7 +1543,7 @@ impl TypeChecker<'_> {
             // A local name of its own wins over the alias of a module.
             if self.is_shadowed(alias) {
                 let object_ty = self.infer_expr(object)?;
-                let ty = self.lookup_member(&object_ty, name, pos)?;
+                let ty = self.lookup_member_for_access(&object_ty, name, pos, for_write)?;
                 return Ok(if optional {
                     union(vec![ty, Type::Null])
                 } else {
@@ -1642,7 +1644,9 @@ impl TypeChecker<'_> {
 
         let object_ty = self.infer_expr(object)?;
         let ty = match prop {
-            MemberProp::Name(name) => self.lookup_member(&object_ty, name, pos)?,
+            MemberProp::Name(name) => {
+                self.lookup_member_for_access(&object_ty, name, pos, for_write)?
+            }
             MemberProp::Computed(index) => {
                 let index_ty = self.infer_expr(index)?;
                 self.lookup_computed_member(
@@ -1651,8 +1655,8 @@ impl TypeChecker<'_> {
                     &index_ty,
                     pos,
                     optional,
+                    for_write,
                     &mut HashSet::new(),
-                    false,
                 )?
             }
         };
@@ -1670,8 +1674,8 @@ impl TypeChecker<'_> {
         index_ty: &Type,
         pos: Pos,
         optional: bool,
+        for_write: bool,
         resolving_bounds: &mut HashSet<String>,
-        constrained: bool,
     ) -> Result<Type, VeyError> {
         match ty {
             Type::Var(type_param) => {
@@ -1693,22 +1697,30 @@ impl TypeChecker<'_> {
                     index_ty,
                     pos,
                     optional,
+                    for_write,
                     resolving_bounds,
-                    true,
                 );
                 resolving_bounds.remove(type_param);
                 result
             }
             Type::Array(inner) => {
                 if self.fits(index_ty, &Type::Number) {
-                    Ok((**inner).clone())
+                    if for_write {
+                        Ok((**inner).clone())
+                    } else {
+                        Ok(union(vec![(**inner).clone(), Type::Undefined]))
+                    }
                 } else {
                     Err(self.type_error(pos, index_ty, &Type::Number))
                 }
             }
             Type::String => {
                 if self.fits(index_ty, &Type::Number) {
-                    Ok(Type::String)
+                    if for_write {
+                        Ok(Type::String)
+                    } else {
+                        Ok(union(vec![Type::String, Type::Undefined]))
+                    }
                 } else {
                     Err(self.type_error(pos, index_ty, &Type::Number))
                 }
@@ -1730,11 +1742,15 @@ impl TypeChecker<'_> {
                 if !matches!(index_ty, Type::Any) && !self.fits(index_ty, key) {
                     return Err(self.type_error(pos, index_ty, key));
                 }
-                Ok((**value).clone())
+                if for_write {
+                    Ok((**value).clone())
+                } else {
+                    Ok(union(vec![(**value).clone(), Type::Undefined]))
+                }
             }
             Type::Object(_) | Type::Named(_, _) | Type::Interface(_, _) => {
                 if let Some(name) = literal_string(index) {
-                    self.lookup_member(ty, name, pos)
+                    self.lookup_member_for_access(ty, name, pos, for_write)
                 } else {
                     Err(self.error(
                         pos,
@@ -1748,7 +1764,7 @@ impl TypeChecker<'_> {
             Type::Union(items) => {
                 let mut out = Vec::new();
                 for item in items {
-                    if optional && matches!(item, Type::Null | Type::Void) {
+                    if optional && matches!(item, Type::Null | Type::Undefined | Type::Void) {
                         continue;
                     }
                     out.push(self.lookup_computed_member(
@@ -1757,8 +1773,8 @@ impl TypeChecker<'_> {
                         index_ty,
                         pos,
                         optional,
+                        for_write,
                         resolving_bounds,
-                        constrained,
                     )?);
                 }
                 if out.is_empty() {
@@ -1773,10 +1789,7 @@ impl TypeChecker<'_> {
                 "an unknown value must be narrowed before computed access",
             )),
             Type::Never => Ok(Type::Never),
-            _ if constrained => {
-                Err(self.error(pos, format!("type {} cannot be indexed", ty.display())))
-            }
-            _ => Ok(Type::Any),
+            _ => Err(self.error(pos, format!("type {} cannot be indexed", ty.display()))),
         }
     }
 
@@ -1950,7 +1963,17 @@ impl TypeChecker<'_> {
     }
 
     pub(crate) fn lookup_member(&self, ty: &Type, name: &str, pos: Pos) -> Result<Type, VeyError> {
-        self.lookup_member_inner(ty, name, pos, &mut HashSet::new())
+        self.lookup_member_for_access(ty, name, pos, false)
+    }
+
+    fn lookup_member_for_access(
+        &self,
+        ty: &Type,
+        name: &str,
+        pos: Pos,
+        for_write: bool,
+    ) -> Result<Type, VeyError> {
+        self.lookup_member_inner(ty, name, pos, for_write, &mut HashSet::new())
     }
 
     fn lookup_member_inner(
@@ -1958,6 +1981,7 @@ impl TypeChecker<'_> {
         ty: &Type,
         name: &str,
         pos: Pos,
+        for_write: bool,
         resolving_bounds: &mut HashSet<String>,
     ) -> Result<Type, VeyError> {
         match ty {
@@ -1969,7 +1993,8 @@ impl TypeChecker<'_> {
                 if !resolving_bounds.insert(type_param.clone()) {
                     return Err(self.no_field_error(ty, name, pos));
                 }
-                let result = self.lookup_member_inner(&bound, name, pos, resolving_bounds);
+                let result =
+                    self.lookup_member_inner(&bound, name, pos, for_write, resolving_bounds);
                 resolving_bounds.remove(type_param);
                 result
             }
@@ -2045,7 +2070,16 @@ impl TypeChecker<'_> {
             Type::Array(_) if name == "length" => Ok(Type::Number),
             Type::String if name == "length" => Ok(Type::Number),
             // Every key of a dictionary has the same type of value.
-            Type::Dict(_, value) => Ok((**value).clone()),
+            Type::Dict(key, value) => {
+                if !self.fits(&Type::String, key) {
+                    return Err(self.type_error(pos, &Type::String, key));
+                }
+                if for_write {
+                    Ok((**value).clone())
+                } else {
+                    Ok(union(vec![(**value).clone(), Type::Undefined]))
+                }
+            }
             // The answer of a function that may fail says whether it
             // worked, and what it was.
             Type::Result(ok, _) if name == "ok" => Ok(Type::Bool),
@@ -2079,7 +2113,13 @@ impl TypeChecker<'_> {
                     // A member that does not have the field is a mistake:
                     // the value may be that member, so the field would not
                     // always be there.
-                    out.push(self.lookup_member_inner(item, name, pos, resolving_bounds)?);
+                    out.push(self.lookup_member_inner(
+                        item,
+                        name,
+                        pos,
+                        for_write,
+                        resolving_bounds,
+                    )?);
                 }
                 if out.is_empty() {
                     Ok(Type::Null)

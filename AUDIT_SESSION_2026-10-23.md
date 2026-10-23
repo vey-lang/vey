@@ -8,7 +8,7 @@
 
 ## Kısa sonuç
 
-İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi; checked module namespace'leri, fixed object/tuple şekilleri ve `unknown` üzerinde statik olmayan computed erişimlerin örtük `any`'e düşmesi engellendi. Son `cargo test --all-targets` **396 geçti, 0 başarısız**. `any` ve unchecked npm import'larının açık dinamik davranışı korunuyor; list/dictionary'de bulunmayan anahtarın `void` olarak modellenmesi ayrıca açık uyumluluk kararı; performans ölçülmedi.
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve literal-string computed member'lar (escaped keys dahil) için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Scope'a bağlı imported-alias gölgelemesi düzeltildi; checked module namespace'leri, fixed object/tuple şekilleri, `unknown` ve indekslenemeyen primitive/union dallarında computed erişimlerin örtük `any`'e düşmesi engellendi. List/string/dictionary okumaları olası `undefined` değerini taşır; let-else başarı dalı bunu daraltır ve yazma hedeflerinde eleman/değer tipi korunur. Son `cargo test --all-targets` **398 geçti, 0 başarısız**. Açık `any` ve unchecked npm import'larının dinamik davranışı korunuyor; performans ölçülmedi.
 
 ## A. Doğrulanmış bulgular
 
@@ -236,11 +236,17 @@ Probe, bilinen `{ x: number }` shape'inin dinamik string anahtarla okunmasının
 - `cargo test --test types a_dynamic_key_on_a_typed_object_needs_a_dictionary_type -- --exact`: **1 geçti**; inline object, named alias ve interface dynamic key'leri reddedildi, dictionary dynamic key'i typed kaldı.
 - `cargo test --test types a_tuple_needs_a_literal_in_range_index -- --exact`: **1 geçti**; dinamik ve aralık dışı tuple index'leri reddedildi.
 - `an_unknown_value_needs_object_narrowing_before_use_as_object`: computed unknown access da narrowing hatası verdi.
-- `cargo test --test types`: **90 geçti**; `cargo test --test readme`: **4 geçti**.
-- Son `cargo test --all-targets`: **396 geçti, 0 başarısız**.
+- `cargo test --test types`: **92 geçti**; `cargo test --test readme`: **4 geçti**.
+- Son `cargo test --all-targets`: **398 geçti, 0 başarısız**; `git diff --check` temiz.
 
-### Açık uyumluluk kararı: list/dictionary indeksinde bulunmayan değer
+### List/string/dictionary okuma yok-değer güvenliği
 
-Son sınır probe'unda `let values: [number] = []; let first: number = values[0]` ve boş `{[string]: number}` dictionary'den olmayan bir anahtarı `number` değişkenine atama `vey check` tarafından kabul edildi. Runtime JavaScript'te list out-of-range ve dictionary missing-key erişimleri `undefined` döndürebilir; mevcut `Type::Array`/`Type::Dict` checker yolu sırasıyla `T`/value türünü verir, `void` olasılığını modellemez. Bu, modül namespace'inden ve sabit shape'lerden ayrı kalan bir type-safety sınırıdır.
+Probe, boş liste `values[0]` ve boş dictionary `values["missing"]` okumalarının `number` olarak kabul edildiğini gösterdi; runtime'da ikisi de `undefined` döndürebilir. `Type::Array`, `Type::Dict` ve string numeric-index okuma türleri artık sırasıyla `T | undefined`, `V | undefined` ve `string | undefined`; dictionary dot-key (`dict.name`) de aynı yok-değer davranışını izliyor. Böylece tüketen kod `??`, narrowing veya union return tipi kullanmalı. Ayrıca computed erişimde desteklenmeyen non-`any` türler artık genel `any` fallback'ına düşmez; primitive veya nullable union önce hata verir ve uygun narrowing gerekir. Optional computed access `null | undefined` union kollarını atlayıp sadece gerçek lookup türünü döndürür.
 
-Tam düzeltme için list/dictionary read türünü `T | void` yapmak veya checked lookup/guard API'si tasarlamak gerekir; ilki mevcut kullanımları kaynak açısından kırabilir. Bu nedenle bu turda davranışı varsayımla değiştirmedim; güvenli düzeltmenin uyumluluk etkisi kararlaştırılmalı.
+Okuma ve yazma yolları ayrıldı: `=` hedefi list/dictionary eleman/değer tipini kullanır ve yeni değer yazabilir; compound assignment önce mevcut değeri okuduğu için `undefined` olasılığını korur ve güvenli şekilde reddedilebilir. `let-else` else bloğu şimdi isim bağlanmadan önce denetlenir, mutlaka çıkış yapmalıdır ve başarı dalındaki isimden `null | undefined` çıkarılır. Bu, README'deki ilk list elemanı örneğinin generic dönüş tipinde doğru şekilde daralmasını da sağlar; generic `first` helper'ı `items[0] ?? null` ile yok durumu açıkça ele alır.
+
+- `collection_reads_include_undefined_but_writes_keep_the_value_type`: boş liste, dictionary bracket/dot ve string index okumalarında `undefined` hatası; `??` sonrası güvenli kullanım; basit yazma; compound-write reddi ve let-else narrowing doğrulandı.
+- `a_union_with_a_non_indexable_member_must_be_narrowed_before_access`: primitive index reddi, nullable list union'ında narrowing zorunluluğu ve null/undefined için optional computed access doğrulandı.
+- Aynı regression'da let-else'in çıkış yapmayan fallback'i reddediliyor; else block içindeyken yeni binding görünür değil.
+- `cargo test --test types`: **92 geçti**; `cargo test --test readme`: **4 geçti**; `supports_generics`: **1 geçti**.
+- Son `cargo test --all-targets`: **398 geçti, 0 başarısız**; `git diff --check` temiz.

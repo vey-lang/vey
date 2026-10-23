@@ -623,15 +623,15 @@ fn an_unbounded_or_missing_generic_member_is_rejected() {
 fn a_bounded_generic_array_index_keeps_its_element_type() {
     check_ok(
         "bounded-array-index",
-        "fn get<T: [number]>(v: T) -> number { return v[0] }\nlet n: number = get([1])\n",
+        "fn get<T: [number]>(v: T) -> number | undefined { return v[0] }\nlet n: number | undefined = get([1])\n",
     );
     check_ok(
         "bounded-nested-array-index",
-        "fn get<T: { items: [number] }>(v: T) -> number { return v.items[0] }\n",
+        "fn get<T: { items: [number] }>(v: T) -> number | undefined { return v.items[0] }\n",
     );
     check_ok(
         "bounded-union-array-index",
-        "fn get<T: [number] | [string]>(v: T) -> number | string { return v[0] }\n",
+        "fn get<T: [number] | [string]>(v: T) -> number | string | undefined { return v[0] }\n",
     );
 
     let wrong_array = check_err(
@@ -639,7 +639,7 @@ fn a_bounded_generic_array_index_keeps_its_element_type() {
         "fn get<T: [number]>(v: T) -> string { return v[0] }\n",
     );
     assert!(
-        wrong_array.contains("expected string, found number"),
+        wrong_array.contains("expected string, found number | undefined"),
         "{wrong_array}"
     );
 
@@ -660,7 +660,7 @@ fn a_bounded_generic_array_index_keeps_its_element_type() {
 fn a_bounded_generic_dictionary_index_checks_key_and_value_types() {
     check_ok(
         "bounded-dictionary-index",
-        "fn get<T: {[string]: number}>(v: T) -> number { return v[\"key\"] }\n",
+        "fn get<T: {[string]: number}>(v: T) -> number | undefined { return v[\"key\"] }\n",
     );
 
     let wrong_value = check_err(
@@ -668,7 +668,7 @@ fn a_bounded_generic_dictionary_index_checks_key_and_value_types() {
         "fn get<T: {[string]: number}>(v: T) -> string { return v[\"key\"] }\n",
     );
     assert!(
-        wrong_value.contains("expected string, found number"),
+        wrong_value.contains("expected string, found number | undefined"),
         "{wrong_value}"
     );
 
@@ -692,12 +692,12 @@ fn a_bounded_generic_dictionary_index_checks_key_and_value_types() {
 fn a_generic_alias_accepts_a_type_parameter_with_a_matching_bound() {
     check_ok(
         "bounded-generic-alias-argument",
-        "type Box<T: number> = [T]\nfn first<U: number>(v: Box<U>) -> U { return v[0] }\nlet n: number = first([1])\n",
+        "type Box<T: number> = [T]\nfn first<U: number>(v: Box<U>) -> U | undefined { return v[0] }\nlet n: number | undefined = first([1])\n",
     );
 
     let error = check_err(
         "bounded-generic-alias-incompatible-argument",
-        "type Box<T: number> = [T]\nfn first<U: string>(v: Box<U>) -> U { return v[0] }\n",
+        "type Box<T: number> = [T]\nfn first<U: string>(v: Box<U>) -> U | undefined { return v[0] }\n",
     );
     assert!(error.contains("type 'Box' expects number"), "{error}");
 }
@@ -898,7 +898,7 @@ let n: number = narrow.x
     );
     check_ok(
         "mutable-dictionary-same-value-alias",
-        "let first: {[string]: number} = { x: 1 }\nlet second: {[string]: number} = first\nsecond[\"x\"] = 2\nlet n: number = first[\"x\"]\n",
+        "let first: {[string]: number} = { x: 1 }\nlet second: {[string]: number} = first\nsecond[\"x\"] = 2\nlet n: number = first[\"x\"] ?? 0\n",
     );
 }
 
@@ -1457,7 +1457,7 @@ fn a_dictionary_gives_the_type_of_its_values() {
         "dict-member",
         r#"
 fn f(d: {[string]: number}, key: string) -> number {
-  return d["a"] + d.b + d[key]
+  return (d["a"] ?? 0) + (d.b ?? 0) + (d[key] ?? 0)
 }
 "#,
     );
@@ -1471,6 +1471,90 @@ fn f(d: {[string]: number}) -> number {
 "#,
     );
     assert!(error.contains("expected string, found bool"), "{error}");
+}
+
+#[test]
+fn collection_reads_include_undefined_but_writes_keep_the_value_type() {
+    for (name, source, expected) in [
+        (
+            "list-read-may-be-undefined",
+            "let values: [number] = []\nlet first: number = values[0]\n",
+            "expected number, found number | undefined",
+        ),
+        (
+            "dictionary-read-may-be-undefined",
+            "let values: {[string]: number} = {}\nlet missing: number = values[\"missing\"]\n",
+            "expected number, found number | undefined",
+        ),
+        (
+            "dictionary-dot-read-may-be-undefined",
+            "let values: {[string]: number} = {}\nlet missing: number = values.missing\n",
+            "expected number, found number | undefined",
+        ),
+        (
+            "string-index-read-may-be-undefined",
+            "let text: string = \"a\"\nlet character: string = text[4]\n",
+            "expected string, found string | undefined",
+        ),
+    ] {
+        let error = check_err(name, source);
+        assert!(error.contains(expected), "{error}");
+    }
+
+    check_ok(
+        "collection-index-write-and-coalesce",
+        "let values: [number] = []\nvalues[0] = 1\nlet first: number = values[0] ?? 0\nlet dict: {[string]: number} = {}\ndict[\"x\"] = 2\ndict.y = 3\nlet found: number = dict.y ?? 0\nlet text: string = \"a\"\nlet character: string = text[4] ?? \"\"\n",
+    );
+    check_ok(
+        "collection-index-let-else-narrows",
+        "fn first(names: [string]) -> string { let found = names[0] else { return \"none\" }; return found }\n",
+    );
+    check_ok(
+        "let-else-binding-starts-after-fallback",
+        "let found: number = 7\nfn get(value: number | undefined) -> number { let found = value else { return found }; return found }\n",
+    );
+
+    let non_exiting_else = check_err(
+        "let-else-must-exit",
+        "let values: [number] = []\nlet first = values[0] else { print(\"missing\") }\n",
+    );
+    assert!(
+        non_exiting_else.contains("the else block of a let-else statement must exit"),
+        "{non_exiting_else}"
+    );
+
+    let compound = check_err(
+        "compound-index-write-reads-possibly-undefined",
+        "let values: [number] = []\nvalues[0] += 1\n",
+    );
+    assert!(compound.contains("number | undefined"), "{compound}");
+}
+
+#[test]
+fn a_union_with_a_non_indexable_member_must_be_narrowed_before_access() {
+    let primitive = check_err(
+        "number-is-not-indexable",
+        "let value: number = 1\nlet indexed = value[0]\n",
+    );
+    assert!(
+        primitive.contains("type number cannot be indexed"),
+        "{primitive}"
+    );
+
+    let error = check_err(
+        "nullable-list-index-without-narrowing",
+        "let maybe: [number] | null = null\nlet value: number = maybe[0]\n",
+    );
+    assert!(error.contains("type null cannot be indexed"), "{error}");
+
+    check_ok(
+        "nullable-list-index-after-narrowing",
+        "let maybe: [number] | null = [1]\nif maybe != null { let value: number | undefined = maybe[0] }\n",
+    );
+    check_ok(
+        "nullable-list-optional-index",
+        "let maybe: [number] | null | undefined = null\nlet value: number | undefined | null = maybe?.[0]\n",
+    );
 }
 
 #[test]
@@ -1498,11 +1582,11 @@ fn a_dynamic_key_on_a_typed_object_needs_a_dictionary_type() {
     }
     check_ok(
         "dynamic-object-index-as-dictionary",
-        "fn get(shape: {[string]: number}, key: string) -> number { return shape[key] }\n",
+        "fn get(shape: {[string]: number}, key: string) -> number | undefined { return shape[key] }\n",
     );
     check_ok(
         "dynamic-object-index-as-named-dictionary",
-        "type Values = {[string]: number}\nfn get(values: Values, key: string) -> number { return values[key] }\n",
+        "type Values = {[string]: number}\nfn get(values: Values, key: string) -> number | undefined { return values[key] }\n",
     );
 }
 
