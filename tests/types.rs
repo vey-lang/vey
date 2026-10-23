@@ -428,7 +428,7 @@ fn recursive_generic_shapes_survive_reexport_layers() {
     .unwrap();
     std::fs::write(
         dir.join("valid.vey"),
-        "use \"./wrapper.vey\" as w\nlet tree: w.Wrapped<number> = { tree: { value: 1, children: [{ value: 2, children: [] }] } }\nlet flip: w.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: \"next\", second: 2, children: [] }] } }\n",
+        "use \"./wrapper.vey\" as t\nlet tree: t.Wrapped<number> = { tree: { value: 1, children: [{ value: 2, children: [] }] } }\nlet flip: t.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: \"next\", second: 2, children: [] }] } }\n",
     )
     .unwrap();
     let valid = common::check_file(&dir.join("valid.vey"));
@@ -436,7 +436,7 @@ fn recursive_generic_shapes_survive_reexport_layers() {
 
     std::fs::write(
         dir.join("invalid.vey"),
-        "use \"./wrapper.vey\" as w\nlet tree: w.Wrapped<number> = { tree: { value: 1, children: [{ value: \"wrong\", children: [] }] } }\nlet flip: w.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: 2, second: \"wrong\", children: [] }] } }\n",
+        "use \"./wrapper.vey\" as t\nlet tree: t.Wrapped<number> = { tree: { value: 1, children: [{ value: \"wrong\", children: [] }] } }\nlet flip: t.Flipped<number, string> = { value: { first: 1, second: \"s\", children: [{ first: 2, second: \"wrong\", children: [] }] } }\n",
     )
     .unwrap();
     let invalid = common::check_file(&dir.join("invalid.vey"));

@@ -463,10 +463,7 @@ pub(crate) fn qualified_type(module: &str, ty: Type) -> Type {
     fn qualify_recursions(module: &str, ty: &mut Type) {
         match ty {
             Type::Recursion(name, args) => {
-                let prefix = format!("{}.", module);
-                if !name.starts_with(&prefix) {
-                    *name = format!("{}.{}", module, name);
-                }
+                *name = format!("{}.{}", module, name);
                 for arg in args {
                     qualify_recursions(module, arg);
                 }
