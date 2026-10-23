@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vey::parser::Parser;
 
@@ -34,6 +34,7 @@ pub(crate) fn cmd_lsp(args: &[String]) -> i32 {
     let mut stdout = io::stdout();
     let mut server = Server {
         files: HashMap::new(),
+        workspace_roots: Vec::new(),
     };
 
     let mut input = stdin.lock();
@@ -144,6 +145,8 @@ fn write_message(output: &mut impl Write, value: &Value) -> io::Result<()> {
 struct Server {
     /// The files that are open, with the text of them.
     files: HashMap<String, String>,
+    /// The workspace folders that may contain unopened references.
+    workspace_roots: Vec<PathBuf>,
 }
 
 impl Server {
@@ -166,7 +169,31 @@ impl Server {
         }
 
         match method {
-            "initialize" => id.map(|id| answer(id, initialize())),
+            "initialize" => {
+                self.workspace_roots.clear();
+                if let Some(params) = message.get("params") {
+                    if let Some(folders) = params.list("workspaceFolders") {
+                        self.workspace_roots
+                            .extend(folders.iter().filter_map(|folder| {
+                                folder
+                                    .text("uri")
+                                    .and_then(path_of)
+                                    .filter(|path| path.is_dir())
+                            }));
+                    }
+                    if self.workspace_roots.is_empty() {
+                        if let Some(root) = params
+                            .text("rootUri")
+                            .and_then(path_of)
+                            .or_else(|| params.text("rootPath").map(PathBuf::from))
+                            .filter(|path| path.is_dir())
+                        {
+                            self.workspace_roots.push(root);
+                        }
+                    }
+                }
+                id.map(|id| answer(id, initialize()))
+            }
             "initialized" => None,
             "shutdown" => id.map(|id| answer(id, Value::Null)),
             "exit" => None,
@@ -402,9 +429,31 @@ impl Server {
     }
 
     fn source(&self, uri: &str) -> Option<String> {
-        self.files.get(uri).cloned().or_else(|| {
-            path_of(uri).and_then(|path| std::fs::read_to_string(path).ok())
-        })
+        self.files
+            .get(uri)
+            .cloned()
+            .or_else(|| path_of(uri).and_then(|path| std::fs::read_to_string(path).ok()))
+    }
+
+    fn workspace_files(&self) -> Vec<String> {
+        let mut files: Vec<String> = self.files.keys().cloned().collect();
+        let mut seen = HashSet::new();
+        for uri in self.files.keys() {
+            if let Some(path) = path_of(uri) {
+                seen.insert(path.canonicalize().unwrap_or(path));
+            }
+        }
+        let mut paths = Vec::new();
+        for root in &self.workspace_roots {
+            collect_workspace_sources(root, &mut paths);
+        }
+        for path in paths {
+            let path = path.canonicalize().unwrap_or(path);
+            if seen.insert(path.clone()) {
+                files.push(file_uri(&path.to_string_lossy()));
+            }
+        }
+        files
     }
 
     fn imported_module_uri(
@@ -468,21 +517,20 @@ impl Server {
             {
                 if let Some(target_names) = self.names(&target_uri) {
                     if target_names.exports.contains(&member.name) {
-                        if let Some((definition, (name, pos, _))) = target_names
+                        let export_symbol = target_names
+                            .export_symbols
+                            .get(&(member.name.clone(), member.type_namespace))?;
+                        if let Some((_, (name, pos, _))) = target_names
                             .defs
                             .iter()
                             .enumerate()
-                            .find(|(_, (name, _, _))| name == &member.name)
+                            .find(|(definition, (name, _, _))| {
+                                name == &member.name
+                                    && target_names.def_symbols.get(*definition).copied().flatten()
+                                        == Some(*export_symbol)
+                            })
                         {
-                            if target_names
-                                .def_symbols
-                                .get(definition)
-                                .copied()
-                                .flatten()
-                                .is_some()
-                            {
-                                return Some((target_uri, name.clone(), *pos));
-                            }
+                            return Some((target_uri, name.clone(), *pos));
                         }
                     }
                 }
@@ -500,8 +548,13 @@ impl Server {
             if !target_names.exports.contains(&variant.enum_name) {
                 return None;
             }
+            let enum_symbol = target_names
+                .export_symbols
+                .get(&(variant.enum_name.clone(), true))?;
             let target = target_names.enum_variant_defs.iter().find(|definition| {
-                definition.enum_name == variant.enum_name && definition.name == variant.name
+                definition.enum_symbol == *enum_symbol
+                    && definition.enum_name == variant.enum_name
+                    && definition.name == variant.name
             })?;
             return Some((target_uri, target.name.clone(), target.pos));
         }
@@ -540,12 +593,18 @@ impl Server {
                 ));
             }
         }
-        for candidate_uri in self.files.keys() {
+        let workspace_files = self.workspace_files();
+        for candidate_uri in &workspace_files {
             let Some(candidate_names) = self.names(candidate_uri) else {
                 continue;
             };
             for member in &candidate_names.module_member_uses {
                 if target_names.exports.contains(target_name)
+                    && target_names
+                        .export_symbols
+                        .get(&(target_name.to_string(), member.type_namespace))
+                        .copied()
+                        == Some(symbol)
                     && member.name == target_name
                     && self
                         .imported_module_uri(
@@ -572,7 +631,7 @@ impl Server {
             .find(|variant| variant.name == target_name && variant.pos == target_pos)
         {
             if target_variant.symbol == symbol {
-                for candidate_uri in self.files.keys() {
+                for candidate_uri in &workspace_files {
                     let Some(candidate_names) = self.names(candidate_uri) else {
                         continue;
                     };
@@ -844,6 +903,8 @@ struct Names {
     enum_variant_uses: Vec<EnumVariantUse>,
     /// Top-level names visible to another module.
     exports: HashSet<String>,
+    /// The binding identity behind each exported name.
+    export_symbols: HashMap<(String, bool), usize>,
     /// The names that are declared.
     defs: Vec<(String, vey::lexer::Pos, &'static str)>,
     /// The binding identity for each declaration (including non-value names).
@@ -888,6 +949,7 @@ struct ModuleMemberUse {
     alias: String,
     receiver_symbol: Option<usize>,
     name: String,
+    type_namespace: bool,
     pos: vey::lexer::Pos,
     range_len: usize,
 }
@@ -986,6 +1048,7 @@ impl Names {
             enum_variant_defs: Vec::new(),
             enum_variant_uses: Vec::new(),
             exports: HashSet::new(),
+            export_symbols: HashMap::new(),
             defs: Vec::new(),
             def_symbols: Vec::new(),
             uses: Vec::new(),
@@ -1169,6 +1232,25 @@ impl Names {
         }
         self.defs.push((name.to_string(), pos, kind));
         self.def_symbols.push(symbol);
+        if self.scope_ids.last() == Some(&0) && self.exports.contains(name) {
+            if let Some(symbol) = symbol {
+                match kind {
+                    "type" | "interface" => {
+                        self.export_symbols.insert((name.to_string(), true), symbol);
+                    }
+                    "enum" => {
+                        self.export_symbols.insert((name.to_string(), true), symbol);
+                        self.export_symbols
+                            .insert((name.to_string(), false), symbol);
+                    }
+                    "variable" | "function" | "component" => {
+                        self.export_symbols
+                            .insert((name.to_string(), false), symbol);
+                    }
+                    _ => {}
+                }
+            }
+        }
         if matches!(kind, "type" | "interface" | "enum") {
             if let (Some(symbol), Some(scope)) = (symbol, self.type_scopes.last_mut()) {
                 scope.insert(name.to_string(), symbol);
@@ -1634,6 +1716,7 @@ impl Names {
                                 alias: module.to_string(),
                                 receiver_symbol: self.resolve(module),
                                 name: member.to_string(),
+                                type_namespace: false,
                                 pos: vey::lexer::Pos::new(
                                     element.pos.line,
                                     element.pos.col + module.chars().count() + 1,
@@ -1707,6 +1790,7 @@ impl Names {
                         alias: module.to_string(),
                         receiver_symbol,
                         name: member.to_string(),
+                        type_namespace: true,
                         pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
                         range_len: member.chars().count(),
                     });
@@ -1759,6 +1843,7 @@ impl Names {
                     alias: module.clone(),
                     receiver_symbol: self.resolve(module),
                     name: member.clone(),
+                    type_namespace: true,
                     pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
                     range_len: member.chars().count(),
                 });
@@ -1770,6 +1855,7 @@ impl Names {
                         alias: module.to_string(),
                         receiver_symbol: self.resolve(module),
                         name: member.to_string(),
+                        type_namespace: true,
                         pos: vey::lexer::Pos::new(pos.line, pos.col + module.chars().count() + 1),
                         range_len: member.chars().count(),
                     });
@@ -1867,6 +1953,7 @@ impl Names {
                             alias: alias.clone(),
                             receiver_symbol: self.resolve(alias),
                             name,
+                            type_namespace: false,
                             pos,
                             range_len,
                         });
@@ -1907,6 +1994,7 @@ impl Names {
                         alias: alias.clone(),
                         receiver_symbol: self.resolve(alias),
                         name: name.clone(),
+                        type_namespace: false,
                         pos: member_name_pos(&self.source, *pos, name),
                         range_len: name.chars().count(),
                     });
@@ -2198,6 +2286,38 @@ fn path_of(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
+fn collect_workspace_sources(root: &Path, out: &mut Vec<PathBuf>) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                let ignored = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        matches!(
+                            name,
+                            ".git" | ".vey" | "build" | "dist" | "node_modules" | "target"
+                        )
+                    });
+                if !ignored {
+                    pending.push(path);
+                }
+            } else if kind.is_file() && path.extension().is_some_and(|extension| extension == "vey")
+            {
+                out.push(path);
+            }
+        }
+    }
+}
+
 fn file_uri(path: &str) -> String {
     #[cfg(windows)]
     let path = path.replace('\\', "/");
@@ -2339,6 +2459,7 @@ mod protocol_tests {
         assert!(rest.is_empty());
         let mut server = Server {
             files: HashMap::new(),
+            workspace_roots: Vec::new(),
         };
         let response = server.handle(&message).unwrap();
         assert_eq!(response.get("id"), Some(&Value::Number(7.0)));

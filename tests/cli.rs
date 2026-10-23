@@ -2507,12 +2507,16 @@ fn the_language_server_navigates_to_unopened_imported_modules() {
     let dir = temp_dir("lsp-unopened-import");
     let math = dir.join("math.vey");
     let main = dir.join("main.vey");
-    let math_source = "export fn area() -> number { return 1 }\n";
-    let main_source = "use \"./math.vey\" as m\nm.area()\n";
+    let other = dir.join("other.vey");
+    let math_source = "export type area = { value: number }\nfn helper() {\n  let area = 9\n  print(area)\n}\nexport fn area() -> number { return 1 }\n";
+    let main_source = "use \"./math.vey\" as m\nlet typed: m.area = { value: 1 }\nm.area()\n";
+    let other_source = "use \"./math.vey\" as x\nx.area()\n";
     write(&math, math_source);
     write(&main, main_source);
+    write(&other, other_source);
     let math_uri = format!("file://{}", math.display());
     let main_uri = format!("file://{}", main.display());
+    let other_uri = format!("file://{}", other.display());
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
         .arg("lsp")
@@ -2522,6 +2526,14 @@ fn the_language_server_navigates_to_unopened_imported_modules() {
         .unwrap();
     {
         let stdin = child.stdin.as_mut().unwrap();
+        let root_uri = format!("file://{}", dir.display());
+        let initialize = format!(
+            "{{\"rootUri\":{},\"capabilities\":{{}}}}",
+            serde_escape(&root_uri)
+        );
+        stdin
+            .write_all(lsp_message(0, "initialize", &initialize).as_bytes())
+            .unwrap();
         let open = format!(
             "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
             main_uri,
@@ -2540,8 +2552,48 @@ fn the_language_server_navigates_to_unopened_imported_modules() {
             (3, "textDocument/rename", ",\"newName\":\"measure\""),
         ] {
             let params = format!(
-                "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":1,\"character\":2}}{}}}",
+                "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":2,\"character\":2}}{}}}",
                 main_uri, extra
+            );
+            stdin
+                .write_all(lsp_message(id, method, &params).as_bytes())
+                .unwrap();
+        }
+        let type_definition = format!(
+            "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":1,\"character\":13}}}}",
+            main_uri
+        );
+        stdin
+            .write_all(lsp_message(6, "textDocument/definition", &type_definition).as_bytes())
+            .unwrap();
+        let type_rename = format!(
+            "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":1,\"character\":13}},\"newName\":\"Region\"}}",
+            main_uri
+        );
+        stdin
+            .write_all(lsp_message(7, "textDocument/rename", &type_rename).as_bytes())
+            .unwrap();
+        let open_math = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+            math_uri,
+            serde_escape(math_source)
+        );
+        stdin
+            .write_all(
+                format!("Content-Length: {}\r\n\r\n{}", open_math.len(), open_math).as_bytes(),
+            )
+            .unwrap();
+        for (id, method, extra) in [
+            (
+                4,
+                "textDocument/references",
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (5, "textDocument/rename", ",\"newName\":\"localArea\""),
+        ] {
+            let params = format!(
+                "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":2,\"character\":7}}{}}}",
+                math_uri, extra
             );
             stdin
                 .write_all(lsp_message(id, method, &params).as_bytes())
@@ -2576,21 +2628,42 @@ const result = id => {
 };
 const mainUri = process.argv[2];
 const mathUri = process.argv[3];
+const otherUri = process.argv[4];
 const definition = result(1);
 assert.equal(definition.uri, mathUri);
-assert.deepEqual([definition.range.start.line, definition.range.start.character], [0, 10]);
+assert.deepEqual([definition.range.start.line, definition.range.start.character], [5, 10]);
 const references = result(2);
-assert.equal(references.length, 2, JSON.stringify(references));
-assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri].sort());
+assert.equal(references.length, 3, JSON.stringify(references));
+assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri, otherUri].sort());
 const changes = result(3).changes;
-assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
-assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.character, edit.range.end.character, edit.newText]), [[10, 14, "measure"]]);
-assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 2, 6, "measure"]]);
+assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri, otherUri].sort());
+assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[5, 10, 14, "measure"]]);
+assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[2, 2, 6, "measure"]]);
+assert.deepEqual(changes[otherUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 2, 6, "measure"]]);
+const typeDefinition = result(6);
+assert.equal(typeDefinition.uri, mathUri);
+assert.deepEqual([typeDefinition.range.start.line, typeDefinition.range.start.character], [0, 12]);
+const typeChanges = result(7).changes;
+assert.deepEqual(Object.keys(typeChanges).sort(), [mainUri, mathUri].sort());
+assert.deepEqual(typeChanges[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[0, 12, 16, "Region"]]);
+assert.deepEqual(typeChanges[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 13, 17, "Region"]]);
+const localReferences = result(4);
+assert.deepEqual(localReferences.map(item => [item.uri, item.range.start.line, item.range.start.character]), [
+    [mathUri, 2, 6],
+    [mathUri, 3, 8],
+]);
+const localChanges = result(5).changes;
+assert.deepEqual(Object.keys(localChanges), [mathUri]);
+assert.deepEqual(localChanges[mathUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [
+    [2, 6, 10, "localArea"],
+    [3, 8, 12, "localArea"],
+]);
 "#,
         )
         .arg(&text)
         .arg(&main_uri)
         .arg(&math_uri)
+        .arg(&other_uri)
         .output()
         .unwrap();
     assert!(
