@@ -294,3 +294,12 @@ Ayrıca `unknown.field` ve desteklenmeyen ordinary member türleri genel fallbac
 - `generic_function_assignability_sees_recursive_placeholder_variables`: **1 geçti**; uyumlu aynı/farklı-alias specialization kabul, uyumsuz dönüş tipi atamaları ret.
 - `recursive_placeholder_arguments_count_as_type_variables`: helper-level regresyon.
 - Son tam doğrulama: `cargo test --all-targets` **406 geçti, 0 başarısız**; `git diff --check` temiz.
+
+### Editörde açık olmayan import hedeflerinde LSP gezinmesi
+
+Diskte mevcut bir `math.vey` dosyasını kullanan `main.vey` açıkken, `math.vey` henüz editörde açılmamışsa `textDocument/definition` `null` dönüyordu. `imported_module_uri` yalnızca açık belge URI'larında hedef arıyor, ayrıca references/rename aralıkları için kaynak metni yalnızca `self.files` içinden alıyordu; dolayısıyla kapalı hedef dosyanın declaration konumu yanıtlara eklenmiyordu.
+
+LSP, açık belge tamponunu öncelikli tutarak kapalı dosya metnini diskteki URI yolundan okuyabiliyor. Import yolu canonical hedef dosyaya çözülüp URI eşleştirmesi yapılabiliyor; isim çıkarımı, references konumları ve rename edit aralıkları aynı kaynak-fallback'ini kullanıyor. Yeni entegrasyon testi yalnızca importer'ı `didOpen` ile açıyor, diskteki target için definition, references ve rename yanıtlarını doğruluyor. References/rename araması halen oturumda açık tüketici belgeleri tarar; bu bulgu, kapalı imported target declaration'ının eksikliğine yönelik.
+
+- `the_language_server_navigates_to_unopened_imported_modules`: **1 geçti**; target dosya kapalıyken definition doğru dosya/range'i verdi, references target tanımıyla açık importer kullanımını döndürdü, rename her iki dosyada da edit üretti.
+- Son tam doğrulama: `cargo test --all-targets` **407 geçti, 0 başarısız**; `git diff --check` temiz.

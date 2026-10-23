@@ -2501,3 +2501,101 @@ for (const id of [34, 36, 39]) {
         String::from_utf8_lossy(&check.stderr)
     );
 }
+
+#[test]
+fn the_language_server_navigates_to_unopened_imported_modules() {
+    let dir = temp_dir("lsp-unopened-import");
+    let math = dir.join("math.vey");
+    let main = dir.join("main.vey");
+    let math_source = "export fn area() -> number { return 1 }\n";
+    let main_source = "use \"./math.vey\" as m\nm.area()\n";
+    write(&math, math_source);
+    write(&main, main_source);
+    let math_uri = format!("file://{}", math.display());
+    let main_uri = format!("file://{}", main.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vey"))
+        .arg("lsp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        let open = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+            main_uri,
+            serde_escape(main_source)
+        );
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
+        for (id, method, extra) in [
+            (1, "textDocument/definition", ""),
+            (
+                2,
+                "textDocument/references",
+                ",\"context\":{\"includeDeclaration\":true}",
+            ),
+            (3, "textDocument/rename", ",\"newName\":\"measure\""),
+        ] {
+            let params = format!(
+                "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":1,\"character\":2}}{}}}",
+                main_uri, extra
+            );
+            stdin
+                .write_all(lsp_message(id, method, &params).as_bytes())
+                .unwrap();
+        }
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    let check = Command::new("node")
+        .arg("-e")
+        .arg(
+            r#"
+const assert = require("node:assert/strict");
+const bytes = Buffer.from(process.argv[1], "utf8");
+const messages = [];
+let offset = 0;
+while (offset < bytes.length) {
+    const separator = bytes.indexOf("\r\n\r\n", offset);
+    assert.notEqual(separator, -1);
+    const headers = bytes.toString("ascii", offset, separator);
+    const length = Number(headers.match(/Content-Length:\s*(\d+)/i)[1]);
+    const start = separator + 4;
+    messages.push(JSON.parse(bytes.subarray(start, start + length).toString("utf8")));
+    offset = start + length;
+}
+const result = id => {
+    const response = messages.find(message => message.id === id);
+    assert.ok(response && !response.error, JSON.stringify(response));
+    return response.result;
+};
+const mainUri = process.argv[2];
+const mathUri = process.argv[3];
+const definition = result(1);
+assert.equal(definition.uri, mathUri);
+assert.deepEqual([definition.range.start.line, definition.range.start.character], [0, 10]);
+const references = result(2);
+assert.equal(references.length, 2, JSON.stringify(references));
+assert.deepEqual(references.map(item => item.uri).sort(), [mainUri, mathUri].sort());
+const changes = result(3).changes;
+assert.deepEqual(Object.keys(changes).sort(), [mainUri, mathUri].sort());
+assert.deepEqual(changes[mathUri].map(edit => [edit.range.start.character, edit.range.end.character, edit.newText]), [[10, 14, "measure"]]);
+assert.deepEqual(changes[mainUri].map(edit => [edit.range.start.line, edit.range.start.character, edit.range.end.character, edit.newText]), [[1, 2, 6, "measure"]]);
+"#,
+        )
+        .arg(&text)
+        .arg(&main_uri)
+        .arg(&math_uri)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}\nLSP output:\n{text}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}

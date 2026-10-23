@@ -393,12 +393,18 @@ impl Server {
 
     /// The names that are declared in a file.
     fn names(&self, uri: &str) -> Option<Names> {
-        let text = self.files.get(uri)?;
         let path = path_of(uri)?;
+        let text = self.source(uri)?;
         let label = path.to_string_lossy().to_string();
-        let mut parser = Parser::new(text, &label).ok()?;
+        let mut parser = Parser::new(&text, &label).ok()?;
         let program = parser.parse_program().ok()?;
-        Some(Names::of(&program, text))
+        Some(Names::of(&program, &text))
+    }
+
+    fn source(&self, uri: &str) -> Option<String> {
+        self.files.get(uri).cloned().or_else(|| {
+            path_of(uri).and_then(|path| std::fs::read_to_string(path).ok())
+        })
     }
 
     fn imported_module_uri(
@@ -428,12 +434,15 @@ impl Server {
             }
         }
         let target = target.canonicalize().ok()?;
-        self.files.keys().find_map(|candidate_uri| {
+        if let Some(open_uri) = self.files.keys().find_map(|candidate_uri| {
             path_of(candidate_uri)
                 .and_then(|path| path.canonicalize().ok())
                 .filter(|path| path == &target)
                 .map(|_| candidate_uri.clone())
-        })
+        }) {
+            return Some(open_uri);
+        }
+        Some(file_uri(&target.to_string_lossy()))
     }
 
     fn symbol_target_at(
@@ -650,9 +659,8 @@ impl Server {
             occurrences
                 .iter()
                 .filter_map(|(file_uri, _name, pos, range_len)| {
-                    self.files
-                        .get(file_uri)
-                        .map(|source| location_with_width(file_uri, source, pos, *range_len))
+                    let source = self.source(file_uri)?;
+                    Some(location_with_width(file_uri, &source, pos, *range_len))
                 })
                 .collect(),
         )
@@ -669,11 +677,11 @@ impl Server {
         };
         let mut changes: Vec<(String, Vec<Value>)> = Vec::new();
         for (file_uri, _name, pos, range_len) in occurrences {
-            let Some(source) = self.files.get(&file_uri) else {
+            let Some(source) = self.source(&file_uri) else {
                 continue;
             };
             let edit = json::object(vec![
-                ("range", name_range_with_width(source, &pos, range_len)),
+                ("range", name_range_with_width(&source, &pos, range_len)),
                 ("newText", json::text(new_name)),
             ]);
             if let Some((_, edits)) = changes.iter_mut().find(|(uri, _)| uri == &file_uri) {
