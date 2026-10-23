@@ -205,6 +205,8 @@ pub struct TryStmt {
 pub struct UseStmt {
     pub path: String,
     pub alias: String,
+    /// The position of an explicitly written alias; inferred aliases have no token.
+    pub alias_pos: Option<Pos>,
     pub pos: Pos,
 }
 

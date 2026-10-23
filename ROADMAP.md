@@ -25,9 +25,9 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 3. LSP doğruluğu ve protokol uyumu
 
-- [ ] Rename'i metinsel ad yerine çözümlenmiş sembol/kapsam kimliğiyle uygula; shadowing testi ekle.
+- [x] Rename/definition/references işlemlerini metinsel ad yerine çözümlenmiş binding kimliğiyle yap; nested shadowing, sibling scopes, assignment read/write, import alias ve exact-token edit testleri ekle.
 - [ ] `exit`, bozuk/eksik frame ve bilinmeyen JSON-RPC yöntemi davranışlarını protokole uygun biçimde sonlandır/yanıtla; subprocess entegrasyon testleri ekle.
-- [ ] LSP `position.character` ve `Range` değerlerini UTF-16 birimlerine dönüştür; token ortası cursor ve astral Unicode testleri ekle.
+- [x] LSP `position.character` ve `Range` değerlerini UTF-16 birimlerine dönüştür; token içi cursor ve astral Unicode rename/range testleri ekle.
 - [ ] `file://` URI percent-decoding'i UTF-8 byte dizilerini doğru çözecek biçimde düzelt; Unicode dosya adı testi ekle.
 - [ ] Completion'ı cursor ve kapsam-duyarlı hâle getir; bunu mevcut rename/position düzeltmelerinden ayrı özellik işi olarak takip et.
 

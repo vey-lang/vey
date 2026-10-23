@@ -886,8 +886,9 @@ impl Parser {
             return Err(self.error_at(start.pos, "module paths cannot interpolate"));
         }
         let path: String = token.parts.iter().map(|p| p.text.as_str()).collect();
-        let alias = if self.eat_kw("as")? {
-            self.expect_ident("module alias")?
+        let (alias, alias_pos) = if self.eat_kw("as")? {
+            let alias_pos = self.tok.pos;
+            (self.expect_ident("module alias")?, Some(alias_pos))
         } else {
             let file_name = path
                 .rsplit('/')
@@ -915,7 +916,7 @@ impl Parser {
             {
                 alias.insert(0, '_');
             }
-            alias
+            (alias, None)
         };
         if !is_ident(&alias) {
             return Err(self.error_at(start.pos, format!("invalid module alias '{}'", alias)));
@@ -923,6 +924,7 @@ impl Parser {
         Ok(Stmt::Use(UseStmt {
             path,
             alias,
+            alias_pos,
             pos: start.pos,
         }))
     }

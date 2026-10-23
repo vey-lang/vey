@@ -17,8 +17,9 @@
 8. **Statik dosya servisinde containment kontrolü ile path'i yeniden açma arasında TOCTOU vardı.** Dosya canonical path kontrolünden sonra bir kez açılıyor; `fstat` ile normal dosya ve dosya kimliği doğrulanıyor. Platform destekliyorsa açılmış descriptor'ın `/proc/self/fd` veya `/dev/fd` hedefi root içinde ayrıca doğrulanıyor; `O_NOFOLLOW` mevcutsa kullanılıyor. Tam GET stream'i ile byte-range okumaları aynı açılmış descriptor'ı kullanıyor; HEAD/304/error yollarında descriptor kapatılıyor.
 9. **`res.sendFile` / `res.download` path'i kontrol ettikten sonra yeniden açıyordu.** `stat` ile alınan kimlik açılmış descriptor'ın `fstat` sonucu ile karşılaştırılıyor; yalnızca doğrulanan descriptor metadata, tam gövde ve stream için kullanılıyor. HEAD/error/erken tamamlanma yollarında descriptor kapanıyor; aktif kaynak response finish/close ile durduruluyor ve `drain` gelene kadar pause ediliyor. Stream ilk byte'ı göndermeden önce finish hook'ları çalışıyor. İndirme adlarındaki kontrol karakterleri ve header ayraçları temizleniyor; Unicode adlar ASCII fallback ve RFC 5987 `filename*` ile aktarılıyor.
 10. **Harici HTTP abort sinyali retry tetikleyebiliyordu.** Önceden iptal edilmiş signal fetch'i başlatmıyor; in-flight iptal ve abort edilebilir retry beklemesi yeni denemeyi durduruyor. Genel timeout sonrası futile retry yapılmıyor ve istek tamamlanınca harici signal listener'ı kaldırılıyor.
+11. **LSP rename aynı yazımdaki bağımsız bağlamları karıştırabiliyordu.** Name index artık lexical scope'larda binding kimlikleri çözüyor; rename/definition/references yalnızca aynı bağlamaya bağlı tokenları döndürüyor. Shadowing, kardeş fonksiyonlar ve assignment hedef/değerleri regresyonla doğrulanıyor. Deklarasyon tokenları ve açık import alias'ları doğru aralıkta; LSP UTF-16 sütunları giriş/çıkışta dönüştürülüyor ve token içi imleç, astral Unicode, tam identifier-range test ediliyor.
 
-Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; mutable-container alias ihlalleri ve `mount.update()` lifecycle geçişleri doğrulanır; optional route ve body-limit senaryoları browser/server testleriyle kapsanır; statik servis için containment/path/stream/range symlink yarışları sınanır. `sendFile` için path swap, HEAD descriptor kapanışı, yanıt timeout/finish ve client disconnect sonrası cleanup, `drain` backpressure, session cookie; `download` için kontrol karakteri sanitizasyonu ve Unicode header encoding test edilir. HTTP için pre-abort, in-flight abort, 5xx/network retry backoff iptali, toplam timeout ve listener cleanup doğrulanır.
+Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; mutable-container alias ihlalleri ve `mount.update()` lifecycle geçişleri doğrulanır; optional route ve body-limit senaryoları browser/server testleriyle kapsanır; statik servis için containment/path/stream/range symlink yarışları sınanır. `sendFile` için path swap, HEAD descriptor kapanışı, yanıt timeout/finish ve client disconnect sonrası cleanup, `drain` backpressure, session cookie; `download` için kontrol karakteri sanitizasyonu ve Unicode header encoding test edilir. HTTP için pre-abort, in-flight abort, 5xx/network retry backoff iptali, toplam timeout ve listener cleanup doğrulanır. LSP rename için outer/inner/sibling scope'ları, yazma hedefi, astral identifier ve açık import alias'ının gerçek token aralıkları doğrulanır.
 
 ## Test ve doğrulama durumu
 
@@ -42,9 +43,8 @@ Tip-güvenliği commitleri `5fa2002` ve `800c332`, mount lifecycle düzeltmesi `
 
 ### CLI/LSP ve deploy
 
-- LSP rename aynı metinsel adı dosyanın tamamında topluyor; shadowed/ayrı scope'lardaki sembolleri de değiştirebilir (`src/cli/lsp.rs:317-365`). Rename capability ilan ediliyor; görünür regresyon testi yok.
 - LSP `exit` bildirimi döngüyü sonlandırmıyor; bozuk/eksik frame EOF gibi sessizce ele alınıyor. Bilinmeyen yöntemler de JSON-RPC error yerine `result: null` dönüyor (`src/cli/lsp.rs:39-73, 93-98, 175`).
-- LSP konumları lexer sütununu doğrudan kullanıyor; UTF-16 birimleri ve token içi cursor konumu doğru ele alınmıyor (`src/cli/lsp.rs:179-187, 787-800, 819-835`). Percent-encoded UTF-8 URI dosya yolu da byte'ları ayrı Unicode karakterlere çeviriyor (`src/cli/lsp.rs:924-950`).
+- `file://` URI percent-decoding'i UTF-8 byte dizilerini ayrı karakterler yerine doğru çözecek biçimde yapılmalı (`src/cli/lsp.rs:924-950`).
 - `deploy` hedefi senkronize etmediği için artık build'de olmayan eski dosyalar hedefte kalıyor (`src/cli/deploy.rs:53-89`).
 - `migrate` dry-run değişiklik gerektiğini söylemesine rağmen exit status 0 veriyor (`src/cli/migrate.rs:124-128`). `vey.toml` içindeki `build.minify` okunuyor ama build akışında kullanılmıyor (`src/cli/config.rs:24-28, 98-107`; `src/cli/build.rs:46-55`).
 
@@ -52,13 +52,12 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 
 ## Dokümantasyon durumu
 
-`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup, statik dosya TOCTOU, `sendFile`/`download` descriptor yaşam döngüsü ve HTTP caller-abort/retry maddeleri regresyon testleriyle kapandı. SSE backpressure, kısıtlı generic üye erişimi, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
+`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance, `mount.update()` effect lifecycle, optional-route backtracking, oversized-body connection cleanup, statik dosya TOCTOU, `sendFile`/`download` descriptor yaşam döngüsü, HTTP caller-abort/retry ve LSP scope-aware rename/UTF-16 name ranges maddeleri regresyon testleriyle kapandı. SSE backpressure, kısıtlı generic üye erişimi, LSP URI/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
 
 ## Öncelikli sonraki işler
 
-1. LSP rename'i ad metni yerine sembol/kapsam kimliğiyle çözmek; shadowing testi eklemek.
-2. LSP UTF-16 position/URI çözümleme ve `exit`/bozuk frame protokol davranışını düzeltmek.
-3. SSE backpressure için sınırlı buffer veya yavaş istemciyi kapatma politikası belirlemek ve regresyon testi eklemek.
-4. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
-5. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
-6. Rust format kontrolü için depo sözleşmesini netleştir; önceden var olan repo-geniş format farklarını ayrı değişiklik olarak ele al.
+1. LSP `file://` URI percent-decoding'i ve `exit`/bozuk frame/bilinmeyen method JSON-RPC davranışını düzeltmek.
+2. SSE backpressure için sınırlı buffer veya yavaş istemciyi kapatma politikası belirlemek ve regresyon testi eklemek.
+3. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
+4. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.
+5. Rust format kontrolü için depo sözleşmesini netleştir; önceden var olan repo-geniş format farklarını ayrı değişiklik olarak ele al.

@@ -850,7 +850,7 @@ fn lsp_message(id: i64, method: &str, params: &str) -> String {
 fn the_language_server_answers_the_places_of_the_names() {
     let dir = temp_dir("lsp");
     let file = dir.join("main.vey");
-    let source = "fn helper() -> number {\n  return 1\n}\n\nfn main() {\n  let x = helper()\n  print(x)\n}\n";
+    let source = "fn helper() -> number {\n  return 1\n}\n\nfn main() {\n  let x = helper()\n  print(x)\n  x = x + 1\n  if true {\n    let x = 2\n    print(x)\n  }\n}\n\nfn other() {\n  let x = 3\n  print(x)\n}\nfn unicode() {\n  let 𐐀x = 1\n  print(𐐀x)\n}\n";
     write(&file, source);
 
     let uri = format!("file://{}", file.display());
@@ -869,9 +869,9 @@ fn the_language_server_answers_the_places_of_the_names() {
             uri,
             serde_escape(source)
         );
-        stdin.write_all(
-            format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes(),
-        ).unwrap();
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
         stdin.write_all(
             lsp_message(
                 1,
@@ -894,24 +894,45 @@ fn the_language_server_answers_the_places_of_the_names() {
             )
             .as_bytes(),
         ).unwrap();
-        stdin.write_all(
-            lsp_message(
-                3,
-                "textDocument/documentSymbol",
-                &format!("{{\"textDocument\":{{\"uri\":\"{}\"}}}}", uri),
+        stdin
+            .write_all(
+                lsp_message(
+                    3,
+                    "textDocument/documentSymbol",
+                    &format!("{{\"textDocument\":{{\"uri\":\"{}\"}}}}", uri),
+                )
+                .as_bytes(),
             )
-            .as_bytes(),
-        ).unwrap();
+            .unwrap();
+        for (id, line, character, new_name) in [
+            (4, 5, 10, "calculate"),
+            (5, 6, 8, "outer"),
+            (6, 9, 8, "inner"),
+            (7, 15, 6, "sibling"),
+            (8, 20, 9, "unicodeName"),
+        ] {
+            stdin.write_all(
+                lsp_message(
+                    id,
+                    "textDocument/rename",
+                    &format!(
+                        "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":{},\"character\":{}}},\"newName\":\"{}\"}}",
+                        uri, line, character, new_name
+                    ),
+                )
+                .as_bytes(),
+            ).unwrap();
+        }
         stdin.flush().unwrap();
     }
 
     let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "LSP exited unsuccessfully");
+    assert!(output.status.success(), "LSP exited unsuccessfully");
     let text = String::from_utf8_lossy(&output.stdout).to_string();
-        let check = Command::new("node")
-                .arg("-e")
-                .arg(
-                        r#"
+    let check = Command::new("node")
+        .arg("-e")
+        .arg(
+            r#"
 const assert = require("node:assert/strict");
 const bytes = Buffer.from(process.argv[1], "utf8");
 const messages = [];
@@ -942,20 +963,41 @@ const references = resultFor(2);
 assert.equal(references.length, 2);
 assert.deepEqual(references.map(item => item.range.start.line).sort(), [0, 5]);
 assert.ok(references.every(item => item.uri === process.argv[2]));
+const editFor = id => resultFor(id).changes[process.argv[2]];
+assert.deepEqual(editFor(4).map(edit => [
+    edit.range.start.line, edit.range.start.character,
+    edit.range.end.character, edit.newText
+]), [[0, 3, 9, "calculate"], [5, 10, 16, "calculate"]]);
+assert.deepEqual(editFor(5).map(edit => [
+    edit.range.start.line, edit.range.start.character,
+    edit.range.end.character, edit.newText
+]), [[5, 6, 7, "outer"], [6, 8, 9, "outer"], [7, 2, 3, "outer"], [7, 6, 7, "outer"]]);
+assert.deepEqual(editFor(6).map(edit => [
+    edit.range.start.line, edit.range.start.character,
+    edit.range.end.character, edit.newText
+]), [[9, 8, 9, "inner"], [10, 10, 11, "inner"]]);
+assert.deepEqual(editFor(7).map(edit => [
+    edit.range.start.line, edit.range.start.character,
+    edit.range.end.character, edit.newText
+]), [[15, 6, 7, "sibling"], [16, 8, 9, "sibling"]]);
+assert.deepEqual(editFor(8).map(edit => [
+    edit.range.start.line, edit.range.start.character,
+    edit.range.end.character, edit.newText
+]), [[19, 6, 9, "unicodeName"], [20, 8, 11, "unicodeName"]]);
 const names = resultFor(3).map(symbol => symbol.name);
 assert.ok(names.includes("helper"), JSON.stringify(names));
 assert.ok(names.includes("main"), JSON.stringify(names));
 "#,
-                )
-                .arg(&text)
-                .arg(&uri)
-                .output()
-                .unwrap();
-        assert!(
-                check.status.success(),
-                "{}\nLSP output:\n{text}",
-                String::from_utf8_lossy(&check.stderr)
-        );
+        )
+        .arg(&text)
+        .arg(&uri)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}\nLSP output:\n{text}",
+        String::from_utf8_lossy(&check.stderr)
+    );
 }
 
 /// The text of a source, as it is written in a message of the server.
@@ -979,7 +1021,10 @@ fn serde_escape(source: &str) -> String {
 fn the_language_server_says_the_mistakes_of_a_used_module() {
     let dir = temp_dir("lsp-module");
     let helper = dir.join("helper.vey");
-    write(&helper, "export fn bad() -> number {\n  return \"text\"\n}\n");
+    write(
+        &helper,
+        "export fn bad() -> number {\n  return \"text\"\n}\n",
+    );
     let file = dir.join("main.vey");
     let source = "use \"./helper.vey\" as h\n\nfn main() {\n  print(h.bad())\n}\n";
     write(&file, source);
@@ -999,8 +1044,19 @@ fn the_language_server_says_the_mistakes_of_a_used_module() {
             uri,
             serde_escape(source)
         );
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
         stdin.write_all(
-            format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes(),
+            lsp_message(
+                1,
+                "textDocument/rename",
+                &format!(
+                    "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":3,\"character\":8}},\"newName\":\"helper\"}}",
+                    uri
+                ),
+            )
+            .as_bytes(),
         ).unwrap();
         stdin.flush().unwrap();
     }
@@ -1014,6 +1070,11 @@ fn the_language_server_says_the_mistakes_of_a_used_module() {
         .find(|message| message.contains("helper.vey"))
         .unwrap_or_else(|| panic!("the module is not named:\n{text}"));
     assert!(reported.contains("expected number, found string"), "{text}");
+    assert_eq!(text.matches("\"newText\":\"helper\"").count(), 2, "{text}");
+    assert!(
+        text.contains("\"line\":0,\"character\":22},\"end\":{\"line\":0,\"character\":23"),
+        "the explicit alias range must select only `h`: {text}"
+    );
 }
 
 /// The container of a new project runs what the Dockerfile builds, and the

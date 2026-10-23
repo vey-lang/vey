@@ -182,8 +182,22 @@ impl Server {
         let uri = document.text("uri")?.to_string();
         let position = message.get("params")?.get("position")?;
         let line = position.number("line")? as usize + 1;
-        let character = position.number("character")? as usize + 1;
-        Some((uri, line, character))
+        let character = position.number("character")? as usize;
+        let source_line = self.files.get(&uri)?.lines().nth(line.saturating_sub(1))?;
+        let mut utf16_column = 0;
+        let mut character_column = 0;
+        for ch in source_line.chars() {
+            if character <= utf16_column {
+                break;
+            }
+            let next_utf16_column = utf16_column + ch.len_utf16();
+            if character < next_utf16_column {
+                break;
+            }
+            utf16_column = next_utf16_column;
+            character_column += 1;
+        }
+        Some((uri, line, character_column + 1))
     }
 
     /// Say what is wrong with a file.
@@ -278,7 +292,7 @@ impl Server {
         let label = path.to_string_lossy().to_string();
         let mut parser = Parser::new(text, &label).ok()?;
         let program = parser.parse_program().ok()?;
-        Some(Names::of(&program))
+        Some(Names::of(&program, text))
     }
 
     /// The names of a file, in the shape the protocol wants.
@@ -291,8 +305,8 @@ impl Server {
             out.push(json::object(vec![
                 ("name", json::text(name)),
                 ("kind", json::number(symbol_kind(kind))),
-                ("range", range(pos, pos)),
-                ("selectionRange", range(pos, pos)),
+                ("range", name_range(&names.source, pos, name)),
+                ("selectionRange", name_range(&names.source, pos, name)),
             ]));
         }
         Value::List(out)
@@ -303,15 +317,14 @@ impl Server {
         let Some(names) = self.names(uri) else {
             return Value::Null;
         };
-        let Some(name) = names.name_at(line, col) else {
+        let Some(symbol) = names.symbol_at(line, col) else {
             return Value::Null;
         };
-        for (declared, pos, _) in &names.defs {
-            if *declared == name {
-                return location(uri, pos);
-            }
-        }
-        Value::Null
+        let Some(definition) = names.symbols[symbol].declaration else {
+            return Value::Null;
+        };
+        let (name, pos, _) = &names.defs[definition];
+        location(uri, &names.source, pos, name)
     }
 
     /// Where a name is used.
@@ -319,18 +332,17 @@ impl Server {
         let Some(names) = self.names(uri) else {
             return Value::List(Vec::new());
         };
-        let Some(name) = names.name_at(line, col) else {
+        let Some(symbol) = names.symbol_at(line, col) else {
             return Value::List(Vec::new());
         };
         let mut out = Vec::new();
-        for (declared, pos, _) in &names.defs {
-            if *declared == name {
-                out.push(location(uri, pos));
-            }
+        if let Some(definition) = names.symbols[symbol].declaration {
+            let (name, pos, _) = &names.defs[definition];
+            out.push(location(uri, &names.source, pos, name));
         }
-        for (used, pos) in &names.uses {
-            if *used == name {
-                out.push(location(uri, pos));
+        for (index, (name, pos)) in names.uses.iter().enumerate() {
+            if names.use_symbols[index] == Some(symbol) {
+                out.push(location(uri, &names.source, pos, name));
             }
         }
         Value::List(out)
@@ -341,28 +353,29 @@ impl Server {
         let Some(names) = self.names(uri) else {
             return Value::Null;
         };
-        let Some(name) = names.name_at(line, col) else {
+        let Some(symbol) = names.symbol_at(line, col) else {
+            return Value::Null;
+        };
+        let Some(definition) = names.symbols[symbol].declaration else {
             return Value::Null;
         };
         let mut changes = Vec::new();
-        let mut places: Vec<vey::lexer::Pos> = Vec::new();
-        for (declared, pos, _) in &names.defs {
-            if *declared == name {
-                places.push(*pos);
+        let mut places = vec![(names.defs[definition].0.clone(), names.defs[definition].1)];
+        for (index, (name, pos)) in names.uses.iter().enumerate() {
+            if names.use_symbols[index] == Some(symbol) {
+                places.push((name.clone(), *pos));
             }
         }
-        for (used, pos) in &names.uses {
-            if *used == name {
-                places.push(*pos);
-            }
-        }
-        for pos in places {
+        for (name, pos) in places {
             changes.push(json::object(vec![
-                ("range", range(&pos, &pos)),
+                ("range", name_range(&names.source, &pos, &name)),
                 ("newText", json::text(new_name)),
             ]));
         }
-        json::object(vec![("changes", json::object(vec![(uri, Value::List(changes))]))])
+        json::object(vec![(
+            "changes",
+            json::object(vec![(uri, Value::List(changes))]),
+        )])
     }
 
     /// The type of the expression under the cursor.
@@ -463,25 +476,117 @@ fn initialize() -> Value {
 /// The names are found by walking the tree of the program, so that the
 /// editor may say where a name is declared and where it is used.
 struct Names {
+    source: String,
     /// The names that are declared.
     defs: Vec<(String, vey::lexer::Pos, &'static str)>,
+    /// The binding identity for each declaration (including non-value names).
+    def_symbols: Vec<Option<usize>>,
     /// The names that are used.
     uses: Vec<(String, vey::lexer::Pos)>,
+    /// The binding identity for each use, when it resolves.
+    use_symbols: Vec<Option<usize>>,
+    /// The value names in each lexical scope.
+    scopes: Vec<HashMap<String, usize>>,
+    /// A binding's declaration, indexed by its stable identity.
+    symbols: Vec<NameSymbol>,
+    /// Top-level bindings are visible to function bodies before their text.
+    predeclared: Vec<(String, vey::lexer::Pos, usize)>,
+}
+
+struct NameSymbol {
+    declaration: Option<usize>,
 }
 
 impl Names {
-    fn new() -> Names {
+    fn new(source: &str) -> Names {
         Names {
+            source: source.to_string(),
             defs: Vec::new(),
+            def_symbols: Vec::new(),
             uses: Vec::new(),
+            use_symbols: Vec::new(),
+            scopes: vec![HashMap::new()],
+            symbols: Vec::new(),
+            predeclared: Vec::new(),
         }
     }
 
     /// The names of a program.
-    fn of(program: &vey::ast::Program) -> Names {
-        let mut names = Names::new();
+    fn of(program: &vey::ast::Program, source: &str) -> Names {
+        let mut names = Names::new(source);
+        names.predeclare_top_level(&program.body);
         names.body(&program.body);
         names
+    }
+
+    fn predeclare_top_level(&mut self, body: &[vey::ast::Stmt]) {
+        use vey::ast::Stmt;
+        for stmt in body {
+            match stmt {
+                Stmt::Var(decl) => {
+                    for (name, pos) in decl.pattern.bindings() {
+                        self.reserve(&name, pos);
+                    }
+                }
+                Stmt::Fn(decl) => {
+                    let pos = self.identifier_pos(decl.pos, &decl.name);
+                    self.reserve(&decl.name, pos);
+                }
+                Stmt::Component(decl) => {
+                    let pos = self.identifier_pos(decl.pos, &decl.name);
+                    self.reserve(&decl.name, pos);
+                }
+                Stmt::Enum(decl) => {
+                    let pos = self.identifier_pos(decl.pos, &decl.name);
+                    self.reserve(&decl.name, pos);
+                }
+                Stmt::Use(decl) if !decl.path.ends_with(".css") => {
+                    if let Some(pos) = decl.alias_pos {
+                        self.reserve(&decl.alias, pos);
+                    } else {
+                        self.define_hidden(&decl.alias);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn reserve(&mut self, name: &str, pos: vey::lexer::Pos) {
+        let Some(scope) = self.scopes.last_mut() else {
+            return;
+        };
+        if scope.contains_key(name) {
+            return;
+        }
+        let symbol = self.symbols.len();
+        self.symbols.push(NameSymbol { declaration: None });
+        scope.insert(name.to_string(), symbol);
+        self.predeclared.push((name.to_string(), pos, symbol));
+    }
+
+    fn identifier_pos(&self, base: vey::lexer::Pos, name: &str) -> vey::lexer::Pos {
+        let Some(line) = self.source.lines().nth(base.line.saturating_sub(1)) else {
+            return base;
+        };
+        let start_byte = line
+            .char_indices()
+            .nth(base.col.saturating_sub(1))
+            .map(|(index, _)| index)
+            .unwrap_or(line.len());
+        let remaining = &line[start_byte..];
+        for (offset, _) in remaining.match_indices(name) {
+            let byte = start_byte + offset;
+            let before = line[..byte].chars().next_back();
+            let after = line[byte + name.len()..].chars().next();
+            let is_ident = |c: char| c == '_' || c.is_alphanumeric();
+            if before.is_some_and(is_ident) || after.is_some_and(is_ident) {
+                continue;
+            }
+            let column = line[..byte].chars().count() + 1;
+            return vey::lexer::Pos::new(base.line, column);
+        }
+        base
     }
 
     fn body(&mut self, body: &[vey::ast::Stmt]) {
@@ -491,11 +596,88 @@ impl Names {
     }
 
     fn define(&mut self, name: &str, pos: vey::lexer::Pos, kind: &'static str) {
+        let definition = self.defs.len();
+        let symbol = if matches!(
+            kind,
+            "variable" | "parameter" | "function" | "component" | "enum" | "module"
+        ) {
+            if let Some((_, _, symbol)) = self
+                .predeclared
+                .iter()
+                .find(|(reserved, reserved_pos, _)| reserved == name && *reserved_pos == pos)
+            {
+                Some(*symbol)
+            } else if self
+                .scopes
+                .last()
+                .is_some_and(|scope| scope.contains_key(name))
+            {
+                None
+            } else {
+                let symbol = self.symbols.len();
+                self.symbols.push(NameSymbol {
+                    declaration: Some(definition),
+                });
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert(name.to_string(), symbol);
+                }
+                Some(symbol)
+            }
+        } else {
+            let symbol = self.symbols.len();
+            self.symbols.push(NameSymbol {
+                declaration: Some(definition),
+            });
+            Some(symbol)
+        };
+        if let Some(symbol) = symbol {
+            self.symbols[symbol].declaration = Some(definition);
+        }
         self.defs.push((name.to_string(), pos, kind));
+        self.def_symbols.push(symbol);
     }
 
     fn use_name(&mut self, name: &str, pos: vey::lexer::Pos) {
         self.uses.push((name.to_string(), pos));
+        self.use_symbols.push(self.resolve(name));
+    }
+
+    fn resolve(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn define_hidden(&mut self, name: &str) {
+        if self
+            .scopes
+            .last()
+            .is_some_and(|scope| scope.contains_key(name))
+        {
+            return;
+        }
+        let symbol = self.symbols.len();
+        self.symbols.push(NameSymbol { declaration: None });
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), symbol);
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
+
+    fn block(&mut self, body: &[vey::ast::Stmt]) {
+        self.push_scope();
+        self.body(body);
+        self.pop_scope();
     }
 
     fn stmt(&mut self, stmt: &vey::ast::Stmt) {
@@ -508,77 +690,114 @@ impl Names {
                 self.pattern(&decl.pattern, "variable");
             }
             Stmt::Fn(decl) => {
-                self.define(&decl.name, decl.pos, "function");
+                let pos = self.identifier_pos(decl.pos, &decl.name);
+                self.define(&decl.name, pos, "function");
+                self.push_scope();
                 for param in &decl.params {
-                    self.pattern(&param.pattern, "parameter");
                     if let Some(default) = &param.default {
                         self.expr(default);
                     }
+                    self.pattern(&param.pattern, "parameter");
                 }
                 self.body(&decl.body.body);
+                self.pop_scope();
             }
             Stmt::Component(decl) => {
-                self.define(&decl.name, decl.pos, "component");
+                let pos = self.identifier_pos(decl.pos, &decl.name);
+                self.define(&decl.name, pos, "component");
+                self.push_scope();
                 for param in &decl.params {
+                    if let Some(default) = &param.default {
+                        self.expr(default);
+                    }
                     self.pattern(&param.pattern, "parameter");
                 }
                 for inner in &decl.body {
                     self.stmt(inner);
                 }
                 self.markup(&decl.children);
+                self.pop_scope();
             }
             Stmt::Enum(decl) => {
-                self.define(&decl.name, decl.pos, "enum");
+                let pos = self.identifier_pos(decl.pos, &decl.name);
+                self.define(&decl.name, pos, "enum");
                 for variant in &decl.variants {
                     self.define(&variant.name, variant.pos, "variant");
                 }
             }
-            Stmt::Type(decl) => self.define(&decl.name, decl.pos, "type"),
-            Stmt::Interface(decl) => self.define(&decl.name, decl.pos, "interface"),
+            Stmt::Type(decl) => {
+                let pos = self.identifier_pos(decl.pos, &decl.name);
+                self.define(&decl.name, pos, "type");
+            }
+            Stmt::Interface(decl) => {
+                let pos = self.identifier_pos(decl.pos, &decl.name);
+                self.define(&decl.name, pos, "interface");
+            }
             Stmt::Impl(decl) => {
-                self.define(&decl.type_name, decl.pos, "type");
+                let pos = self.identifier_pos(decl.pos, &decl.type_name);
+                self.define(&decl.type_name, pos, "type");
                 for method in &decl.methods {
                     self.define(&method.name, method.pos, "method");
+                    self.push_scope();
+                    self.define_hidden("self");
+                    for param in &method.params {
+                        if let Some(default) = &param.default {
+                            self.expr(default);
+                        }
+                        self.pattern(&param.pattern, "parameter");
+                    }
                     self.body(&method.body.body);
+                    self.pop_scope();
                 }
             }
             Stmt::If(decl) => {
                 self.expr(&decl.test);
-                self.body(&decl.then_block.body);
+                self.block(&decl.then_block.body);
                 if let Some(branch) = &decl.else_branch {
                     self.stmt(branch);
                 }
             }
             Stmt::IfLet(decl) => {
                 self.expr(&decl.value);
-                self.body(&decl.then_block.body);
+                self.push_scope();
+                self.pattern_match(&decl.pattern);
+                self.block(&decl.then_block.body);
+                self.pop_scope();
                 if let Some(branch) = &decl.else_branch {
                     self.stmt(branch);
                 }
             }
             Stmt::While(decl) => {
                 self.expr(&decl.test);
-                self.body(&decl.body.body);
+                self.block(&decl.body.body);
             }
             Stmt::WhileLet(decl) => {
                 self.expr(&decl.value);
+                self.push_scope();
+                self.pattern_match(&decl.pattern);
                 self.body(&decl.body.body);
+                self.pop_scope();
             }
             Stmt::LetElse(decl) => {
                 self.expr(&decl.value);
                 self.pattern(&decl.pattern, "variable");
-                self.body(&decl.otherwise.body);
+                self.block(&decl.otherwise.body);
             }
             Stmt::Defer(decl) => self.expr(&decl.value),
             Stmt::Throw(decl) => self.expr(&decl.value),
             Stmt::For(decl) => {
+                if let Some(step) = &decl.step {
+                    self.expr(step);
+                }
                 self.expr(&decl.iter);
+                self.push_scope();
                 self.pattern(&decl.pattern, "variable");
                 self.body(&decl.body.body);
+                self.pop_scope();
             }
             Stmt::Repeat(decl) => {
                 self.expr(&decl.count);
-                self.body(&decl.body.body);
+                self.block(&decl.body.body);
             }
             Stmt::Return(decl) => {
                 if let Some(value) = &decl.value {
@@ -586,12 +805,17 @@ impl Names {
                 }
             }
             Stmt::Try(decl) => {
-                self.body(&decl.body.body);
+                self.block(&decl.body.body);
                 if let Some(catch) = &decl.catch {
+                    self.push_scope();
+                    if let Some(name) = &decl.name {
+                        self.define_hidden(name);
+                    }
                     self.body(&catch.body);
+                    self.pop_scope();
                 }
                 if let Some(finally) = &decl.finally {
-                    self.body(&finally.body);
+                    self.block(&finally.body);
                 }
             }
             Stmt::Expr(decl) => self.expr(&decl.expr),
@@ -599,8 +823,15 @@ impl Names {
                 self.expr(&decl.target);
                 self.expr(&decl.value);
             }
-            Stmt::Block(block, _) => self.body(&block.body),
-            Stmt::Use(decl) => self.define(&decl.alias, decl.pos, "module"),
+            Stmt::Block(block, _) => self.block(&block.body),
+            Stmt::Use(decl) if !decl.path.ends_with(".css") => {
+                if let Some(pos) = decl.alias_pos {
+                    self.define(&decl.alias, pos, "module");
+                } else {
+                    self.define_hidden(&decl.alias);
+                }
+            }
+            Stmt::Use(_) => {}
             Stmt::Break(_, _) | Stmt::Continue(_, _) | Stmt::Style(_) => {}
         }
     }
@@ -610,17 +841,17 @@ impl Names {
         use vey::ast::BindingPattern;
         match pattern {
             BindingPattern::Name { name, pos, default } => {
-                self.define(name, *pos, kind);
                 if let Some(default) = default {
                     self.expr(default);
                 }
+                self.define(name, *pos, kind);
             }
             BindingPattern::Array { items, rest, .. } => {
                 for item in items {
                     self.pattern(item, kind);
                 }
                 if let Some(rest) = rest {
-                    self.define(rest, vey::lexer::Pos::new(1, 1), kind);
+                    self.define_hidden(rest);
                 }
             }
             BindingPattern::Object { fields, rest, .. } => {
@@ -628,7 +859,7 @@ impl Names {
                     self.pattern(&field.pattern, kind);
                 }
                 if let Some(rest) = rest {
-                    self.define(rest, vey::lexer::Pos::new(1, 1), kind);
+                    self.define_hidden(rest);
                 }
             }
         }
@@ -640,6 +871,13 @@ impl Names {
             match node {
                 MarkupNode::Expr(expr) => self.expr(expr),
                 MarkupNode::Element(element) => {
+                    if element.component {
+                        if let Some((module, _)) = element.tag.rsplit_once('.') {
+                            self.use_name(module, element.pos);
+                        } else {
+                            self.use_name(&element.tag, element.pos);
+                        }
+                    }
                     for (_, value) in &element.attrs {
                         self.expr(value);
                     }
@@ -655,11 +893,21 @@ impl Names {
                 }
                 MarkupNode::For(loop_node) => {
                     self.expr(&loop_node.iter);
+                    self.push_scope();
+                    self.define_hidden(&loop_node.name);
+                    if let Some(index) = &loop_node.index {
+                        self.define_hidden(index);
+                    }
+                    if let Some(key) = &loop_node.key {
+                        self.expr(key);
+                    }
                     self.markup(&loop_node.body);
+                    self.pop_scope();
                 }
                 MarkupNode::Match(m) => {
                     self.expr(&m.subject);
                     for arm in &m.arms {
+                        self.push_scope();
                         for pattern in &arm.patterns {
                             self.pattern_match(pattern);
                         }
@@ -667,6 +915,7 @@ impl Names {
                             self.expr(guard);
                         }
                         self.markup(&arm.body);
+                        self.pop_scope();
                     }
                 }
             }
@@ -749,23 +998,34 @@ impl Names {
                 }
             }
             Expr::Fn(params, body, _, _) => {
+                self.push_scope();
                 for param in params {
+                    if let Some(default) = &param.default {
+                        self.expr(default);
+                    }
                     self.pattern(&param.pattern, "parameter");
                 }
                 self.body(&body.body);
+                self.pop_scope();
             }
             Expr::Arrow(_, params, body, _, _) => {
+                self.push_scope();
                 for param in params {
+                    if let Some(default) = &param.default {
+                        self.expr(default);
+                    }
                     self.pattern(&param.pattern, "parameter");
                 }
                 match body {
                     vey::ast::ArrowBody::Expr(value) => self.expr(value),
                     vey::ast::ArrowBody::Block(block) => self.body(&block.body),
                 }
+                self.pop_scope();
             }
             Expr::Match(subject, arms, _) => {
                 self.expr(subject);
                 for arm in arms {
+                    self.push_scope();
                     for pattern in &arm.patterns {
                         self.pattern_match(pattern);
                     }
@@ -773,6 +1033,7 @@ impl Names {
                         self.expr(guard);
                     }
                     self.expr(&arm.body);
+                    self.pop_scope();
                 }
             }
             Expr::Await(value, _) | Expr::Try(value, _) | Expr::Spread(value, _) => {
@@ -785,15 +1046,16 @@ impl Names {
     }
 
     /// The name that is at a place, if there is one there.
-    fn name_at(&self, line: usize, col: usize) -> Option<String> {
-        for (name, pos) in &self.uses {
-            if pos.line == line && pos.col == col {
-                return Some(name.clone());
+    /// The identity of the name that is at a place, if it is bound.
+    fn symbol_at(&self, line: usize, col: usize) -> Option<usize> {
+        for (index, (name, pos)) in self.uses.iter().enumerate() {
+            if pos.line == line && col >= pos.col && col < pos.col + name.chars().count() {
+                return self.use_symbols[index];
             }
         }
-        for (name, pos, _) in &self.defs {
-            if pos.line == line && pos.col == col {
-                return Some(name.clone());
+        for (index, (name, pos, _)) in self.defs.iter().enumerate() {
+            if pos.line == line && col >= pos.col && col < pos.col + name.chars().count() {
+                return self.def_symbols[index];
             }
         }
         None
@@ -816,31 +1078,38 @@ fn symbol_kind(kind: &str) -> f64 {
     }
 }
 
-/// The place of a name, in the shape the protocol wants.
-fn range(start: &vey::lexer::Pos, end: &vey::lexer::Pos) -> Value {
+/// The range of a name in the UTF-16 positions required by LSP.
+fn name_range(source: &str, pos: &vey::lexer::Pos, name: &str) -> Value {
+    let line = source.lines().nth(pos.line.saturating_sub(1)).unwrap_or("");
+    let start = line
+        .chars()
+        .take(pos.col.saturating_sub(1))
+        .map(char::len_utf16)
+        .sum::<usize>();
+    let end = start + name.encode_utf16().count();
     json::object(vec![
         (
             "start",
             json::object(vec![
-                ("line", json::number(start.line as f64 - 1.0)),
-                ("character", json::number(start.col as f64 - 1.0)),
+                ("line", json::number(pos.line as f64 - 1.0)),
+                ("character", json::number(start as f64)),
             ]),
         ),
         (
             "end",
             json::object(vec![
-                ("line", json::number(end.line as f64 - 1.0)),
-                ("character", json::number(end.col as f64)),
+                ("line", json::number(pos.line as f64 - 1.0)),
+                ("character", json::number(end as f64)),
             ]),
         ),
     ])
 }
 
 /// The place of a name in a file, in the shape the protocol wants.
-fn location(uri: &str, pos: &vey::lexer::Pos) -> Value {
+fn location(uri: &str, source: &str, pos: &vey::lexer::Pos, name: &str) -> Value {
     json::object(vec![
         ("uri", json::text(uri)),
-        ("range", range(pos, pos)),
+        ("range", name_range(source, pos, name)),
     ])
 }
 
