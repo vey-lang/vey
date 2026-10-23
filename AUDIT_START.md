@@ -10,20 +10,21 @@
 1. **Serbest `TypeVar` herhangi bir tipe atanabiliyordu.** `(Type::Var(_), _) | (_, Type::Var(_)) => true` kuralı kaldırıldı. Checker, etkin generic scope'larda deklarasyonla gelen type bound'ları genişletip assignability ve sayısal/string operatör kontrollerinde kullanıyor. Böylece `T` artık kendiliğinden `number` veya başka somut tip sayılmıyor; `T: number` gibi sınırlar kullanılmaya devam ediyor.
 2. **`unknown`, daraltma olmadan `object` kabul ediliyordu.** `Unknown -> AnyObject` istisnası kaldırıldı. `is object` ile daraltılmış kullanım geçerli; daraltılmamış kullanım artık tip hatası.
 3. **Promise olmayan `await` sonucu `any` oluyordu.** `await` Promise içini açıyor; Promise olmayan operandın tipini koruyor. Yanlış dönüş tipinin bu yoldan saklanması önlendi.
+4. **Mutable alias covariance tip güvenliğini bozuyordu.** Array/tuple elemanları, dictionary key/value türleri ve yazılabilir object/named/interface alanları invariant kontrol ediliyor; bilinmeyen uzunlukta array→tuple dönüşümü reddediliyor. Fresh array/tuple/object literal'ları bağlamsal olarak hedef tipi alırken mevcut nested alias'lar genişletilemiyor.
 
-Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur.
+Regresyon kapsamı: generic identity ve kısıtlı generic dönüş/aritmetik/liste kabul edilir; kısıtsız generic dönüş ve sayı işlemi reddedilir; `unknown` yalnızca `object` olarak daraltılınca kabul edilir; scalar `await` gerçek tipini korur; array/tuple/object/dictionary alias ihlalleri reddedilir ve fresh literal'lar doğrulanır.
 
 ## Test ve doğrulama durumu
 
 | Komut | Sonuç |
 |---|---|
-| `cargo test --test types` | **71 geçti, 0 kaldı** (değişikliklerin uygulandığı temiz klonda) |
-| `cargo test --test cli` | **31 geçti, 0 kaldı** |
-| `cargo test --all-targets --quiet` | **Tamamlanmadı:** `tests/server.rs` hedefi başlarken süreç dışarıdan SIGTERM aldı; exit status `143`. Bu, başarılı tam-suite sonucu değildir. |
+| `cargo test --test types --test cli --test readme --test runtime --quiet` | **187 geçti, 0 kaldı:** types 74, CLI 31, README 4, runtime 78. |
+| `cargo test --test server -- --nocapture --test-threads=1` | **Tamamlanmadı:** `a_malformed_path_does_not_take_the_server_down` başlarken test süreci `SIGTERM` aldı; exit status `143`. |
+| `cargo test --all-targets --quiet` | **Tam-suite sonucu doğrulanmadı:** server hedefindeki tekrarlanabilir exit 143 çözülmeden başarı iddia edilemez. |
 | `git diff --check` | Geçti. |
 | `cargo fmt --all -- --check` | Repo genelinde çok sayıda biçim farkı gösterdi; bu yüzden tüm depo için temiz format sonucu verilemiyor. Denetim sırasında ilgisiz dosyaları topluca yeniden formatlamadım. |
 
-Aynı revizyondaki önceki, değişiklik öncesi tam test çalışması başarılıydı; ancak bu yeni değişikliklerin tam test paketiyle doğrulandığı anlamına gelmez. Server hedefi kaynak kodu kendi alt sürecini process group üzerinden kapatıyor; SIGTERM’in test çalıştırıcısına ulaşma sebebi ayrıca araştırılmalı.
+Kod/test commitleri `5fa2002` ve `800c332`, `manus/type-safety-audit-2026-10-23` dalına pushlandı. Server hedefi kaynak kodu kendi alt sürecini process group üzerinden kapatıyor; SIGTERM’in test çalıştırıcısına ulaşma sebebi ayrıca araştırılmalı.
 
 ## Henüz düzeltilmemiş, doğrulanmış yüksek öncelikli bulgular
 
@@ -47,7 +48,7 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 
 ## Dokümantasyon durumu
 
-`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; bu değişiklikte yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` ilk incelemede boştu; şimdi bu rapordaki kalan riskleri sıralayan güncel öncelik listesi içeriyor. LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ geçerli.
+`EKSIKLER.md` içinde 22 Ekim snapshot'ından kalan bazı iddialar vardı; yönetici özeti ve kanıt tablosundaki doğrudan çelişkiler düzeltildi, eski sonuç bölümleri tarihsel olarak etiketlendi. `ROADMAP.md` güncel riskleri sıralıyor. Mutable-container covariance maddesi kapandı; kısıtlı generic üye erişimi, LSP scope/Unicode/protokol sorunları, deploy stale files, `build.minify` ve migrate dry-run sorunları hâlâ açık.
 
 ## Öncelikli sonraki işler
 
@@ -57,4 +58,5 @@ Bunlar static audit bulgularıdır; her madde için ilgili mevcut regresyon test
 4. Oversized request için açık drain/destroy politikası belirlemek; keep-alive ve eşzamanlı bağlantı testleri eklemek.
 5. Optional route matching'i tüket/atla dallarıyla çözmek; optional-middle/literal testleri eklemek.
 6. Deploy hedefi için güvenli stale-file temizleme/senkronizasyonu ve `migrate` dry-run exit status sözleşmesini tanımlamak.
-7. `EKSIKLER.md`, README ve ROADMAP'teki tarihsel ifadeleri güncel koda göre düzeltmek.
+7. Server integration testindeki process-group cleanup kök nedenini bulup ardından tam `cargo test --all-targets` çalıştırmak.
+8. Kısıtlı generic'lerin üye erişimi ve nested alan birleşimlerinde bound-aware davranışını ayrıca denetlemek.

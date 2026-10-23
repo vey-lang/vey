@@ -10,7 +10,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 - [x] Serbest `TypeVar`'ı keyfî tiplere uyumlu sayan kuralı kaldır; deklarasyondaki generic bound'ları kullan.
 - [x] `unknown` değerini `object` olarak kullanmadan önce açıkça daraltmayı zorunlu kıl.
 - [x] Promise olmayan `await` operandının gerçek tipini koru.
-- [ ] Mutable array variance politikasını belirle (varsayılan olarak invariant olması güvenli); mutation sonrası alias'larda soundness regresyonu yaz.
+- [x] Mutable array/tuple, dictionary key/value ve yazılabilir object/named/interface alanlarını invariant yap; fresh literal bağlamlamasını ve alias regresyonlarını test et.
 - [ ] Kısıtlı generic'lerin tüm işlemlerini, özellikle nested/container ve üye erişimlerini, bound-aware şekilde test et.
 
 ## 2. Runtime ve routing doğruluğu
@@ -39,7 +39,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 ## 5. Doğrulama ve dokümantasyon
 
-- [ ] Server integration testlerinin process-group cleanup sırasında test runner'a SIGTERM göndermediğini doğrula; ardından tam `cargo test --all-targets` çalıştır.
-- [ ] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
+- [ ] Server hedefindeki `a_malformed_path_does_not_take_the_server_down` testi tek iş parçacığında da exit 143 ile test sürecini sonlandırıyor; process-group cleanup kök nedenini bul ve ardından tam `cargo test --all-targets` çalıştır.
+- [x] `EKSIKLER.md` içindeki tamamlanmış LSP/config/lint/build iddialarını güncel kaynakla uzlaştır; eski bulguları tarihsel etiketle.
 - [ ] Rust format kontrolünü temiz hâle getir veya repository'nin format sözleşmesini belirleyip tüm mevcut dosyaları ayrı, gözden geçirilebilir değişiklikte formatla.
 - [ ] Her yüksek riskli bulgu için yeniden üretim testi ya da açıkça belgelenmiş “statik audit, henüz test edilmedi” durumu tut.

@@ -10,9 +10,9 @@
 
 Vey, **derleyici + tip denetleyici + tarayıcı/Node runtime + CLI** içeren bir web dilidir. 23 Ekim denetimi, önceki raporun bazı tamamlanmış işleri ve yeni bulguları yansıtmadığını gösterdi; aşağıdaki 22 Ekim kayıtları tarihsel snapshot olarak okunmalıdır.
 
-**Güncel, doğrulanmış durum (23 Ekim 2026):** üç type-safety açığı bu dalda kapatıldı: sınırsız generic `TypeVar` artık tüm tiplere uymaz; `unknown` daraltılmadan `object` sayılamaz; Promise olmayan `await` gerçek operand tipini korur. Kısıtlı generic'ler ve geçerli number işlemleri regresyon testleriyle korunuyor.
+**Güncel, doğrulanmış durum (23 Ekim 2026):** sınırsız generic `TypeVar` artık tüm tiplere uymaz; `unknown` daraltılmadan `object` sayılamaz; Promise olmayan `await` gerçek operand tipini korur; mutable array/tuple, dictionary ve yazılabilir object/named/interface alanları alias üzerinden covariant genişletilemez. Fresh literal bağlamlaması ve mevcut nested alias'ların korunması regresyon testleriyle doğrulandı.
 
-**Testler:** değişiklik sonrası temiz klonda `cargo test --test types` → **71/71 geçti**; `cargo test --test cli` → **31/31 geçti**. `cargo test --all-targets --quiet` ise `tests/server.rs` aşamasına gelirken exit **143 (SIGTERM)** ile sonlandı; bu nedenle güncel tam-suite sonucu **doğrulanmış değil**. `cargo fmt --all -- --check` depo genelinde mevcut format farkları nedeniyle temiz geçmiyor.
+**Testler:** `cargo test --test types --test cli --test readme --test runtime --quiet` → **187/187 geçti** (74 + 31 + 4 + 78). `cargo test --test server -- --nocapture --test-threads=1` ilk testte exit **143 (SIGTERM)** ile sonlandı; tam-suite sonucu **doğrulanmış değil**. `cargo fmt --all -- --check` depo genelinde mevcut format farkları nedeniyle temiz geçmiyor.
 
 **Açık yüksek öncelikli riskler:** reactive `mount.update()` mod değişimi, optional route segmenti, oversized chunked request'in drain/destroy edilmemesi, LSP rename kapsamı/protokol/Unicode konumları ve deploy hedefinde eski dosyaların kalması. Ayrıntılar [güncel denetim raporunda](AUDIT_START.md).
 
@@ -588,11 +588,13 @@ fn use2() -> Result<number, string> {
 ```
 Hata tipi taşınmadığı için `use2` de `Result<number, string>` görünüyor, ama içeride ne olursa olsun hata türü **hiçbir yerde denetlenmiyor**.
 
-### B3 · Tip parametresi her tipe uyuyordu — **evrensel `TypeVar` kuralı düzeltildi; array variance ayrı açık**
+### B3 · Serbest `TypeVar` ve mutable alias covariance — **temel soundness açıkları düzeltildi**
 
 > **Durum (23 Ekim 2026):** `(Type::Var(_), _) | (_, Type::Var(_)) => true` kuralı kaldırıldı. `TypeChecker::fits` etkin generic scope'lardaki bounds'ları nested tiplerde genişletiyor; number/string operator kontrolleri de aynı yoldan geçiyor. Serbest `T` somut `number` dönüşü veya `T + 1` işlemi için kullanılamıyor; `T: number` geçerli dönüş, aritmetik ve `[T] -> [number]` kullanımını koruyor. Test: `tests/types.rs::a_generic_parameter_is_not_a_concrete_return_type`.
 >
-> **Kalan ayrı risk:** mutable diziler hâlâ eleman bazında covariant kabul ediliyor. Bu nedenle `[Dog] -> [Animal]` gibi atamalar için variance/invariance ayrıca tasarlanmalı; bu değişiklik onu çözmüş sayılmaz.
+> **Mutable alias düzeltmesi (commit `5fa2002`):** array/tuple elemanları, dictionary key/value'ları ve yazılabilir object/named/interface alanları iki yönlü uyumlulukla kontrol ediliyor; optional/required alan durumu da eşleşmeli. Uzunluğu bilinmeyen array→tuple dönüşümü reddediliyor. Fresh object/array/tuple literal'ları hedef tipe göre bağlamsal olarak denetleniyor; başka değişkende tutulan nested object/array alias'ı daha geniş tipe atanamıyor. Regresyonlar `tests/types.rs::mutable_arrays_and_tuples_do_not_allow_covariant_aliases`, `mutable_objects_and_dictionaries_do_not_allow_covariant_aliases` ve `fresh_literals_take_contextual_types_without_widening_existing_aliases` içinde.
+>
+> **Kalan kapsam:** generic varyans anotasyonları (`in`/`out`) ve kısıtlı generic üye erişiminin tüm biçimleri henüz kapsamlı biçimde modellenip test edilmedi; güncel takip için `ROADMAP.md` kullanın.
 
 ### B4 · Jenerik fonksiyon **monomorfize** ediliyor → açık tip argümanı düşürülüyor 🔴  ✅ **düzeltildi**
 
