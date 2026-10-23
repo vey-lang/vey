@@ -17,7 +17,7 @@ Bu liste, denetim sırasında doğrulanan davranış ve riskleri sıralar; tamam
 
 - [x] `mount.update()` statik ↔ fonksiyon geçişlerinde effect'i durdurup yeniden kur; fonksiyon→fonksiyon bağımlılık yenilemesini, cleanup'ı ve DOM davranışını mock DOM ile Chromium'da test et.
 - [x] Optional route parametrelerini önce tüketip kalan desen başarısız olursa geri dönerek atla; constraint/literal/required-parametre/wildcard senaryolarını browser ve server testleriyle kapsa; belirsiz wildcard eşleşmelerinde consume-first davranışını koru.
-- [ ] Oversized chunked request'lerde bağlantı/stream'i güvenli biçimde drain et veya kapat; keep-alive ve eşzamanlı istek testleri ekle.
+- [x] Oversized `Content-Length` ve chunked body aşımında 413 yanıtı gönderildikten sonra bağlantıyı kapat; incomplete chunked socket kapanışını ve declared-length keep-alive isteğinde `Connection: close` davranışını test et.
 - [ ] Statik dosya symlink/containment denetimini path yarışına dayanıklı açılış/stream stratejisiyle güçlendir.
 - [ ] HTTP caller abort'u retries'den ayır; SSE backpressure için sınırlı tampon veya kapatma politikası ekle.
 
