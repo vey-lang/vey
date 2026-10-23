@@ -1115,9 +1115,8 @@ Ayrıca `fetch(url, { signal, timeout: 100 })` → kullanıcı `signal` verdiği
 ### D20 · Regex 🟡 **named group ve callback replacement eklendi**
 `match()` ve `matchAll()` sonuçları named groups'ı `.groups` alanında taşıyor; `replace()`/`replaceAll()` native callback replacement fonksiyonlarını kabul ediyor. Test: `tests/runtime.rs::regex_supports_named_groups_and_function_replacements`.
 
-### D21 · `date`/`intl` timezone ve DST güvenli değil
-`src/runtime/date.js:43-70` — `format` yalnızca 6 token, timezone yok; `daysBetween` `Math.round` kullanıyor (DST'te bir gün kayar); `addDays` sabit 24 saat ekliyor (DST'te yanlış).
-`src/runtime/intl.js:78-97` — timezone ayarlanmıyor; fallback'ler sabit en-US.
+### D21 · `date`/`intl` timezone ve DST 🟡 **takvim günü desteği eklendi**
+`date.parts(value, { timeZone })` ve `date.format(value, pattern, { timeZone })` timezone-aware çalışıyor; `daysBetween` yerel takvim günlerini karşılaştırıyor, `addDays` `setDate` ile DST geçişlerini koruyor. `intl.formatDate/formatTime` zaten Intl seçeneklerindeki `timeZone` alanını iletiyor. Daha geniş timezone fallback'leri ve locale fallback özelleştirmesi hâlâ eksik. Test: `tests/runtime.rs::date_helpers_use_calendar_days_and_timezones`.
 
 ### D22 · Yinelenen yardımcılar ve ölü kod
 | Konu | Konum 1 | Konum 2 |

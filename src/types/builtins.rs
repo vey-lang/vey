@@ -255,10 +255,10 @@ pub(crate) fn builtin_type(name: &str) -> Option<Type> {
         "date" => Some(builtin_object(vec![
             ("now", builtin_function(vec![], number())),
             ("iso", builtin_function(vec![], string())),
-            ("parts", builtin_function(vec![any()], any())),
+            ("parts", builtin_optional(vec![any(), any()], 1, any())),
             (
                 "format",
-                builtin_optional(vec![any(), string()], 1, string()),
+                builtin_optional(vec![any(), string(), any()], 1, string()),
             ),
             (
                 "daysBetween",

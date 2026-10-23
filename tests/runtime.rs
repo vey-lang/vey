@@ -301,6 +301,22 @@ console.log(runtime.intl.relativeTime(-1, "day", "en-US"));
 }
 
 #[test]
+fn date_helpers_use_calendar_days_and_timezones() {
+    let text = run_runtime(
+        "date-timezone",
+        r#"
+const instant = "2024-03-10T06:30:00Z";
+console.log(JSON.stringify(runtime.date.parts(instant, { timeZone: "America/New_York" })));
+console.log(runtime.date.format(instant, "YYYY-MM-DD HH:mm", { timeZone: "America/New_York" }));
+console.log(runtime.date.daysBetween("2024-03-10T23:00:00-05:00", "2024-03-11T01:00:00-04:00"));
+"#,
+    );
+    assert!(text.contains(r#"{"year":2024,"month":3,"day":10,"hour":1,"minute":30,"second":0,"weekday":0}"#), "{text}");
+    assert!(text.contains("2024-03-10 01:30"), "{text}");
+    assert!(text.contains("1"), "{text}");
+}
+
+#[test]
 fn the_bytes_of_a_text_are_a_list_of_numbers() {
     let text = run_runtime(
         "bytes",
