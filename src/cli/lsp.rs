@@ -173,13 +173,13 @@ impl Server {
                 self.workspace_roots.clear();
                 if let Some(params) = message.get("params") {
                     if let Some(folders) = params.list("workspaceFolders") {
-                        self.workspace_roots
-                            .extend(folders.iter().filter_map(|folder| {
-                                folder
-                                    .text("uri")
-                                    .and_then(path_of)
-                                    .filter(|path| path.is_dir())
-                            }));
+                        for folder in folders {
+                            if let Some(root) = existing_workspace_folder_path(folder) {
+                                if !self.workspace_roots.contains(&root) {
+                                    self.workspace_roots.push(root);
+                                }
+                            }
+                        }
                     }
                     if self.workspace_roots.is_empty() {
                         if let Some(root) = params
@@ -187,6 +187,7 @@ impl Server {
                             .and_then(path_of)
                             .or_else(|| params.text("rootPath").map(PathBuf::from))
                             .filter(|path| path.is_dir())
+                            .map(normalize_workspace_root)
                         {
                             self.workspace_roots.push(root);
                         }
@@ -195,6 +196,27 @@ impl Server {
                 id.map(|id| answer(id, initialize()))
             }
             "initialized" => None,
+            "workspace/didChangeWorkspaceFolders" => {
+                if let Some(event) = message.get("params").and_then(|params| params.get("event")) {
+                    let removed: HashSet<PathBuf> = event
+                        .list("removed")
+                        .into_iter()
+                        .flatten()
+                        .filter_map(workspace_folder_path)
+                        .collect();
+                    self.workspace_roots.retain(|root| !removed.contains(root));
+                    if let Some(added) = event.list("added") {
+                        for folder in added {
+                            if let Some(root) = existing_workspace_folder_path(folder) {
+                                if !self.workspace_roots.contains(&root) {
+                                    self.workspace_roots.push(root);
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            }
             "shutdown" => id.map(|id| answer(id, Value::Null)),
             "exit" => None,
             "textDocument/didOpen" => {
@@ -601,7 +623,22 @@ impl Server {
                 ));
             }
         }
-        let workspace_files = self.workspace_files();
+        let exported_symbol = target_names
+            .export_symbols
+            .values()
+            .any(|exported| *exported == symbol);
+        let exported_variant = target_names.enum_variant_defs.iter().any(|variant| {
+            variant.symbol == symbol
+                && target_names
+                    .export_symbols
+                    .values()
+                    .any(|exported_enum| *exported_enum == variant.enum_symbol)
+        });
+        let workspace_files = if exported_symbol || exported_variant {
+            self.workspace_files()
+        } else {
+            vec![target_uri.to_string()]
+        };
         for candidate_uri in &workspace_files {
             let Some(candidate_names) = self.names(candidate_uri) else {
                 continue;
@@ -877,17 +914,34 @@ fn error_answer(id: Value, code: i64, message: &str) -> Value {
 /// What the server can do.
 fn initialize() -> Value {
     json::object(vec![
-        ("capabilities", json::object(vec![
-            ("textDocumentSync", json::number(1.0)),
-            ("hoverProvider", Value::Bool(true)),
-            ("completionProvider", json::object(vec![
-                ("triggerCharacters", Value::List(vec![json::text(".")])),
-            ])),
-            ("documentSymbolProvider", Value::Bool(true)),
-            ("definitionProvider", Value::Bool(true)),
-            ("referencesProvider", Value::Bool(true)),
-            ("renameProvider", Value::Bool(true)),
-        ])),
+        (
+            "capabilities",
+            json::object(vec![
+                ("textDocumentSync", json::number(1.0)),
+                ("hoverProvider", Value::Bool(true)),
+                (
+                    "completionProvider",
+                    json::object(vec![(
+                        "triggerCharacters",
+                        Value::List(vec![json::text(".")]),
+                    )]),
+                ),
+                ("documentSymbolProvider", Value::Bool(true)),
+                ("definitionProvider", Value::Bool(true)),
+                ("referencesProvider", Value::Bool(true)),
+                ("renameProvider", Value::Bool(true)),
+                (
+                    "workspace",
+                    json::object(vec![(
+                        "workspaceFolders",
+                        json::object(vec![
+                            ("supported", Value::Bool(true)),
+                            ("changeNotifications", Value::Bool(true)),
+                        ]),
+                    )]),
+                ),
+            ]),
+        ),
         (
             "serverInfo",
             json::object(vec![
@@ -2295,6 +2349,19 @@ fn path_of(uri: &str) -> Option<PathBuf> {
     #[cfg(not(windows))]
     let path = path;
     Some(PathBuf::from(path))
+}
+
+fn normalize_workspace_root(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+fn workspace_folder_path(folder: &Value) -> Option<PathBuf> {
+    Some(normalize_workspace_root(path_of(folder.text("uri")?)?))
+}
+
+fn existing_workspace_folder_path(folder: &Value) -> Option<PathBuf> {
+    let path = workspace_folder_path(folder)?;
+    path.is_dir().then_some(path)
 }
 
 fn collect_workspace_sources(root: &Path, out: &mut Vec<PathBuf>) {
