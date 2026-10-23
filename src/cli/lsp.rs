@@ -917,6 +917,31 @@ fn member_name_pos(source: &str, operator: vey::lexer::Pos, name: &str) -> vey::
     }
 }
 
+fn literal_member_name(source: &str, index: &vey::ast::Expr) -> Option<(String, vey::lexer::Pos)> {
+    let vey::ast::Expr::String(parts, pos) = index else {
+        return None;
+    };
+    if parts.len() != 1 || parts[0].expr.is_some() {
+        return None;
+    }
+    let name = &parts[0].text;
+    let line = source.lines().nth(pos.line.saturating_sub(1))?;
+    let chars: Vec<char> = line.chars().collect();
+    let quote_index = pos.col.saturating_sub(1);
+    let quote = *chars.get(quote_index)?;
+    if !matches!(quote, '\'' | '"' | '`') {
+        return None;
+    }
+    let name_chars: Vec<char> = name.chars().collect();
+    let start = quote_index + 1;
+    if chars.get(start..start + name_chars.len()) != Some(name_chars.as_slice())
+        || chars.get(start + name_chars.len()) != Some(&quote)
+    {
+        return None;
+    }
+    Some((name.clone(), vey::lexer::Pos::new(pos.line, start + 1)))
+}
+
 impl Names {
     fn new(source: &str) -> Names {
         Names {
@@ -970,10 +995,7 @@ impl Names {
                 Stmt::Enum(decl) => {
                     let pos = self.identifier_pos(decl.pos, &decl.name);
                     self.reserve(&decl.name, pos);
-                    if let Some(symbol) = self
-                        .scopes
-                        .last()
-                        .and_then(|scope| scope.get(&decl.name))
+                    if let Some(symbol) = self.scopes.last().and_then(|scope| scope.get(&decl.name))
                     {
                         if let Some(scope) = self.type_scopes.last_mut() {
                             scope.insert(decl.name.clone(), *symbol);
@@ -1798,6 +1820,18 @@ impl Names {
                 }
             }
             Expr::Member(object, prop, _, pos) => {
+                if let (Expr::Ident(alias, _), vey::ast::MemberProp::Computed(index)) =
+                    (object.as_ref(), prop)
+                {
+                    if let Some((name, pos)) = literal_member_name(&self.source, index) {
+                        self.module_member_uses.push(ModuleMemberUse {
+                            alias: alias.clone(),
+                            receiver_symbol: self.resolve(alias),
+                            name,
+                            pos,
+                        });
+                    }
+                }
                 if let vey::ast::MemberProp::Name(name) = prop {
                     let variant_pos = member_name_pos(&self.source, *pos, name);
                     match object.as_ref() {

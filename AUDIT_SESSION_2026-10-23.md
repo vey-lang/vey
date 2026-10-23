@@ -8,7 +8,7 @@
 
 ## Kısa sonuç
 
-İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları ve enum variant'ları için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Son `cargo test --all-targets` **390 geçti, 0 başarısız**. Kalan LSP kapsamı aşağıdaki notlarda listelenmiştir; performans ölçülmedi.
+İlk denetimde README/runtime test beklentileri düzeltildi; tekrarlı exit listener giderildi ve cache'e kararlı compiler fingerprint eklendi. Type-soundness ve tooling bulgularına ek olarak cross-file LSP definition/references/rename; expression üyeleri, qualified markup component etiketleri, qualified type/enum adları, enum variant'ları ve plain literal-string computed member'lar için tamamlandı. Ayrı type-symbol namespace'i yerel type alias ve type parameter kullanımlarını da izliyor. Son `cargo test --all-targets` **392 geçti, 0 başarısız**. Kalan LSP kapsamı aşağıdaki notlarda listelenmiştir; performans ölçülmedi.
 
 ## A. Doğrulanmış bulgular
 
@@ -42,7 +42,7 @@ Veyboard README ve `src/site.vey` gözden geçirildi. README üç açık sınır
 
 ## E. İlk oturum sonunda kalan işler (takipte güncellendi)
 
-İlk oturum sonunda runtime test sözleşmesi, cache fingerprint ve daha geniş doğruluk/tooling taraması açık bırakılmıştı. Sonraki bölümlerde runtime test beklentileri belgelenmiş HTTP sözleşmesine göre düzeltildi, cache riski kaynak/build fingerprint'iyle kapatıldı; type-soundness, tooling ve LSP çapraz-dosya taraması genişletildi. LSP artık doğrudan static expression üyelerini (`m.area`), qualified markup components (`m.Card`), qualified type/enum adlarını (`m.Box<T>`, `m.Color`) ve enum variant segmentlerini (`m.Color.Red`) kapsar. Yerel type alias/type parameter adları da ayrı type namespace'inde izlenir. Dynamic/computed properties (`m[key]`, `m["area"]`) ve açık olmayan belgeler için genel workspace index'i kapsam dışındadır. Önceki `AUDIT_START.md` gözlemleri tek başına bu oturumda doğrulanmış sayılmaz.
+İlk oturum sonunda runtime test sözleşmesi, cache fingerprint ve daha geniş doğruluk/tooling taraması açık bırakılmıştı. Sonraki bölümlerde runtime test beklentileri belgelenmiş HTTP sözleşmesine göre düzeltildi, cache riski kaynak/build fingerprint'iyle kapatıldı; type-soundness, tooling ve LSP çapraz-dosya taraması genişletildi. LSP artık doğrudan static expression üyelerini (`m.area`, `m["area"]`), qualified markup components (`m.Card`), qualified type/enum adlarını (`m.Box<T>`, `m.Color`) ve enum variant segmentlerini (`m.Color.Red`) kapsar. Yerel type alias/type parameter adları da ayrı type namespace'inde izlenir. Dynamic computed keys (`m[key]`) ve açık olmayan belgeler için genel workspace index'i kapsam dışındadır. Önceki `AUDIT_START.md` gözlemleri tek başına bu oturumda doğrulanmış sayılmaz.
 
 ## F. Performans
 
@@ -175,19 +175,19 @@ print(m.area())
 
 Düzeltme öncesi `textDocument/references`, `math.vey` içindeki `area` konumunda (line 0, character 13; `includeDeclaration: true`) yalnızca tanımı döndürüyor; `main.vey` içindeki `m.area` kullanımı eksikti. `textDocument/rename` (`newName: "measure"`) da yalnızca `math.vey` için edit üretiyordu.
 
-**Düzeltme:** `Names` imported aliases, lexical receiver binding identity, exported top-level names ve static module-member uses topluyor. Bu kayıtlar artık `m.area` expression'larının yanında README'de belgelenen `m.Card` markup tag'lerini, `m.Box<T>` generic type'larını ve `m.Color` qualified enum/type adlarını da kapsıyor. Type walker annotations, declarations, signatures, constraints, casts/type tests ve explicit generic type arguments içinden qualified names topluyor. LSP import yolunu canonical URI'ye çözüyor; sembolü URI, ad ve declaration konumuyla tanımlayıp aynı adlı başka modül veya shadowed alias'ın yanlış eşleşmesini önlüyor. `definition`, `references` ve per-file WorkspaceEdit rename bu ortak çözümlemeyi kullanıyor.
+**Düzeltme:** `Names` imported aliases, lexical receiver binding identity, exported top-level names ve static module-member uses topluyor. Bu kayıtlar artık `m.area` ve plain string-literal `m["area"]` expression'larının yanında README'de belgelenen `m.Card` markup tag'lerini, `m.Box<T>` generic type'larını ve `m.Color` qualified enum/type adlarını da kapsıyor. Type walker annotations, declarations, signatures, constraints, casts/type tests ve explicit generic type arguments içinden qualified names topluyor. LSP import yolunu canonical URI'ye çözüyor; sembolü URI, ad ve declaration konumuyla tanımlayıp aynı adlı başka modül veya shadowed alias'ın yanlış eşleşmesini önlüyor. `definition`, `references` ve per-file WorkspaceEdit rename bu ortak çözümlemeyi kullanıyor.
 
 `the_language_server_resolves_cross_file_members_and_local_type_symbols` dört açık dosyada aynı adları export eden iki modül ile shadowed `m` decoy'larını kullanıyor. Function member `area`, markup component `Card`, generic alias `Box<T>`, enum type `Color` ve variant `Color.Red` için definition/references/rename sınanıyor. Test ayrıca `Shape.Red` adlı aynı isimli, farklı enum variant'ının yanlışlıkla `Color.Red` sonuçlarına karışmadığını; yerel type-name kullanımlarını, match pattern'larını ve astral Unicode öncesindeki UTF-16 konumlarını doğruluyor. Yalnızca hedef modül/gerçek kullanımlar edit'leniyor. Mevcut single-file LSP testi shadowed local binding regresyonunu koruyor.
 
-**Kapsam notu:** Yerel alias ve type-parameter adları için type namespace index'i ile final enum variant segmenti desteği eklendi. String-literal computed member (`m["area"]`) ve dynamic member (`m[key]`) hâlâ statik cross-file navigation'a bağlanmıyor; açık olmayan belgeler için genel workspace index'i de kapsam dışıdır. Parser'ın type grammar'ı tek module qualifier taşır; çok segmentli qualified type yazımı ayrıca tasarlanmalıdır.
+**Kapsam notu:** Yerel alias ve type-parameter adları için type namespace index'i ile final enum variant segmenti desteği eklendi. Plain, escape içermeyen string key'ler (`m["area"]`) statik navigasyona bağlanır; escape/interpolation içeren string ifadeleri ve dynamic key'ler (`m[key]`) LSP cross-file navigation'a bağlanmaz. Açık olmayan belgeler için genel workspace index'i de kapsam dışıdır. Parser'ın type grammar'ı tek module qualifier taşır; çok segmentli qualified type yazımı ayrıca tasarlanmalıdır.
 
 ### Güncel doğrulama
 
 - `cargo test --test cli an_unknown_new_project_template_does_not_create_the_target -- --exact`: **1 geçti**.
 - `cargo test --test dev dev_reloads_the_title_when_project_config_changes -- --exact`: **1 geçti**.
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**; ayrıca var olan single-file LSP shadowing test **1 geçti**.
-- Son `cargo test --all-targets`: **390 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 84.
-- `git diff --check`: temiz. İlk audit commit'i `0e46312` ve LSP devamı `565b3cf` `main` dalına push edildi; bu rapordaki son enum/type-symbol follow-up testlerle doğrulandı ve bu teslim kapsamında commit/push edilecek.
+- Son `cargo test --all-targets`: **392 geçti, 0 başarısız**. Hedefler: lib 1, main 8, CLI 50, dev 10, DOM 15, lang 64, README 4, regressions 43, runtime 101, server 10, types 86.
+- `git diff --check`: temiz. İlk audit commit'i `0e46312` ve sonraki LSP follow-up'ları `565b3cf`, `cf15808` push edildi; computed-key doğruluk düzeltmesi ve bu rapor güncellemesi final audit continuation commit/push'unda yer alıyor.
 
 Bu audit performans ölçümü içermez. Canlı config yenileme kapsamı sayfa title'ıdır; dinleyen soketin host/port ayarını çalışan süreçte yeniden bind etme davranışı bu değişiklikle kapsama alınmadı.
 
@@ -198,5 +198,14 @@ Enum variant tanımları ve kullanımları artık ebeveyn enum sembolüyle iliş
 Yerel type alias'lar ve generic type parameter'lar için value namespace'inden ayrı symbol map eklendi. Type-name occurrences scoped binding identity ile tutulduğu için aynı yazımlı değer adıyla karışmaz; references/rename type bağlamlarında doğru sembole uygulanır. Regresyon testi enum type/variant tanımları ve kullanımları, pattern'lar, type parameter scope'ları ve ayrı enum'larda tekrarlanan variant adlarını kapsar.
 
 - `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**.
-- Son kaynak/test durumu üzerinde `cargo test --all-targets`: **390 geçti, 0 başarısız**; CLI 50, type 84, runtime 101 ve diğer hedefler de geçti.
-- `git diff --check`: geçti. `m["area"]` ve `m[key]` için statik member navigation henüz eklenmedi; dynamic expression'larda güvenli statik hedef bulunmadığından bu bir sonraki isteğe bağlı araç iyileştirmesi olarak bırakıldı.
+- Son kaynak/test durumu üzerinde `cargo test --all-targets`: **392 geçti, 0 başarısız**; CLI 50, type 86, runtime 101 ve diğer hedefler de geçti.
+- `git diff --check`: geçti. `m["area"]` için static computed navigation ve type-checking sonraki audit continuation'da eklendi; `m[key]` dynamic kaldı.
+
+### Literal computed module key bulgusu ve düzeltmesi
+
+Hedefli bir probe, `m["area"]("not a number")` çağrısının ve `m["noSuchExport"]` erişiminin `vey check` tarafından kabul edildiğini gösterdi. AST, computed key'i `MemberProp::Computed` olarak temsil ediyordu; import alias'ı normal expression değeri olarak `any`'e düştüğü için modülün export imza/varlık doğrulaması atlanıyordu. Bu doğrulanmış bir type-safety kaçamağıydı.
+
+Plain string literal key, shadowed olmayan imported module alias üzerinde direct named-member checker'a yönlendirildi. Böylece export varlığı, private üyeler, fonksiyon argümanları ve dönüş tipi nokta erişimiyle aynı kuralları izliyor. Dynamic `m[key]` için bu düzeltme uygulanmadı. LSP, escape içermeyen literal içeriğin tam kaynak aralığını doğruladığında `m["area"]` içindeki isim için definition/references/rename sağlıyor; rename yalnızca string içeriğini değiştirip quote'ları koruyor.
+
+- `cargo test --test types literal_computed -- --nocapture`: **2 geçti** (valid call, yanlış argüman ve olmayan export kontrolleri).
+- `cargo test --test cli the_language_server_resolves_cross_file_members_and_local_type_symbols -- --exact`: **1 geçti**; computed `m["area"]` için definition, references ve rename doğrulandı.

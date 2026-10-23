@@ -997,6 +997,45 @@ fn a_call_to_another_module_with_too_few_arguments_is_checked() {
 }
 
 #[test]
+fn a_literal_computed_call_to_another_module_is_checked() {
+    let dir = common::temp_dir("module-computed-member");
+    std::fs::write(
+        dir.join("lib.vey"),
+        "export fn add(a: number, b: number) -> number {\n  return a + b\n}\n",
+    )
+    .unwrap();
+    let app = dir.join("app.vey");
+    std::fs::write(
+        &app,
+        "use \"./lib.vey\" as lib\nlet n: number = lib[\"add\"](1, 2)\n",
+    )
+    .unwrap();
+    let output = common::check_file(&app);
+    assert!(output.status.success(), "{}", common::stderr(&output));
+
+    std::fs::write(&app, "use \"./lib.vey\" as lib\nlib[\"add\"](\"one\", 2)\n").unwrap();
+    let output = common::check_file(&app);
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(error.contains("argument 1 expects number"), "{error}");
+}
+
+#[test]
+fn a_missing_literal_computed_export_is_rejected() {
+    let dir = common::temp_dir("module-computed-missing");
+    std::fs::write(dir.join("lib.vey"), "export let count: number = 1\n").unwrap();
+    std::fs::write(
+        dir.join("app.vey"),
+        "use \"./lib.vey\" as lib\nlet value = lib[\"missing\"]\n",
+    )
+    .unwrap();
+    let output = common::check_file(&dir.join("app.vey"));
+    assert!(!output.status.success());
+    let error = common::stderr(&output);
+    assert!(error.contains("module 'lib' has no 'missing'"), "{error}");
+}
+
+#[test]
 fn a_value_of_the_language_has_no_fields() {
     let error = check_err("field-of-a-number", "let n: number = 5\nprint(n.field)\n");
     assert!(

@@ -1498,6 +1498,18 @@ impl TypeChecker<'_> {
         optional: bool,
         pos: Pos,
     ) -> Result<Type, VeyError> {
+        if let (MemberProp::Computed(index), Expr::Ident(alias, _)) = (prop, object) {
+            if !self.shadowed.contains(alias) && self.imports.contains_key(alias) {
+                if let Some(name) = literal_string(index) {
+                    return self.member_type(
+                        object,
+                        &MemberProp::Name(name.to_string()),
+                        optional,
+                        pos,
+                    );
+                }
+            }
+        }
         // A check may have narrowed the member, such as `user.name` after
         // `if user.name != null`.
         if let MemberProp::Name(name) = prop {
