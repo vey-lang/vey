@@ -2,12 +2,37 @@
 
 use crate::ast::*;
 use crate::types::core::{
-    element_type, is_empty, object_rest_type, project_field, remove_type, string_literal,
-    type_from_kind, union, without_empty, Type,
+    is_empty, object_rest_type, project_field, remove_type, string_literal, type_from_kind, union,
+    without_empty, Type,
 };
 use crate::VeyError;
 
 use super::checker::TypeChecker;
+
+fn destructured_element_type(ty: &Type) -> Type {
+    match ty {
+        Type::Array(element) => union(vec![(**element).clone(), Type::Undefined]),
+        Type::String => union(vec![Type::String, Type::Undefined]),
+        Type::Any => Type::Any,
+        Type::Unknown => Type::Unknown,
+        Type::Union(items) => union(items.iter().map(destructured_element_type).collect()),
+        _ => Type::Unknown,
+    }
+}
+
+fn without_undefined(ty: &Type) -> Type {
+    match ty {
+        Type::Undefined => Type::Never,
+        Type::Union(items) => union(
+            items
+                .iter()
+                .map(without_undefined)
+                .filter(|item| !matches!(item, Type::Never))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
 
 impl TypeChecker<'_> {
     /// The path of a value that a check may narrow, and its type.
@@ -196,15 +221,22 @@ impl TypeChecker<'_> {
             BindingPattern::Name { default, .. } => {
                 if let Some(default) = default {
                     let actual = self.infer_expr(default)?;
-                    if !matches!(actual, Type::Any) && !self.fits(&actual, ty) {
-                        return Err(self.type_error(default.pos(), &actual, ty));
+                    let wanted = without_undefined(ty);
+                    if wanted != Type::Never
+                        && !matches!(actual, Type::Any)
+                        && !self.fits(&actual, &wanted)
+                    {
+                        return Err(self.type_error(default.pos(), &actual, &wanted));
                     }
                 }
                 Ok(())
             }
             BindingPattern::Array { items, .. } => {
-                let element = element_type(ty);
-                for item in items {
+                for (index, item) in items.iter().enumerate() {
+                    let element = match ty {
+                        Type::Tuple(parts) => parts.get(index).cloned().unwrap_or(Type::Undefined),
+                        other => destructured_element_type(other),
+                    };
                     self.check_pattern_defaults_against(item, &element)?;
                 }
                 Ok(())
@@ -221,13 +253,25 @@ impl TypeChecker<'_> {
 
     pub(crate) fn declare_pattern_typed(&mut self, pattern: &BindingPattern, ty: &Type) {
         match pattern {
-            BindingPattern::Name { name, .. } => self.set_binding(name, ty.clone()),
+            BindingPattern::Name { name, default, .. } => {
+                let found = if default.is_some() {
+                    let found = without_undefined(ty);
+                    if found == Type::Never {
+                        Type::Unknown
+                    } else {
+                        found
+                    }
+                } else {
+                    ty.clone()
+                };
+                self.set_binding(name, found);
+            }
             BindingPattern::Array { items, rest, .. } => {
                 // A tuple gives every name the type of its own place.
                 let item_ty = match ty {
                     Type::Tuple(parts) => {
                         for (index, item) in items.iter().enumerate() {
-                            let part = parts.get(index).cloned().unwrap_or(Type::Any);
+                            let part = parts.get(index).cloned().unwrap_or(Type::Undefined);
                             self.declare_pattern_typed(item, &part);
                         }
                         if let Some(rest) = rest {
@@ -236,7 +280,7 @@ impl TypeChecker<'_> {
                         }
                         return;
                     }
-                    other => element_type(other),
+                    other => destructured_element_type(other),
                 };
                 for item in items {
                     self.declare_pattern_typed(item, &item_ty);

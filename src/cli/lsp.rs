@@ -257,30 +257,41 @@ impl Server {
             }
             "textDocument/hover" => {
                 let id = id?;
-                let (uri, line, col) = self.place(message)?;
+                let Some((uri, line, col)) = self.place(message) else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 Some(answer(id, self.hover(&uri, line, col)))
             }
             "textDocument/completion" => {
                 let id = id?;
-                let (uri, line, col) = self.place(message)?;
+                let Some((uri, line, col)) = self.place(message) else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 Some(answer(id, self.completion(&uri, line, col)))
             }
             "textDocument/documentSymbol" => {
                 let id = id?;
-                let uri = message
+                let Some(uri) = message
                     .get("params")
                     .and_then(|p| p.get("textDocument"))
-                    .and_then(|d| d.text("uri"))?;
+                    .and_then(|d| d.text("uri"))
+                else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 Some(answer(id, self.document_symbols(&uri)))
             }
             "textDocument/definition" => {
                 let id = id?;
-                let (uri, line, col) = self.place(message)?;
+                let Some((uri, line, col)) = self.place(message) else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 Some(answer(id, self.definition(&uri, line, col)))
             }
             "textDocument/references" => {
                 let id = id?;
-                let (uri, line, col) = self.place(message)?;
+                let Some((uri, line, col)) = self.place(message) else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 let include_declaration = message
                     .get("params")
                     .and_then(|params| params.get("context"))
@@ -293,10 +304,12 @@ impl Server {
             }
             "textDocument/rename" => {
                 let id = id?;
-                let (uri, line, col) = self.place(message)?;
+                let Some((uri, line, col)) = self.place(message) else {
+                    return Some(error_answer(id, -32602, "Invalid params"));
+                };
                 let new_name = match message.get("params").and_then(|p| p.get("newName")) {
                     Some(Value::Text(text)) => text.clone(),
-                    _ => return None,
+                    _ => return Some(error_answer(id, -32602, "Invalid params")),
                 };
                 if !is_rename_identifier(&new_name) {
                     return Some(answer(id, Value::Null));

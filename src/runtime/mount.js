@@ -213,14 +213,18 @@ function veyMount(ctx) {
           log.error(err);
         }
         if (waiting && typeof waiting.then === "function") {
-          waiting.then(
-            function () {
-              if (leaving.parentNode === parent) parent.removeChild(leaving);
-            },
-            function () {
-              if (leaving.parentNode === parent) parent.removeChild(leaving);
-            }
-          );
+          // Capture this node and its owner; `var leaving` changes as the
+          // loop advances while asynchronous transitions are still pending.
+          (function (node, owner, promise) {
+            promise.then(
+              function () {
+                if (node.parentNode === owner) owner.removeChild(node);
+              },
+              function () {
+                if (node.parentNode === owner) owner.removeChild(node);
+              }
+            );
+          })(leaving, parent, waiting);
           continue;
         }
       }

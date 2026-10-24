@@ -317,27 +317,23 @@ pub(crate) fn rest_element_type(ty: &Type) -> Type {
 }
 
 pub(crate) fn project_field(ty: &Type, name: &str) -> Type {
+    fn from_fields(fields: &[ObjectField], name: &str) -> Type {
+        match fields.iter().find(|field| field.name == name) {
+            Some(field) if field.optional => union(vec![field.ty.clone(), Type::Undefined]),
+            Some(field) => field.ty.clone(),
+            None => Type::Undefined,
+        }
+    }
     match ty {
-        Type::Object(fields) => fields
-            .iter()
-            .find(|field| field.name == name)
-            .map(|field| field.ty.clone())
-            .unwrap_or(Type::Any),
-        Type::Named(_, fields) => fields
-            .iter()
-            .find(|field| field.name == name)
-            .map(|field| field.ty.clone())
-            .unwrap_or(Type::Any),
-        Type::Interface(_, fields) => fields
-            .iter()
-            .find(|field| field.name == name)
-            .map(|field| field.ty.clone())
-            .unwrap_or(Type::Any),
+        Type::Object(fields) | Type::Named(_, fields) | Type::Interface(_, fields) => {
+            from_fields(fields, name)
+        }
         // Every key of a dictionary has the same type of value.
-        Type::Dict(_, value) => (**value).clone(),
+        Type::Dict(_, value) => union(vec![(**value).clone(), Type::Undefined]),
         Type::Union(items) => union(items.iter().map(|item| project_field(item, name)).collect()),
         Type::Any => Type::Any,
-        _ => Type::Any,
+        Type::Unknown => Type::Unknown,
+        _ => Type::Undefined,
     }
 }
 

@@ -348,3 +348,34 @@ Bağımsız type-soundness ajanı, `check_call_named` içindeki spread erken dö
 - Hedefli regresyonlar: `diagnostic_ranges_use_utf16_code_units` **1/1**; `checked_spread_calls_validate_elements_and_required_arguments` **1/1**; `utf8_decoder_replaces_malformed_sequences_and_recovers` **1/1**.
 - `git diff --check`: geçti.
 - Çalışma değişiklikleri uygulama, regresyon testleri ve bu rapor güncellemesiyle birlikte toplam altı dosyayla sınırlı.
+
+
+## Takip denetimi — 24 Ekim 2026, 10:43 (+03:00)
+
+Önceki tam doğrulanmış `main` commit'i `e01f6b7` üzerinden tip sistemi, JavaScript runtime ve LSP protokolü için bağımsız salt-okunur denetimler çalıştırıldı. Üç yeni, güncel kaynakta yeniden üretilen bulgu kapatıldı.
+
+### Destructuring ile eksik değerlerin `any`/non-nullable tipe sızması
+
+Array binding pattern'ı `let [head, second]: [number] = [1]` biçiminde ikinci binding'i doğrudan `number` sayıyordu; object pattern da annotation'da olmayan alanı `any` sayıyordu. JavaScript gerçekte her ikisinde `undefined` verir. Denetim örnekleri `bad() -> number` fonksiyonundan `second` veya `{ missing }` binding'ini döndürdü; checker ikisini de kabul etti ve oluşan Node programı `undefined` bastı. Böylece sabit dönüş tipi yanıltıcı olabiliyordu.
+
+Destructuring eleman/alan projeksiyonları artık yokluk ihtimalini `undefined` olarak taşır; optional object alanları ve dictionary property destructuring de bu union'ı içerir. `unknown` değer destructuring sırasında `any`'e çevrilmez. Tuple pattern'ında olmayan indeks `undefined` alır. Destructuring default'u, kaynak tipindeki `undefined` olasılığını binding tipinden çıkarır. Var olan `for [left, right] in [[1, 2], [3, 4]]` gibi biçimlerde literal satırların bilinen tuple şekli ayrıca korunur; bu, düzeltmenin gerçek runtime riski olmayan sabit literal öğelerini gereksiz yere `number | undefined` genişletmesini önler. Heterojen/eksik literal satırlar indeks bazında union ve gerekirse `undefined` üretir.
+
+`destructuring_missing_values_keep_undefined_in_their_types` eksik array öğesini ve olmayan object alanını `number` dönüşüne sokmayı reddediyor; varsayılan verilen destructuring'in `undefined`'ı kaldırmasını kabul ediyor. Eski `destructures_objects_and_arrays` çalışma zamanı testi de literal-shape korumasıyla geçti.
+
+### Asenkron `leave` geçişlerinde yanlış kardeş düğümün kaldırılması
+
+`src/runtime/mount.js` removal loop'u `var leaving` değişkenini promise resolve/reject closure'larında yakalıyordu. Birden çok node aynı güncellemede ayrılır ve `leave` promise'leri beklerse, döngü değişkeni sonraki node'a ilerliyordu; ilk promise yanlış kardeşi erken kaldırıp gerçek düğümü sayfada bırakabiliyordu. İki node'un ayrı çözümlenmemiş promise'leriyle yeniden üretimde önce `a,b`, `a` promise'i çözüldükten sonra yanlış biçimde yalnız `a`, iki promise çözüldükten sonra yine `a` kaldı.
+
+Her callback artık ilgili node ve parent'ı closure'a ayrı parametrelerle yakalıyor. `async_leave_transitions_remove_their_own_nodes` regresyonu `a` geçişi çözülünce `b`'nin hâlâ sayfada olduğunu; `b` geçişi de çözülünce hiçbir düğüm kalmadığını doğruluyor.
+
+### LSP isteklerinde geçersiz parametreye cevap verilmemesi
+
+Hover/completion/definition/references/documentSymbol dallarında eksik ya da yanlış biçimli parametre için kullanılan `?`, `handle()` metodunu yanıtsız `None` ile bitiriyordu; rename ayrıca `newName` yoksa açıkça `None` dönüyordu. JSON-RPC `id` taşıyan bu isteklerde istemci yanıt beklemeye devam eder. Sunucu artık bu hatalarda korelasyon ID'sini koruyarak `-32602 Invalid params` error yanıtı veriyor; ID olmayan notification'lara yanıt vermeme davranışı değişmedi.
+
+`the_language_server_answers_requests_with_invalid_params` gerçek Content-Length JSON-RPC akışında eksik parametreli hover ve documentSymbol ile, geçerli belge/konum verip `newName`'i atlayan rename isteğini gönderiyor; üç isteğin her biri için ID'si doğru `-32602` yanıtını doğruluyor.
+
+### Doğrulama
+
+- `cargo test --all-targets --quiet`: **413 geçti, 0 başarısız**. Hedefler: library 2, binary 9, CLI 52, dev 10, DOM 15, lang 65, README 4, regressions 43, runtime 103, server 10, types 100.
+- Yeni hedefli regresyonlar: LSP invalid params **1/1**, typed destructuring **1/1**, async leave **1/1**; mevcut nested-array destructuring testi **1/1**.
+- `git diff --check`: geçti. Bu takipte henüz commit/push yapılmadı.

@@ -1387,6 +1387,74 @@ fn the_language_server_reports_unknown_requests_and_ignores_unknown_notification
 }
 
 #[test]
+fn the_language_server_answers_requests_with_invalid_params() {
+    let dir = temp_dir("lsp-invalid-params");
+    let file = dir.join("main.vey");
+    let source = "let value = 1\n";
+    write(&file, source);
+    let uri = format!("file://{}", file.display());
+    let mut child = vey()
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(lsp_message(1, "initialize", "{}").as_bytes())
+            .unwrap();
+        let open = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{}\",\"languageId\":\"vey\",\"version\":1,\"text\":{}}}}}}}",
+            uri,
+            serde_escape(source)
+        );
+        stdin
+            .write_all(format!("Content-Length: {}\r\n\r\n{}", open.len(), open).as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_message(2, "textDocument/hover", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_message(3, "textDocument/documentSymbol", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(
+                lsp_message(
+                    4,
+                    "textDocument/rename",
+                    &format!(
+                        "{{\"textDocument\":{{\"uri\":\"{}\"}},\"position\":{{\"line\":0,\"character\":4}}}}",
+                        uri
+                    ),
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stdin
+            .write_all(lsp_message(5, "shutdown", "{}").as_bytes())
+            .unwrap();
+        stdin
+            .write_all(lsp_notification("exit", "{}").as_bytes())
+            .unwrap();
+        stdin.flush().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    for id in [2, 3, 4] {
+        assert!(
+            text.contains(&format!(
+                "\"id\":{},\"error\":{{\"code\":-32602,\"message\":\"Invalid params\"}}",
+                id
+            )),
+            "missing correlated invalid-params response for id {id}:\n{text}"
+        );
+    }
+    assert_eq!(text.matches("\"code\":-32602").count(), 3, "{text}");
+}
+
+#[test]
 fn the_language_server_answers_the_places_of_the_names() {
     let dir = temp_dir("lsp");
     let file = dir.join("main.vey");

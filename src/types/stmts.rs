@@ -19,6 +19,41 @@ use super::helpers::{
 };
 
 impl TypeChecker<'_> {
+    fn nested_array_literal_item_type(&mut self, expr: &Expr) -> Result<Option<Type>, VeyError> {
+        let Expr::Array(rows, _) = expr else {
+            return Ok(None);
+        };
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let mut tuples = Vec::with_capacity(rows.len());
+        for row in rows {
+            let Expr::Array(items, _) = row else {
+                return Ok(None);
+            };
+            if items.iter().any(|item| matches!(item, Expr::Spread(_, _))) {
+                return Ok(None);
+            }
+            let mut tuple = Vec::with_capacity(items.len());
+            for item in items {
+                tuple.push(self.infer_expr(item)?);
+            }
+            tuples.push(tuple);
+        }
+        let width = tuples.iter().map(Vec::len).max().unwrap_or(0);
+        let parts = (0..width)
+            .map(|index| {
+                union(
+                    tuples
+                        .iter()
+                        .map(|tuple| tuple.get(index).cloned().unwrap_or(Type::Undefined))
+                        .collect(),
+                )
+            })
+            .collect();
+        Ok(Some(Type::Tuple(parts)))
+    }
+
     pub(crate) fn check_program(&mut self, program: &Program) -> Result<(), VeyError> {
         self.predeclare_top_level(program)?;
         for stmt in &program.body {
@@ -480,7 +515,9 @@ impl TypeChecker<'_> {
                         }
                         expected
                     }
-                    None => element_type(&iter_ty),
+                    None => self
+                        .nested_array_literal_item_type(&decl.iter)?
+                        .unwrap_or_else(|| element_type(&iter_ty)),
                 };
                 self.push_scope();
                 self.declare_pattern_typed(&decl.pattern, &item_ty);

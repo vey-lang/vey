@@ -67,6 +67,37 @@ let answer = total(...values)
 }
 
 #[test]
+fn destructuring_missing_values_keep_undefined_in_their_types() {
+    check_err(
+        "destructure-missing-array-item",
+        r#"
+fn bad() -> number {
+  let [head, second]: [number] = [1]
+  return second
+}
+"#,
+    );
+    check_err(
+        "destructure-missing-object-field",
+        r#"
+fn bad() -> number {
+  let { missing }: { present: number } = { present: 1 }
+  return missing
+}
+"#,
+    );
+    check_ok(
+        "destructure-default-removes-undefined",
+        r#"
+fn value() -> number {
+  let [first, second = 0]: [number] = [1]
+  return second
+}
+"#,
+    );
+}
+
+#[test]
 fn a_generic_type_is_not_bound_by_a_nullable_argument() {
     check_ok(
         "generic-union",

@@ -159,6 +159,75 @@ console.log(JSON.stringify([
 }
 
 #[test]
+fn async_leave_transitions_remove_their_own_nodes() {
+    let text = run_runtime(
+        "async-leave-nodes",
+        r#"
+function makeNode(name) {
+  return {
+    nodeType: 1,
+    tagName: name,
+    attributes: [],
+    childNodes: [],
+    parentNode: null,
+    get firstChild() { return this.childNodes[0] || null; },
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const siblings = this.parentNode.childNodes;
+      return siblings[siblings.indexOf(this) + 1] || null;
+    },
+    appendChild(node) {
+      if (node.parentNode) node.parentNode.removeChild(node);
+      this.childNodes.push(node);
+      node.parentNode = this;
+      return node;
+    },
+    replaceChildren(...nodes) {
+      for (const child of this.childNodes.slice()) this.removeChild(child);
+      for (const node of nodes) this.appendChild(node);
+    },
+    removeChild(node) {
+      const index = this.childNodes.indexOf(node);
+      if (index !== -1) this.childNodes.splice(index, 1);
+      node.parentNode = null;
+      return node;
+    },
+    getAttribute() { return null; },
+    setAttribute() {},
+    hasAttribute() { return false; },
+    removeAttribute() {}
+  };
+}
+const fakeDoc = { activeElement: null };
+const browser = new Function(
+  require('node:fs').readFileSync(RUNTIME, 'utf8') + '\nreturn createVeyRuntime;'
+)()({ document: fakeDoc, console }, null);
+const parent = makeNode('parent');
+const a = makeNode('a');
+const b = makeNode('b');
+let resolveA;
+let resolveB;
+a.__veyLeave = () => new Promise(resolve => { resolveA = resolve; });
+b.__veyLeave = () => new Promise(resolve => { resolveB = resolve; });
+const mounted = browser.mount(parent, [a, b]);
+mounted.update([]);
+console.log('before', parent.childNodes.map(node => node.tagName).join(','));
+resolveA();
+Promise.resolve().then(() => {
+  console.log('after-a', parent.childNodes.map(node => node.tagName).join(','));
+  resolveB();
+  return Promise.resolve();
+}).then(() => {
+  console.log('after-b', parent.childNodes.map(node => node.tagName).join(','));
+});
+"#,
+    );
+    assert!(text.contains("before a,b"), "{text}");
+    assert!(text.contains("after-a b"), "{text}");
+    assert!(text.contains("after-b "), "{text}");
+}
+
+#[test]
 fn node_only_helpers_report_a_clear_error_in_the_browser() {
     let text = run_runtime(
         "browser-guard",
